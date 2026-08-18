@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ایجاد حساب Owner — HiveOS</title>
+<style>
+  :root{
+    --bg:#FFFFFF;--bg-secondary:#F7F7F5;--border:#E4E4E1;--text-muted:#A8A79E;--text-secondary:#57564F;--text-primary:#1C1C19;
+    --primary:#2B3A73;--primary-hover:#1B264D;--accent-bg:#EEF1FB;--focus-border:#C4CDF0;
+    --error:#B42318;--error-bg:#FDECEC;--success:#1B7F4B;--success-bg:#E8F5EE;--warning:#B7791F;--warning-bg:#FBF1E3;--info-bg:#EEF1FB;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'IranYekanXFaNum','Vazirmatn',Tahoma,sans-serif;background:var(--bg-secondary);color:var(--text-primary);line-height:1.7;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 16px;}
+  .monospace{font-family:'Consolas','Courier New',monospace;direction:ltr;unicode-bidi:embed;}
+  .page{width:100%;max-width:520px;}
+  .brand{text-align:center;margin-bottom:24px;}
+  .brand .crumb{font-size:12px;color:var(--text-muted);}
+  .brand .crumb b{color:var(--text-secondary);font-weight:600;}
+  .brand h1{font-size:20px;font-weight:700;margin-top:6px;}
+  .brand p{font-size:13px;color:var(--text-secondary);margin-top:4px;}
+  .card{background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:32px;box-shadow:0 1px 2px rgba(28,28,25,.04);}
+  .field{margin-bottom:20px;}
+  label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;}
+  label .req{color:var(--error);}
+  label .opt{color:var(--text-muted);font-weight:400;font-size:12px;}
+  .hint{font-size:12px;color:var(--text-muted);margin-top:4px;}
+  input[type=text],input[type=password],input[type=email],input[type=tel]{width:100%;padding:10px 12px;font-size:14px;font-family:inherit;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text-primary);transition:border-color .15s, box-shadow .15s;}
+  input:focus{outline:none;border-color:var(--focus-border);box-shadow:0 0 0 3px var(--accent-bg);}
+  .invalid input{border-color:var(--error);}
+  .invalid input:focus{box-shadow:0 0 0 3px var(--error-bg);}
+  .field-error{display:flex;align-items:flex-start;gap:6px;font-size:12px;color:var(--error);margin-top:6px;}
+  .checklist{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px 14px;}
+  .check{font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:5px;}
+  .check.ok{color:var(--success);}
+  .check .dot{width:8px;height:8px;border-radius:50%;background:var(--border);display:inline-block;}
+  .check.ok .dot{background:var(--success);}
+  .actions{margin-top:28px;display:flex;flex-direction:column;gap:10px;}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;font-size:14px;font-weight:600;font-family:inherit;border:none;border-radius:8px;cursor:pointer;transition:background .15s;}
+  .btn-primary{background:var(--primary);color:#fff;}
+  .btn-primary:hover{background:var(--primary-hover);}
+  .btn-secondary{background:transparent;color:var(--text-secondary);border:1px solid var(--border);}
+  .btn-secondary:hover{background:var(--bg-secondary);}
+  .banner{border-radius:8px;padding:12px 14px;font-size:13px;margin-bottom:20px;border:1px solid transparent;}
+  .banner.error{background:var(--error-bg);border-color:var(--error);color:var(--error);}
+  .banner.error .title{font-weight:700;}
+  .banner.error .path{color:var(--text-secondary);}
+  .samples{border-top:1px dashed var(--border);margin-top:32px;padding-top:24px;}
+  .samples-title{font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;}
+  .sample{margin-bottom:16px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--bg-secondary);}
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;margin-bottom:10px;}
+  .badge.error{background:var(--error-bg);color:var(--error);}
+  .badge.info{background:var(--info-bg);color:var(--primary);}
+  .badge.warning{background:var(--warning-bg);color:var(--warning);}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="brand">
+    <div class="crumb">سازمان <b>شرکت داده‌پرداز آریا</b> ساخته شد.</div>
+    <h1>ایجاد حساب Owner</h1>
+    <p>حساب مدیریتی خود را برای این سازمان بسازید.</p>
+  </div>
+  <div class="card">
+    <form>
+      <div class="field">
+        <label>شماره موبایل <span class="req">*</span></label>
+        <input class="monospace" type="tel" placeholder="+98 912 345 6789" dir="ltr">
+        <div class="hint">با فرمت بین‌المللی E.164 (مثلاً <span class="monospace">+98…</span>). کد تأیید به این شماره ارسال می‌شود.</div>
+      </div>
+      <div class="field">
+        <label>ایمیل <span class="opt">(اختیاری)</span></label>
+        <input class="monospace" type="email" placeholder="owner@company.com" dir="ltr">
+      </div>
+      <div class="field">
+        <label>رمز عبور <span class="req">*</span></label>
+        <input type="password" placeholder="••••••••">
+        <div class="checklist">
+          <span class="check not"><span class="dot"></span>حداقل ۸ نویسه</span>
+          <span class="check not"><span class="dot"></span>یک حرف بزرگ</span>
+          <span class="check not"><span class="dot"></span>یک عدد</span>
+          <span class="check not"><span class="dot"></span>یک نماد</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>تکرار رمز عبور <span class="req">*</span></label>
+        <input type="password" placeholder="••••••••">
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">ایجاد حساب</button>
+        <button type="button" class="btn btn-secondary">بازگشت</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="samples">
+    <div class="samples-title">نمونه حالت‌ها — برای بررسی PO</div>
+    <div class="sample">
+      <span class="badge error">نمونه: شماره موبایل تکراری</span>
+      <div class="field invalid">
+        <label>شماره موبایل <span class="req">*</span></label>
+        <input class="monospace" type="tel" value="+98 912 345 6789" dir="ltr">
+        <div class="field-error">این شماره موبایل پیش‌تر ثبت شده است. اگر حساب دارید وارد شوید، یا شماره دیگری وارد کنید.</div>
+      </div>
+    </div>
+    <div class="sample">
+      <span class="badge error">نمونه: ایمیل تکراری</span>
+      <div class="field invalid">
+        <label>ایمیل <span class="opt">(اختیاری)</span></label>
+        <input class="monospace" type="email" value="owner@company.com" dir="ltr">
+        <div class="field-error">این ایمیل قبلاً استفاده شده است. ایمیل دیگری وارد کنید.</div>
+      </div>
+    </div>
+    <div class="sample">
+      <span class="badge error">نمونه: رمز عبور ضعیف (قوانین نقض‌شده واضح)</span>
+      <div class="field invalid">
+        <label>رمز عبور <span class="req">*</span></label>
+        <input type="password" value="pass123">
+        <div class="field-error">رمز عبور شرایط لازم را ندارد:</div>
+        <div class="checklist">
+          <span class="check ok"><span class="dot"></span>حداقل ۸ نویسه</span>
+          <span class="check not" style="color:var(--error);"><span class="dot" style="background:var(--error);"></span>یک حرف بزرگ</span>
+          <span class="check ok"><span class="dot"></span>یک عدد</span>
+          <span class="check not" style="color:var(--error);"><span class="dot" style="background:var(--error);"></span>یک نماد</span>
+        </div>
+      </div>
+    </div>
+    <div class="sample">
+      <span class="badge error">نمونه: رمزهای مطابقت ندارند</span>
+      <div class="field invalid">
+        <label>تکرار رمز عبور <span class="req">*</span></label>
+        <input type="password" value="••••••••">
+        <div class="field-error">تکرار رمز عبور با رمز عبور یکسان نیست.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const pwd = document.querySelector('input[type=password]');
+  const checks = document.querySelectorAll('.card .checklist .check');
+  pwd.addEventListener('input', () => {
+    const v = pwd.value;
+    const rules = [v.length >= 8, /[A-Z]/.test(v), /[0-9]/.test(v), /[^A-Za-z0-9]/.test(v)];
+    checks.forEach((c,i)=>c.classList.toggle('ok', rules[i]));
+  });
+</script>
+</body>
+</html>

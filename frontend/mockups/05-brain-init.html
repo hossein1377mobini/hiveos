@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>راه‌اندازی Brain — HiveOS</title>
+<style>
+  :root{
+    --bg:#FFFFFF;--bg-secondary:#F7F7F5;--border:#E4E4E1;--text-muted:#A8A79E;--text-secondary:#57564F;--text-primary:#1C1C19;
+    --primary:#2B3A73;--primary-hover:#1B264D;--accent-bg:#EEF1FB;--focus-border:#C4CDF0;
+    --error:#B42318;--error-bg:#FDECEC;--success:#1B7F4B;--success-bg:#E8F5EE;--warning:#B7791F;--warning-bg:#FBF1E3;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'IranYekanXFaNum','Vazirmatn',Tahoma,sans-serif;background:var(--bg-secondary);color:var(--text-primary);line-height:1.7;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 16px;}
+  .page{width:100%;max-width:520px;}
+  .card{background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:32px;box-shadow:0 1px 2px rgba(28,28,25,.04);}
+  .head{display:flex;align-items:center;gap:12px;margin-bottom:8px;}
+  .spinner{width:22px;height:22px;border:3px solid var(--accent-bg);border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite;flex-shrink:0;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  h1{font-size:18px;font-weight:700;}
+  .sub{font-size:13px;color:var(--text-secondary);margin-bottom:28px;}
+  .steps{margin-bottom:24px;}
+  .step{display:flex;gap:14px;padding:12px 0;position:relative;}
+  .step:not(:last-child)::before{content:'';position:absolute;top:34px;right:11px;bottom:-2px;width:2px;background:var(--border);}
+  .marker{width:24px;height:24px;border-radius:50%;flex-shrink:0;z-index:1;display:flex;align-items:center;justify-content:center;font-size:13px;border:2px solid var(--border);background:var(--bg);color:var(--text-muted);}
+  .step.done .marker{background:var(--success);border-color:var(--success);color:#fff;}
+  .step.active .marker{background:var(--accent-bg);border-color:var(--primary);color:var(--primary);animation:pulse 1.4s infinite;}
+  .step.error .marker{background:var(--error);border-color:var(--error);color:#fff;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(43,58,115,.3);}50%{box-shadow:0 0 0 6px rgba(43,58,115,0);}}
+  .step .body{flex:1;padding-top:1px;}
+  .step .name{font-size:14px;font-weight:600;}
+  .step.done .name{color:var(--text-secondary);}
+  .step .desc{font-size:12px;color:var(--text-muted);margin-top:2px;}
+  .step.active .name{color:var(--primary);}
+  .step.error .name{color:var(--error);}
+  .step.error .desc{color:var(--error);}
+  .retry{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--error);background:none;border:1px solid var(--error);border-radius:6px;padding:4px 10px;cursor:pointer;font-family:inherit;margin-top:6px;}
+  .retry:hover{background:var(--error-bg);}
+  .ready{text-align:center;padding:8px 0 4px;}
+  .ready .tick{width:56px;height:56px;border-radius:50%;background:var(--success-bg);color:var(--success);display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:12px;}
+  .ready h2{font-size:18px;font-weight:700;color:var(--success);}
+  .ready p{font-size:13px;color:var(--text-secondary);margin-top:6px;}
+  .banner{border-radius:8px;padding:12px 14px;font-size:13px;margin-bottom:20px;border:1px solid transparent;}
+  .banner.error{background:var(--error-bg);border-color:var(--error);color:var(--error);}
+  .banner.error .title{font-weight:700;}
+  .banner.error .path{color:var(--text-secondary);}
+  .samples{border-top:1px dashed var(--border);margin-top:32px;padding-top:24px;}
+  .samples-title{font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;}
+  .sample{margin-bottom:16px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--bg-secondary);}
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;margin-bottom:10px;}
+  .badge.error{background:var(--error-bg);color:var(--error);}
+  .badge.success{background:var(--success-bg);color:var(--success);}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <div class="head">
+      <div class="spinner"></div>
+      <h1>راه‌اندازی Brain</h1>
+    </div>
+    <p class="sub">در حال ساخت مغز سازمان (پایه v0.1). این مرحله کاملاً خودکار است و به اقدامی از شما نیاز ندارد.</p>
+    <div class="steps" id="steps">
+      <div class="step done">
+        <div class="marker">✓</div>
+        <div class="body"><div class="name">ایجاد مخزن دانش</div><div class="desc">ساختار پایه مخزن دانش ساخته شد.</div></div>
+      </div>
+      <div class="step active">
+        <div class="marker">۱</div>
+        <div class="body"><div class="name">مقداردهی پیکربندی RAG</div><div class="desc">در حال تنظیم شاخص‌گذاری و بازیابی…</div></div>
+      </div>
+      <div class="step">
+        <div class="marker">۲</div>
+        <div class="body"><div class="name">آماده‌سازی مدل تعبیه (Embedding)</div><div class="desc">بارگذاری مدل و پایگاه برداری.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="samples">
+    <div class="samples-title">نمونه حالت‌ها — برای بررسی PO</div>
+    <div class="sample">
+      <span class="badge error">نمونه: خطا در مقداردهی + Retry</span>
+      <div class="banner error">
+        <div class="title">مقداردهی پیکربندی RAG ناموفق بود.</div>
+        <div class="path" style="color:var(--text-secondary);">خطا در اتصال به پایگاه برداری. دوباره تلاش کنید.</div>
+      </div>
+      <div class="steps" style="margin-bottom:0;">
+        <div class="step done"><div class="marker">✓</div><div class="body"><div class="name">ایجاد مخزن دانش</div></div></div>
+        <div class="step error"><div class="marker">!</div><div class="body"><div class="name">مقداردهی پیکربندی RAG</div><div class="desc">خطا رخ داد.</div><button class="retry">↻ تلاش مجدد</button></div></div>
+        <div class="step"><div class="marker">۲</div><div class="body"><div class="name">آماده‌سازی مدل تعبیه</div></div></div>
+      </div>
+    </div>
+    <div class="sample">
+      <span class="badge success">نمونه: موفق — Ready</span>
+      <div class="ready">
+        <div class="tick">✓</div>
+        <h2>Brain آماده است</h2>
+        <p>مغز سازمان با موفقیت راه‌اندازی شد و آماده دریافت اسناد است.</p>
+      </div>
+      <div class="steps" style="margin-bottom:0;">
+        <div class="step done"><div class="marker">✓</div><div class="body"><div class="name">ایجاد مخزن دانش</div></div></div>
+        <div class="step done"><div class="marker">✓</div><div class="body"><div class="name">مقداردهی پیکربندی RAG</div></div></div>
+        <div class="step done"><div class="marker">✓</div><div class="body"><div class="name">آماده‌سازی مدل تعبیه</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const container = document.getElementById('steps');
+  const t = setInterval(()=>{
+    const active = container.querySelector('.step.active');
+    if(active){
+      active.classList.remove('active');
+      active.querySelector('.marker').textContent='✓';
+      active.classList.add('done');
+      const next = active.nextElementSibling;
+      if(next){ next.classList.add('active'); }
+      else { clearInterval(t); document.querySelector('.spinner').style.display='none'; }
+    } else { clearInterval(t); }
+  }, 2200);
+</script>
+</body>
+</html>
