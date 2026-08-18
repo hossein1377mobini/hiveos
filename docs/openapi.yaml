@@ -91,6 +91,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OtpSendResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: مالک در وضعیت pending یافت نشد — شماره برای ارسال OTP معتبر نیست
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
         '503':
           description: دسترسی به SMS Gateway/اینترنت در دسترس نیست (FR-007)
           content:
@@ -115,6 +122,13 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OtpSendResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: مالک در وضعیت pending یافت نشد
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '429': { $ref: '#/components/responses/RateLimited' }
         '503': { $ref: '#/components/responses/GatewayUnavailable' }
 
@@ -138,11 +152,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OtpVerifyResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: مالک (pending) برای این شماره یافت نشد
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '410':
           description: OTP منقضی‌شده
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
   /api/v1/workspaces/initialize:

@@ -19,7 +19,10 @@ class ApiError(Exception):
 
     status_code: int = status.HTTP_400_BAD_REQUEST
     error_code: str = "bad_request"
-    audit_logged: bool = True
+    # Honest flag (m4): True ONLY where an AuditLog row is actually written for
+    # the failure (nothing does today), so the API never claims log coverage it
+    # doesn't have.
+    audit_logged: bool = False
 
     def __init__(self, message: str | None = None, error_code: str | None = None):
         self.message = message
@@ -61,10 +64,6 @@ class GatewayUnavailableError(ApiError):
 class ValidationError422(ApiError):
     status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
     error_code = "validation_failed"
-
-
-class _ErrorBody(dict):
-    pass
 
 
 def _error_payload(err: ApiError) -> dict:

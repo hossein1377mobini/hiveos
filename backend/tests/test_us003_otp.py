@@ -97,3 +97,15 @@ def test_verify_otp_max_attempts_rate_limited(client, make_org, make_owner, sms_
 
     resp = client.post("/api/v1/auth/verify-otp", json={"phone": PHONE, "code": wrong})
     assert resp.status_code == 429
+
+
+def test_send_otp_cooldown_rate_limited(client, make_org, make_owner, sms_provider):
+    org = make_org()
+    make_owner(org, phone=PHONE)
+
+    first = client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
+    assert first.status_code == 200
+
+    # Issuing again within the 60s cooldown must be rate-limited (429).
+    second = client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
+    assert second.status_code == 429

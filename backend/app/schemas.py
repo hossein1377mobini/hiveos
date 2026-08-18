@@ -82,6 +82,8 @@ class OrganizationCreate(BaseModel):
         v = v.strip()
         if len(v) < 3:
             raise ValueError("must be at least 3 characters")
+        if len(v) > 100:
+            raise ValueError("must be at most 100 characters")
         return v
 
     @field_validator("industry")
@@ -90,6 +92,8 @@ class OrganizationCreate(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("must not be blank")
+        if len(v) > 100:
+            raise ValueError("must be at most 100 characters")
         return v
 
 

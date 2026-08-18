@@ -17,6 +17,7 @@ hash are likewise never logged.
 """
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import security
@@ -61,15 +62,24 @@ async def create_owner(
         role="owner",
         status="pending",
     )
-    session.add(owner)
-    await session.flush()
 
-    raw_token, _ = await session_service.issue_session(
-        session,
-        owner_id=owner.id,
-        tenant_id=pending_org.tenant_id,
-        organization_id=pending_org.id,
-    )
+    # m2: the pre-checks above are best-effort under concurrency; the DB-level
+    # UNIQUE constraints (phone, case-insensitive email, ONE owner per org) are
+    # the real guard. Map any race-time IntegrityError to a clean 409 instead of
+    # leaking a 500.
+    try:
+        session.add(owner)
+        await session.flush()
 
-    await session.commit()
+        raw_token, _ = await session_service.issue_session(
+            session,
+            owner_id=owner.id,
+            tenant_id=pending_org.tenant_id,
+            organization_id=pending_org.id,
+        )
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ConflictError("phone, email, or organization already registered") from exc
+
     return owner, raw_token

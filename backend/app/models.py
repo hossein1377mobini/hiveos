@@ -96,6 +96,11 @@ class Workspace(Base):
     """Independent workspace per Organization (FR-002)."""
 
     __tablename__ = "workspaces"
+    __table_args__ = (
+        # US-004 "exactly one workspace" — enforced at DB level so a naive
+        # /workspaces/initialize cannot create a duplicate.
+        UniqueConstraint("organization_id", name="uq_workspaces_one_per_org"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -119,6 +124,8 @@ class Owner(Base):
     """
     __tablename__ = "owners"
     __table_args__ = (
+        # Exactly ONE owner per organization (US-002).
+        UniqueConstraint("organization_id", name="uq_owners_one_per_org"),
         # F-7: email is unique case-insensitively. A plain UNIQUE on the column is
         # case-sensitive, so enforce a functional unique index on lower(email),
         # ignoring NULL rows (email is optional).
