@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HiveOS API — Epic-01 (Organization Bootstrap / v0.1)
-  version: 0.1.0
+  version: 0.2.0
   description: >
     قرارداد حداقلی قابل‌کدنویسی (OpenAPI 3.1) برای endpoint های اپیک ۰۱.
     منبع: متن US-001 تا US-008 در `Dropbox/Hive/doc/Development/epic-01/`.
@@ -20,8 +20,10 @@ paths:
     post:
       summary: ثبت سازمان جدید (US-001)
       description: >
-        یک Organization + Workspace مستقل + Tenant ID یکتا می‌سازد و سازمان را
-        در وضعیت `pending_owner_registration` قرار می‌دهد. عملیات تراکنشی است.
+        یک Organization + Workspace مستقل + Tenant ID یکتا می‌سازد و سازمان را در وضعیت
+        `pending_owner_registration` قرار می‌دهد. عملیات تراکنشی است.
+        ادغام US-006 در US-001 (decision 2026-08-19): توصیف کسب‌وکار و پیکربندی مدل AI
+        در همین درخواست ارسال می‌شوند؛ توصیف کسب‌وکار به‌عنوان اولین سند به Brain تزریق می‌شود.
       security: []
       operationId: createOrganization
       tags: [Onboarding]
@@ -170,7 +172,7 @@ paths:
       description: >
         زیرساخت RAG پایه v0.1 می‌سازد: Knowledge Repository خالی + Vector Index.
         تنظیمات Embedding Provider/Retrieval/Default Language را مقداردهی می‌کند
-        (Embedding Provider از پیکربندی AI مدلِ US-006 خوانده می‌شود).
+        (Embedding Provider از پیکربندی AI مدلِ US-001 خوانده می‌شود، که در US-006 ادغام شده).
       operationId: initializeBrain
       tags: [Onboarding]
       responses:
@@ -182,45 +184,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500':
           description: راه‌اندازی ناموفق — retry مجاز
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
-
-  /api/v1/onboarding/setup:
-    get:
-      summary: وضعیت/پیشرفت جادوگر و پیکربندی (US-006)
-      description: وضعیت فعلی Wizard را برمی‌گرداند تا ادامهٔ آن پس از خروج ممکن باشد (FR-006).
-      operationId: getSetupState
-      tags: [Onboarding]
-      responses:
-        '200':
-          description: وضعیت جادوگر
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SetupState' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-    post:
-      summary: ذخیرهٔ جادوگر راه‌اندازی (US-006)
-      description: >
-        اطلاعات پایه + توصیف کسب‌وکار (سؤالات هدایت‌شده) + پیکربندی AI مدل (آنلاین) را
-        ذخیره می‌کند. پیش از ذخیره، اتصال API Key باید موفق تست شود (FR-008)؛ در شکست
-        ذخیره نمی‌شود. توصیف کسب‌وکار به‌عنوان اولین سند به Brain تزریق می‌شود.
-      operationId: saveSetup
-      tags: [Onboarding]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/SetupUpdate' }
-      responses:
-        '200':
-          description: ذخیره شد — هدایت به US-007
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/SetupState' }
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '502':
-          description: تست اتصال AI model ناموفق — پیکربندی ذخیره نشد (FR-008)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -327,7 +290,7 @@ paths:
     post:
       summary: تکمیل Onboarding و ورود به چت (US-008)
       description: >
-        شرط: تمام مراحل US-001..US-006 تکمیل و پایش فولدر (US-007) فعال باشد. در موفقیت،
+        شرط: تمام مراحل US-001..US-005 تکمیل و پایش فولدر (US-007) فعال باشد. در موفقیت،
         وضعیت onboarding = completed و کاربر به نقطهٔ ورود چت (EPIC-09) دستیابی پیدا می‌کند.
       operationId: completeOnboarding
       tags: [Onboarding]
@@ -406,40 +369,36 @@ components:
     OrganizationCreate:
       type: object
       additionalProperties: false
-      required: [name]
+      required: [displayName, industry, companySize, businessDescription, aiModel]
       properties:
-        name:
+        displayName:
           type: string
           description: نام رسمی سازمان. ۳ تا ۱۰۰ کاراکتر، Unicode.
           minLength: 3
           maxLength: 100
-        slug:
-          type: [string, 'null']
-          description: اختیاری؛ خودکار از نام تولید می‌شود (فقط a-z/0-9). در تکرار شماره می‌گیرد.
-          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
         industry:
-          type: [string, 'null']
-          description: متادیتا؛ فقط ذخیره می‌شود (استفاده در v0.2+).
+          type: string
+          description: صنعت سازمان. الزامی.
         companySize:
-          type: [string, 'null']
-          enum: [Startup, SME, Enterprise]
-        country:
-          type: [string, 'null']
-        timeZone:
-          type: [string, 'null']
-          description: پیش‌فرض خودکار از مرورگر/سرور.
-        language:
-          type: [string, 'null']
-          description: پیش‌فرض خودکار.
+          type: string
+          description: مقیاس تعداد نفر. الزامی.
+          enum: [lt_10, 10_to_49, 50_to_199, 200_to_499, ge_500]
+        businessDescription:
+          $ref: '#/components/schemas/BusinessDescription'
+        aiModel:
+          $ref: '#/components/schemas/AIModelConfiguration'
+      description: >
+        ادغام US-001 + US-006 (decision 2026-08-19): توصیف کسب‌وکار و پیکربندی مدل AI در همین
+        درخواست ایجاد سازمان ارسال می‌شوند. country/timeZone/language در ورودی حذف شدند و مقادیر
+        پیش‌فرض (fa-IR / Iran / Asia-Tehran) از سمت سرور اعمال می‌شوند. slug حذف شد.
 
     Organization:
       type: object
-      required: [id, slug, name, status]
+      required: [id, name, status]
       properties:
         id:
           type: string
           format: uuid
-        slug: { type: string }
         name: { type: string }
         status:
           type: string
@@ -457,17 +416,17 @@ components:
       properties:
         phone:
           type: string
-          description: شناسهٔ اصلی ورود؛ ذخیره با فرمت E.164.
-          pattern: '^\+[1-9]\d{1,14}$'
+          description: شناسهٔ اصلی ورود؛ پیشوند +98 ثابت + ۱۰ رقم (شماره موبایل ایران).
+          pattern: '^\+98\d{10}$'
         email:
           type: [string, 'null']
           format: email
           description: اختیاری؛ یکتا در کل سیستم، case-insensitive.
         password:
           type: string
-          description: حداقل ۸ کاراکتر شامل حرف بزرگ، کوچک، عدد و کاراکتر ویژه.
+          description: حداقل ۸ کاراکتر شامل حرف بزرگ، کوچک، عدد و نماد لاتین.
           minLength: 8
-          pattern: '^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$'
+          pattern: '^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};:''"\\|,.<>\/?~`]).{8,}$'
         confirmPassword:
           type: string
           description: باید دقیقاً با password برابر باشد.
@@ -551,64 +510,18 @@ components:
             embeddingProvider: { type: string }
             defaultLanguage: { type: string }
 
-    SetupState:
-      type: object
-      required: [step, completed]
-      properties:
-        step:
-          type: string
-          enum: [organization-info, business-description, ai-model, done]
-        completed: { type: boolean }
-        organizationInfo:
-          $ref: '#/components/schemas/OrganizationInfo'
-        businessDescription:
-          $ref: '#/components/schemas/BusinessDescription'
-        aiModel:
-          $ref: '#/components/schemas/AIModelConfiguration'
-
-    SetupUpdate:
-      type: object
-      additionalProperties: false
-      description: فرستادن هر ترکیبی که شامل آخرین پیشرفت Wizard باشد.
-      properties:
-        organizationInfo: { $ref: '#/components/schemas/OrganizationInfo' }
-        businessDescription: { $ref: '#/components/schemas/BusinessDescription' }
-        aiModel: { $ref: '#/components/schemas/AIModelConfiguration' }
-
-    OrganizationInfo:
-      type: object
-      required: [displayName, industry, companySize]
-      properties:
-        displayName: { type: string, minLength: 3, maxLength: 100 }
-        industry: { type: string }
-        companySize: { type: string, enum: [Startup, SME, Enterprise] }
-        logo:
-          type: [string, 'null']
-          description: URL/کلید لوگو (PNG/JPG/SVG)؛ اختیاری.
-        website:
-          type: [string, 'null']
-          format: uri
-          description: اختیاری.
-
     BusinessDescription:
       type: object
-      required: [whatYouDo, customers, productsServices]
+      required: [whatYouDo, productsServices]
       properties:
         whatYouDo:
           type: string
-          description: کسب‌وکار دقیقاً چه می‌کند (۱-۲ جمله).
-          minLength: 10
-        customers:
-          type: string
-          description: مشتریان/کاربران اصلی.
+          description: کسب‌وکار سازمان دقیقاً چه می‌کند (۱-۲ جمله).
           minLength: 10
         productsServices:
           type: string
-          description: مهم‌ترین محصولات/خدمات.
+          description: مهم‌ترین محصولات/خدمات سازمان.
           minLength: 10
-        internalTerms:
-          type: [string, 'null']
-          description: اصطلاحات/اختصارات داخلی؛ اختیاری.
 
     AIModelConfiguration:
       type: object
@@ -689,7 +602,7 @@ components:
           type: array
           items:
             type: string
-            enum: [register-organization, owner-account, verify-owner, workspace, brain, setup-wizard, ingestion-folder]
+            enum: [register-organization, owner-account, verify-owner, workspace, brain, ingestion-folder]
       description: missingSteps در صورت in_progress پر می‌شود.
 
     OnboardingIncomplete:
