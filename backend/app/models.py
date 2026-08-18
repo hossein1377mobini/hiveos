@@ -102,7 +102,8 @@ class Owner(Base):
     """First & only admin account per Organization (US-002). phone is the global login id.
 
     Email is optional (PO final decision) but if present it is globally unique,
-    case-insensitive. Password stored hashed (argon2). role is 'owner' in v0.1
+    case-insensitive. Password stored hashed (PBKDF2-HMAC-SHA256 via
+    app.security.hash_password). role is 'owner' in v0.1
     (ADR-019 decision 5 — simple Owner role, no multi-role RBAC yet).
     """
     __tablename__ = "owners"
