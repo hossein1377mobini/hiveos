@@ -1,0 +1,41 @@
+# HiveOS v0.1 Docker infrastructure (ADR-019 Python-first backend).
+#
+# SEPARATE from the Kaneo sample stack:
+#   - Postgres runs on host port 5434 (Kaneo uses 5433, container kaneo-postgres-1).
+#   - Redis runs on host port 6380 (avoids a possibly-busy host 6379).
+# These are independent instances; nothing here touches the running containers.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: hiveos-db
+    environment:
+      POSTGRES_DB: hiveos
+      POSTGRES_USER: hiveos
+      POSTGRES_PASSWORD: hiveos
+    ports:
+      - "5434:5432"
+    volumes:
+      - hiveos-db-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hiveos -d hiveos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: hiveos-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  hiveos-db-data:
