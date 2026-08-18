@@ -158,3 +158,36 @@ class OwnerCreated(BaseModel):
     organizationId: UUID
     status: Literal["pending"] = "pending"
     sessionIssued: bool
+
+
+# ---------------------------------------------------------------- US-003
+class OtpSendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Contract E.164 `^\+[1-9]\d{1,14}$`; `[0-9]` keeps it ASCII-only so
+    # Persian/Arabic digits are rejected (PO rule). Canonical +98 is enforced
+    # in the service layer (400 for non-Iranian numbers).
+    phone: str = Field(pattern=r"^\+[1-9][0-9]{1,14}$")
+
+
+class OtpSendResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["sent"] = "sent"
+    resendAfterSeconds: int = Field(ge=0)
+    expiresInSeconds: int
+
+
+class OtpVerifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phone: str = Field(pattern=r"^\+[1-9][0-9]{1,14}$")
+    code: str = Field(pattern=r"^[0-9]{6}$", description="6-digit one-time code")
+
+
+class OtpVerifyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verified: Literal[True] = True
+    userStatus: Literal["active"] = "active"
+    organizationStatus: Literal["active"] = "active"

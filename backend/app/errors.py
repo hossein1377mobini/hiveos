@@ -43,6 +43,16 @@ class UnauthorizedError(ApiError):
     error_code = "unauthorized"
 
 
+class GoneError(ApiError):
+    status_code = status.HTTP_410_GONE
+    error_code = "gone"
+
+
+class RateLimitedError(ApiError):
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    error_code = "rate_limited"
+
+
 class GatewayUnavailableError(ApiError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     error_code = "gateway_unavailable"

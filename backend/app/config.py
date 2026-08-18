@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     session_ttl_seconds: int = 86400  # 24h default for the initial owner session (US-002)
 
+    # ADR-019 decision 4: mock SMS first. When True, the mock provider raises 503
+    # (FR-007: no internet / gateway down) instead of delivering the code.
+    mock_otp_offline: bool = False
+
     # CORS origins (frontend dev server)
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 

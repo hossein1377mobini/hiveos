@@ -14,8 +14,10 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -138,6 +140,32 @@ class Session(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OtpCode(Base):
+    """One-time verification code (US-003). Only the SHA-256 hash of the code is
+    stored — never the code itself. Scoped by phone (the login id) and the owning
+    tenant/organization/owner. attempts caps brute-force (otp_max_attempts);
+    used + expires_at prevent replay."""
+
+    __tablename__ = "otp_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    phone: Mapped[str] = mapped_column(String(16), index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("owners.id", ondelete="CASCADE"), nullable=True
+    )
+    code_hash: Mapped[str] = mapped_column(String(64))  # SHA-256 hex digest
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class AuditLog(Base):
