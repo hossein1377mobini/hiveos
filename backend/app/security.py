@@ -22,10 +22,12 @@ _SLUG_STRIP = re.compile(r"[^\w\s-]", re.UNICODE)
 _SLUG_HYPHEN = re.compile(r"[-\s]+")
 
 
+def _secret_digest() -> bytes:
+    return hashlib.sha256(get_settings().secret_key.encode("utf-8")).digest()
+
+
 def _fernet() -> Fernet:
-    digest = hashlib.sha256(get_settings().secret_key.encode("utf-8")).digest()
-    key = base64.urlsafe_b64encode(digest)
-    return Fernet(key)
+    return Fernet(base64.urlsafe_b64encode(_secret_digest()))
 
 
 def encrypt_secret(value: str) -> str:
@@ -51,8 +53,9 @@ def slugify(text: str, *, max_len: int = 32) -> str:
 
 
 # ---------------------------------------------------------------- passwords (stdlib only)
+# OWASP-recommended iteration count for PBKDF2-HMAC-SHA256 (≥ 600k as of 2023).
 _PBKDF2_ALGO = "sha256"
-_PBKDF2_ITERATIONS = 290_000
+_PBKDF2_ITERATIONS = 600_000
 _PBKDF2_SALT_BYTES = 16
 
 
@@ -80,7 +83,22 @@ def verify_password(plain: str, stored: str) -> bool:
     return hmac.compare_digest(dk, expected)
 
 
-# ---------------------------------------------------------------- sessions
+# ---------------------------------------------------------------- sessions / hashing
 def new_session_token() -> str:
     """URL-safe 256-bit random session token (raw value; only its SHA-256 hash is stored)."""
     return secrets.token_urlsafe(32)
+
+
+def sha256(raw: str) -> str:
+    """SHA-256 hex digest — used for onboarding tokens and session tokens."""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def otp_hmac(code: str) -> str:
+    """Keyed-HMAC of a 6-digit OTP using the server secret as pepper.
+
+    Storing this instead of a plain SHA-256 means a DB leak alone does NOT reveal
+    the codes; the server-side secret is required to reconstruct them. Combined
+    with the short TTL + max-attempts rate limit this hardens the 1M-code space.
+    """
+    return hmac.new(_secret_digest(), code.encode("utf-8"), hashlib.sha256).hexdigest()

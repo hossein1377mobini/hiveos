@@ -46,7 +46,7 @@ async def issue_session(
 
 
 async def resolve_session(session: AsyncSession, raw_token: str | None) -> Session | None:
-    """Resolve a raw token to a live (non-expired) Session row, or None."""
+    """Resolve a raw token to a live (non-expired, non-revoked) Session row, or None."""
     if not raw_token:
         return None
     token_hash = hash_token(raw_token)
@@ -54,6 +54,13 @@ async def resolve_session(session: AsyncSession, raw_token: str | None) -> Sessi
         select(Session).where(
             Session.token_hash == token_hash,
             Session.expires_at > datetime.now(UTC),
+            Session.revoked_at.is_(None),
         )
     )
     return result.scalar_one_or_none()
+
+
+async def revoke_session(session: AsyncSession, row: Session) -> None:
+    """F-5: mark a session revoked so resolve_session stops returning it."""
+    row.revoked_at = datetime.now(UTC)
+    session.add(row)

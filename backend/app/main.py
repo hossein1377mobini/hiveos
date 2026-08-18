@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1 import auth, health, organizations, owners
-from app.config import get_settings
+from app.config import get_settings, validate_runtime_security
 from app.db import init_models
 from app.errors import install_handlers
 
@@ -21,6 +21,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    # Security F-1: refuse to boot outside dev/test with the insecure dev key.
+    validate_runtime_security(settings)
 
     app = FastAPI(
         title=settings.app_name,

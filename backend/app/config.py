@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     app_name: str = "HiveOS API"
     app_version: str = "0.2.0"  # tracks the OpenAPI contract version
 
+    # Security F-1: only 'dev'/'test' may run with the insecure placeholder key.
+    env: str = "dev"
+
     # Dev defaults keep the HiveOS DB distinct from Kaneo (host port 5434).
     database_url: str = Field(
         default="postgresql+asyncpg://hiveos:hiveos@localhost:5434/hiveos"
@@ -48,3 +51,13 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_runtime_security(settings: Settings | None = None) -> None:
+    """F-1: fail hard outside dev/test when the insecure placeholder secret is used."""
+    s = settings or get_settings()
+    if s.env not in ("dev", "test") and s.secret_key == "dev-insecure-change-me":
+        raise RuntimeError(
+            "SECRET_KEY must be set from the environment outside dev/test; "
+            "the dev placeholder is not a safe production key."
+        )

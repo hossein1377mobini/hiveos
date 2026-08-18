@@ -74,6 +74,9 @@ def _reset_db(client: TestClient) -> Iterator[None]:
     would hit non-existent tables on the very first test.
     """
     assert client is not None  # dependency trigger, nothing else to do with it
+    # F-2 makes scoping cookie-based; clear the shared client jar so an earlier
+    # test's `onboarding`/`session` cookies cannot leak into this one.
+    client.cookies.clear()
 
     async def _truncate() -> None:
         conn = await asyncpg.connect(**_db_kwargs())
@@ -93,7 +96,12 @@ def db() -> _Db:
 
 @pytest.fixture
 def make_org(client: TestClient):
-    """Create an organization via the API; returns the 201 JSON body."""
+    """Create an organization via the API.
+
+    Returns ``{"id": ..., "onboarding": <po token>}`` — the onboarding token is
+    read from the client cookie jar right after creation (US-001 now scopes
+    US-002 via this proof-of-possession cookie, not a header).
+    """
 
     def _make(name: str = "Acme Test Org", **overrides: object) -> dict:
         payload: dict[str, object] = {
@@ -107,28 +115,38 @@ def make_org(client: TestClient):
             "aiModel": {
                 "mode": "online",
                 "provider": "openai",
-                "apiKey": "sk-test-not-a-real-key-1234567890",
+                "apiKey": "sk-test-key",
             },
         }
         payload.update(overrides)
         resp = client.post("/api/v1/organizations", json=payload)
         assert resp.status_code == 201, resp.text
-        return resp.json()
+        org = resp.json()
+        return {"id": org["id"], "onboarding": client.cookies.get("onboarding")}
 
     return _make
 
 
 @pytest.fixture
 def make_owner(client: TestClient):
-    """Create the first Owner for a pending organization; returns the 201 JSON."""
+    """Create the first Owner for a pending organization; returns the 201 JSON.
+
+    Scoping is by the ``onboarding`` cookie (proof of possession), so the helper
+    sets the jar cookie to the target org's token before posting.
+    """
 
     def _make(
-        org_id: str,
-        phone: str = "+989123456780",
+        org: dict,
+        phone: str = "+989100111000",
         email: str | None = None,
         password: str = "Str0ng!Pass123",
         **overrides: object,
     ) -> dict:
+        org_token = org.get("onboarding")
+        if org_token:
+            client.cookies.set("onboarding", org_token)
+        else:
+            client.cookies.delete("onboarding")
         payload: dict[str, object] = {
             "phone": phone,
             "password": password,
@@ -137,11 +155,7 @@ def make_owner(client: TestClient):
         if email is not None:
             payload["email"] = email
         payload.update(overrides)
-        resp = client.post(
-            "/api/v1/users/owner",
-            json=payload,
-            headers={"X-Pending-Org": str(org_id)},
-        )
+        resp = client.post("/api/v1/users/owner", json=payload)
         assert resp.status_code == 201, resp.text
         return resp.json()
 

@@ -17,7 +17,7 @@ def _wrong_code(code: str) -> str:
 
 def test_send_otp_returns_sent(client, make_org, make_owner, sms_provider):
     org = make_org()
-    make_owner(org["id"], phone=PHONE)
+    make_owner(org, phone=PHONE)
 
     resp = client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
 
@@ -35,7 +35,7 @@ def test_send_otp_returns_sent(client, make_org, make_owner, sms_provider):
 
 def test_verify_otp_success_activates_owner_and_org(client, db, make_org, make_owner, sms_provider):
     org = make_org()
-    make_owner(org["id"], phone=PHONE)
+    make_owner(org, phone=PHONE)
     client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
     code = sms_provider.sent[-1][1]
 
@@ -58,7 +58,7 @@ def test_verify_otp_success_activates_owner_and_org(client, db, make_org, make_o
 
 def test_verify_otp_wrong_code_rejected(client, make_org, make_owner, sms_provider):
     org = make_org()
-    make_owner(org["id"], phone=PHONE)
+    make_owner(org, phone=PHONE)
     client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
     code = sms_provider.sent[-1][1]
 
@@ -70,7 +70,7 @@ def test_verify_otp_wrong_code_rejected(client, make_org, make_owner, sms_provid
 
 def test_verify_otp_reused_code_gone(client, make_org, make_owner, sms_provider):
     org = make_org()
-    make_owner(org["id"], phone=PHONE)
+    make_owner(org, phone=PHONE)
     client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
     code = sms_provider.sent[-1][1]
 
@@ -83,7 +83,7 @@ def test_verify_otp_reused_code_gone(client, make_org, make_owner, sms_provider)
 
 def test_verify_otp_max_attempts_rate_limited(client, make_org, make_owner, sms_provider):
     org = make_org()
-    make_owner(org["id"], phone=PHONE)
+    make_owner(org, phone=PHONE)
     client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
     code = sms_provider.sent[-1][1]
     wrong = _wrong_code(code)

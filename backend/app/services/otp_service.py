@@ -2,8 +2,9 @@
 
 Single mock SMS path (ADR-019 decision 4): the ``ISmsProvider`` seam in
 ``app.services.sms`` is the only touchpoint to the outside world, so swapping in
-Kavenegar later is a one-class change. We store only the SHA-256 hash of the
-6-digit code — never the code itself — and never write codes to logs.
+Kavenegar later is a one-class change. We store only a keyed HMAC (server-secret
+pepper) of the 6-digit code — never the code itself — and never write codes to
+logs.
 
 Behaviour:
 - send_otp / resend_otp resolve the still-``pending`` Owner by canonical phone
@@ -14,15 +15,15 @@ Behaviour:
   wrong code), and on success activates both Owner and Organization.
 """
 
-import hashlib
 import hmac
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import security
 from app.config import get_settings
 from app.errors import ApiError, GoneError, NotFoundError, RateLimitedError
 from app.models import Organization, OtpCode, Owner
@@ -55,7 +56,13 @@ def _generate_code() -> str:
 
 
 def _hash_code(code: str) -> str:
-    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+    """Keyed-HMAC of the code with the server secret (pepper), not a plain hash.
+
+    F-3: a DB leak alone cannot reveal codes (requires the server secret), which
+    meaningfully shrinks the brute-force surface of the 1M-code space on top of
+    the TTL + max-attempts controls.
+    """
+    return security.otp_hmac(code)
 
 
 async def _pending_owner(session: AsyncSession, canonical: str) -> Owner:
@@ -163,9 +170,17 @@ async def verify_otp(session: AsyncSession, phone: str, code: str) -> OtpVerifyR
         raise RateLimitedError("too many failed attempts")
 
     if not hmac.compare_digest(_hash_code(code), otp.code_hash):
-        otp.attempts += 1
+        # F-6: atomic increment (no read-modify-write race across concurrent
+        # attempts) so brute-forcing cannot slip past the cap.
+        result = await session.execute(
+            update(OtpCode)
+            .where(OtpCode.id == otp.id)
+            .values(attempts=OtpCode.attempts + 1)
+            .returning(OtpCode.attempts)
+        )
+        new_attempts = result.scalar_one()
         await session.commit()
-        if otp.attempts >= max_attempts:
+        if new_attempts >= max_attempts:
             raise RateLimitedError("too many failed attempts")
         raise ApiError("invalid verification code")
 

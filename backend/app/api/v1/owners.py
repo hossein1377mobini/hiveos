@@ -1,37 +1,26 @@
 """US-002 Onboarding endpoints (v1): create the first Owner account.
 
-Organization-scope resolution (v0.1): the request carries the pending
-organization id in the ``X-Pending-Org`` header (the organization id returned by
-POST /api/v1/organizations). This is used instead of a session cookie because at
-this step no session exists yet — US-002 is precisely what issues the first
-session. The header is treated as an unsigned scope hint valid only for
-organizations still in ``pending_owner_registration`` (enforced in the service).
+Organization-scope resolution (F-2 hardening): the request is scoped by the
+HttpOnly ``onboarding`` cookie issued when the Organization was created in
+US-001 (proof of possession). The previous client-supplied ``X-Pending-Org``
+header is removed — it was forgeable and unsafe as a trust boundary. The
+onboarding cookie is accepted only for organizations still in
+``pending_owner_registration`` (enforced in the service via
+``resolve_pending_org_by_onboard_token``).
 """
 
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Cookie, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.errors import NotFoundError, UnauthorizedError
-from app.models import Organization
 from app.schemas import OwnerCreate, OwnerCreated
-from app.services import owner_service
+from app.services import organization_service, owner_service
 
 router = APIRouter()
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
-
-
-def _resolve_pending_org_id(x_pending_org: str | None) -> UUID:
-    if not x_pending_org or not x_pending_org.strip():
-        raise UnauthorizedError("missing X-Pending-Org scope header")
-    try:
-        return UUID(x_pending_org.strip())
-    except ValueError:
-        raise UnauthorizedError("invalid X-Pending-Org scope header") from None
 
 
 @router.post(
@@ -45,13 +34,11 @@ async def create_owner(
     data: OwnerCreate,
     response: Response,
     session: DbSession,
-    x_pending_org: Annotated[str | None, Header()] = None,
+    onboarding: Annotated[str | None, Cookie()] = None,
 ) -> OwnerCreated:
-    org_id = _resolve_pending_org_id(x_pending_org)
-
-    pending_org = await session.get(Organization, org_id)
-    if pending_org is None:
-        raise NotFoundError("organization not found")
+    pending_org = await organization_service.resolve_pending_org_by_onboard_token(
+        session, onboarding
+    )
 
     owner, raw_token = await owner_service.create_owner(session, pending_org, data)
 

@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -24,8 +24,21 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 async def create_organization(
     data: OrganizationCreate,
     session: DbSession,
+    response: Response,
 ) -> Organization:
-    org = await organization_service.create_organization(session, data)
+    org, onboard_token = await organization_service.create_organization(session, data)
+
+    # F-2: bind owner creation to this browser via a proof-of-possession
+    # onboarding cookie (HttpOnly) — not a client-forgeable scope header.
+    response.set_cookie(
+        key="onboarding",
+        value=onboard_token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+
     return Organization(
         id=org.id,
         name=org.display_name,

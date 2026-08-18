@@ -17,10 +17,12 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -78,6 +80,15 @@ class Organization(Base):
     language: Mapped[str] = mapped_column(String(10), default="fa-IR")
     time_zone: Mapped[str] = mapped_column(String(32), default="Asia/Tehran")
 
+    # F-2: proof-of-possession onboarding token (hash only). Issued at org
+    # creation as an HttpOnly `onboarding` cookie; required to create the Owner,
+    # so createOwner is bound to the browser that created the org — not a
+    # client-supplied header. Nulled/kept after owner creation; only pending orgs
+    # accept it (enforced in service).
+    owner_onboard_token_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -107,6 +118,17 @@ class Owner(Base):
     (ADR-019 decision 5 — simple Owner role, no multi-role RBAC yet).
     """
     __tablename__ = "owners"
+    __table_args__ = (
+        # F-7: email is unique case-insensitively. A plain UNIQUE on the column is
+        # case-sensitive, so enforce a functional unique index on lower(email),
+        # ignoring NULL rows (email is optional).
+        Index(
+            "uq_owners_email_ci",
+            text("lower(email)"),
+            unique=True,
+            postgresql_where=text("email IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -116,7 +138,7 @@ class Owner(Base):
         PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
     phone: Mapped[str] = mapped_column(String(16), unique=True, index=True)  # +98xxxxxxxxxx
-    email: Mapped[str | None] = mapped_column(String(254), unique=True, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(16), default="owner")
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|active
@@ -141,13 +163,17 @@ class Session(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # F-5: revocation support (set by revoke_session; filtered by resolve_session).
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
 
 
 class OtpCode(Base):
-    """One-time verification code (US-003). Only the SHA-256 hash of the code is
-    stored — never the code itself. Scoped by phone (the login id) and the owning
-    tenant/organization/owner. attempts caps brute-force (otp_max_attempts);
-    used + expires_at prevent replay."""
+    """One-time verification code (US-003). Only a keyed HMAC (server-secret
+    pepper) of the code is stored — never the code itself. Scoped by phone (the
+    login id) and the owning tenant/organization/owner. attempts caps brute-force
+    (otp_max_attempts); used + expires_at prevent replay."""
 
     __tablename__ = "otp_codes"
 
