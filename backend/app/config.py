@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     otp_ttl_seconds: int = 120
     otp_max_attempts: int = 5
+    session_ttl_seconds: int = 86400  # 24h default for the initial owner session (US-002)
 
     # CORS origins (frontend dev server)
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]

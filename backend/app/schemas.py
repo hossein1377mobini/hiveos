@@ -108,7 +108,7 @@ class Organization(BaseModel):
 class OwnerCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    phone: str = Field(pattern=r"^\+\d{10}$", description="+98 + 10 digits, normalized")
+    phone: str = Field(pattern=r"^\+98\d{10}$", description="+98 + exactly 10 digits (Iran mobile)")
     email: EmailStr | None = None
     password: str = Field(min_length=8)
     confirmPassword: str
