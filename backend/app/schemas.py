@@ -234,3 +234,52 @@ class OtpVerifyResponse(BaseModel):
     verified: Literal[True] = True
     userStatus: Literal["active"] = "active"
     organizationStatus: Literal["active"] = "active"
+
+
+# ---------------------------------------------------------------- US-007 (WAVE-3A)
+_DOCUMENT_FORMAT = Literal["pdf", "docx", "txt", "md"]
+_DOCUMENT_STATUS = Literal["detected", "processing", "ready", "failed"]
+
+
+class IngestionFolderConfigure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    folderPath: str
+
+
+class IngestionFolderCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    detected: int = 0
+    processing: int = 0
+    ready: int = 0
+    failed: int = 0
+
+
+class IngestionFolderStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    active: bool
+    folderPath: str | None = None
+    watchStartedAt: datetime | None = None
+    counts: IngestionFolderCounts = Field(default_factory=IngestionFolderCounts)
+
+
+class Document(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    filename: str
+    format: _DOCUMENT_FORMAT
+    sizeBytes: int
+    status: _DOCUMENT_STATUS
+    error: str | None = None
+    createdAt: datetime
+
+
+class DocumentStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    status: _DOCUMENT_STATUS
+    error: str | None = None

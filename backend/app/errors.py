@@ -55,6 +55,11 @@ class UnauthorizedError(ApiError):
     error_code = "unauthorized"
 
 
+class ForbiddenError(ApiError):
+    status_code = status.HTTP_403_FORBIDDEN
+    error_code = "forbidden"
+
+
 class GoneError(ApiError):
     status_code = status.HTTP_410_GONE
     error_code = "gone"

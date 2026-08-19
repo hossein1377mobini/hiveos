@@ -4,6 +4,8 @@ Matches ADR-019 v0.1: dev server :8100, Postgres+pgvector, maintenance-safe
 separate from the Kaneo sample (different host port).
 """
 
+import os
+import tempfile
 from functools import lru_cache
 
 from pydantic import Field
@@ -46,6 +48,21 @@ class Settings(BaseSettings):
 
     # CORS origins (frontend dev server)
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+
+    # US-007 ingestion folder (WAVE-3A). The resolved real path of any configured
+    # folder must stay inside one of these roots (path-traversal guard). Default is
+    # a dev-only folder under LOCALAPPDATA (or the OS temp dir); override via
+    # env INGESTION_ALLOWED_ROOTS (a JSON array string).
+    ingestion_allowed_roots: list[str] = Field(
+        default_factory=lambda: [
+            os.path.join(
+                os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(),
+                "hiveos-ingest",
+            )
+        ]
+    )
+    allowed_document_extensions: list[str] = [".pdf", ".docx", ".txt", ".md"]
+    max_document_size_mb: int = 20
 
 
 @lru_cache

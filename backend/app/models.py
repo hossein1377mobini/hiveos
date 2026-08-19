@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -318,3 +319,98 @@ class DocumentChunk(Base):
     embedding: Mapped[list] = mapped_column(Vector(1024))
     chunk_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class IngestionFolderConfig(Base):
+    """US-007 configured ingestion folder (one per Organization). (WAVE-3A)
+
+    Records the on-premise folder path + watch state. Exactly one active config
+    per org (``uq_ingestion_folder_one_per_org``). ``active``/``watch_started_at``
+    drive the FR-009 restart-resume: on boot we re-start a watcher for every
+    active row.
+    """
+
+    __tablename__ = "ingestion_folder_configs"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_ingestion_folder_one_per_org"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    folder_path: Mapped[str] = mapped_column(Text)
+    watch_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Document(Base):
+    """US-007 ingested document (WAVE-3A). Lifecycle: detected -> processing -> ready | failed.
+
+    ``source_document_id`` in DocumentChunk (WAVE-3B) will reference ``id`` here.
+    ``(organization_id, filename)`` is UNIQUE to keep concurrent watcher scans from
+    inserting duplicate rows for the same file.
+    """
+
+    __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "filename", name="uq_documents_org_filename"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    brain_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organization_brains.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    filename: Mapped[str] = mapped_column(String(255))
+    format: Mapped[str] = mapped_column(String(8))  # pdf|docx|txt|md
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(16), default="detected", index=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class ProcessingJob(Base):
+    """US-007 per-document processing job (WAVE-3A). consumed by the WAVE-3B worker.
+
+    The WAVE-3A pipeline is a stub: detection enqueues a ``pending`` job here; the
+    real chunk/embed/index worker (``process_job`` seam) transitions it through
+    ``running`` -> ``succeeded`` (or ``failed`` with ``last_error``, retried via
+    ``attempts``).
+    """
+
+    __tablename__ = "processing_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
+    job_type: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
