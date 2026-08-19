@@ -1,18 +1,24 @@
 import { useState } from "react";
-import type { Organization } from "./api";
+import type { Organization, DocumentItem } from "./api";
 import RegisterOrganization from "./pages/RegisterOrganization";
 import OwnerAccount from "./pages/OwnerAccount";
 import OtpVerify from "./pages/OtpVerify";
+import InitializeWorkspace from "./pages/InitializeWorkspace";
+import InitializeBrain from "./pages/InitializeBrain";
+import IngestionFolder from "./pages/IngestionFolder";
+import Done from "./pages/Done";
 
 export interface WizardState {
   orgId?: string;
   orgName?: string;
   workspaceId?: string;
+  brainId?: string;
   userId?: string;
   phone?: string;
+  folderPath?: string;
+  documents?: DocumentItem[];
+  onboardingStatus?: string;
 }
-
-const LATER_STEPS = ["فضای کار", "هوش سازمان", "اسناد"];
 
 export default function App() {
   const [step, setStep] = useState(0);
@@ -30,18 +36,28 @@ export default function App() {
 
   const onVerified = () => setStep(3);
 
+  const onWorkspaceDone = (r: { workspaceId: string }) => {
+    setState((s) => ({ ...s, workspaceId: r.workspaceId }));
+    setStep(4);
+  };
+
+  const onBrainDone = (r: { brainId: string }) => {
+    setState((s) => ({ ...s, brainId: r.brainId }));
+    setStep(5);
+  };
+
+  const onIngestionDone = (r: { folderPath: string; documents: DocumentItem[] }) => {
+    setState((s) => ({ ...s, folderPath: r.folderPath, documents: r.documents }));
+    setStep(6);
+  };
+
+  const jump = (s: number) => setStep(s);
+
   if (step === 0) return <RegisterOrganization onDone={onOrgCreated} />;
   if (step === 1) return <OwnerAccount onDone={onOwnerCreated} onBack={() => setStep(0)} />;
   if (step === 2) return <OtpVerify phone={state.phone ?? ""} onDone={onVerified} onBack={() => setStep(1)} />;
-
-  // Steps 3–5 (فضای کار / هوش سازمان / اسناد) — placeholders so the app still compiles/serves.
-  const label = LATER_STEPS[step - 3] ?? "";
-  return (
-    <div style={{ maxWidth: 620, margin: "0 auto", padding: "40px 0" }}>
-      <div className="card" style={{ textAlign: "center" }}>
-        <h2 style={{ marginTop: 0 }}>«{label}»</h2>
-        <p style={{ color: "var(--muted)" }}>این مرحله به‌زودی</p>
-      </div>
-    </div>
-  );
+  if (step === 3) return <InitializeWorkspace onDone={onWorkspaceDone} onBack={() => setStep(2)} />;
+  if (step === 4) return <InitializeBrain onDone={onBrainDone} onBack={() => setStep(3)} />;
+  if (step === 5) return <IngestionFolder onDone={onIngestionDone} onBack={() => setStep(4)} />;
+  return <Done orgName={state.orgName} documents={state.documents} onJump={jump} />;
 }

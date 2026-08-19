@@ -102,3 +102,48 @@ button {
 .otp input.err { border-color: var(--err); box-shadow: 0 0 0 3px var(--err-weak); }
 .timer { font-size: 12px; color: var(--muted); margin-top: 14px; min-height: 28px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 .timer .count { font-weight: 700; color: var(--text); direction: ltr; unicode-bidi: embed; display: inline-block; min-width: 44px; }
+
+/* --- Onboarding wizard: workspace init (04) + brain init (05) + ingestion (07) + done (08) --- */
+.spinner { width: 22px; height: 22px; border: 3px solid var(--brand-weak); border-top-color: var(--brand); border-radius: 50%; animation: spin 1s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-head { display: flex; align-items: center; gap: 12px; }
+.ready { text-align: center; padding: 8px 0 4px; }
+.ready .tick { width: 60px; height: 60px; border-radius: 50%; background: var(--ok-weak); color: var(--ok); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 14px; }
+.ready .tick svg { width: 30px; height: 30px; }
+.ready h2 { font-size: 18px; font-weight: 800; color: var(--ok); margin: 0; }
+.ready p { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.kv { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 4px 16px; margin-top: 16px; }
+.kv .row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.kv .row:last-child { border-bottom: none; }
+.kv .lbl { flex: 1; font-weight: 600; color: var(--text); }
+.kv .val { color: var(--muted); font-size: 13px; }
+.kv .val.mono { font-family: "Consolas", "Courier New", monospace; direction: ltr; unicode-bidi: embed; }
+.badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.badge.detected { background: var(--brand-weak); color: var(--brand); }
+.badge.processing { background: #fbf1e3; color: #b7791f; }
+.badge.ready { background: var(--ok-weak); color: var(--ok); }
+.badge.failed { background: var(--err-weak); color: var(--err); }
+.doc-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+.doc-table th { text-align: right; font-weight: 700; color: var(--muted); padding: 9px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.doc-table td { padding: 11px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.doc-table tr:last-child td { border-bottom: none; }
+.fmt { display: inline-block; font-family: "Consolas", "Courier New", monospace; direction: ltr; font-size: 11px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+.fail-reason { font-size: 11px; color: var(--err); margin-top: 2px; }
+.counts { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; }
+.count-chip { flex: 1; min-width: 88px; border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; background: var(--bg); }
+.count-chip .n { font-size: 20px; font-weight: 800; color: var(--text); }
+.count-chip .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.summary { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; padding: 6px 18px; margin-bottom: 24px; }
+.summary-title { font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 12px 0 6px; }
+.summary .row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.summary .row:last-child { border-bottom: none; }
+.summary .check { width: 22px; height: 22px; border-radius: 50%; background: var(--ok-weak); color: var(--ok); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.summary .check svg { width: 12px; height: 12px; }
+.summary .lbl { flex: 1; font-weight: 600; }
+.summary .val { color: var(--muted); font-size: 13px; }
+.quickstart { margin-top: 24px; padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); }
+.quickstart h3 { font-size: 13px; font-weight: 800; display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.quickstart h3 svg { width: 16px; height: 16px; color: var(--brand); }
+.quickstart ul { list-style: none; margin: 0; padding: 0; }
+.quickstart li { font-size: 13px; color: var(--muted); padding: 6px 0; display: flex; gap: 8px; align-items: flex-start; line-height: 1.8; }
+.quickstart li svg { width: 14px; height: 14px; color: var(--ok); flex-shrink: 0; margin-top: 3px; }

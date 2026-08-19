@@ -65,16 +65,69 @@ export interface OtpVerifyRequest {
   code: string;
 }
 
+export interface WorkspaceSettings {
+  language: string;
+  timeZone: string;
+  dateFormat: string;
+  numberFormat: string;
+  defaultLocale: string;
+}
+export interface WorkspaceInitResult {
+  workspaceId: string;
+  status: string;
+  settings: WorkspaceSettings;
+}
+export interface BrainInitResult {
+  brainId: string;
+  knowledgeRepositoryId: string;
+  vectorIndexId: string;
+  status: string;
+  rag: { embeddingProvider: string; defaultLanguage: string };
+}
+export interface IngestionCounts {
+  detected: number;
+  processing: number;
+  ready: number;
+  failed: number;
+}
+export interface IngestionConfigureResult {
+  active: boolean;
+  folderPath: string;
+  watchStartedAt?: string;
+  counts: IngestionCounts;
+}
+export interface IngestionStatusResult {
+  active: boolean;
+  folderPath?: string;
+  counts: IngestionCounts;
+}
+export interface DocumentItem {
+  id: string;
+  filename: string;
+  format: string;
+  status: string;
+  error?: string;
+}
+export interface OnboardingStatusResult {
+  onboardingStatus: string;
+  missingSteps?: string[];
+}
+export interface CompleteOnboardingResult {
+  onboardingStatus: string;
+  next?: string;
+}
+
 export const api = {
   createOrganization: (p: OrganizationCreate) => request<Organization>("POST", "/organizations", p),
   createOwner: (p: OwnerCreate) => request<{ userId: string; organizationId: string; status: string; sessionIssued: boolean }>("POST", "/users/owner", p),
   sendOtp: (p: OtpSendRequest) => request<{ status: string; resendAfterSeconds: number; expiresInSeconds: number }>("POST", "/auth/send-otp", p),
   verifyOtp: (p: OtpVerifyRequest) => request<{ verified: boolean; userStatus: string; organizationStatus: string }>("POST", "/auth/verify-otp", p),
-  workspaceInit: () => request<{ workspaceId: string; status: string; settings: Record<string, string> }>("POST", "/workspaces/initialize"),
-  brainInit: () => request<{ brainId: string; knowledgeRepositoryId: string; vectorIndexId: string; status: string; rag: { embeddingProvider: string; defaultLanguage: string } }>("POST", "/brain/initialize"),
+  initializeWorkspace: () => request<WorkspaceInitResult>("POST", "/workspaces/initialize"),
+  initializeBrain: () => request<BrainInitResult>("POST", "/brain/initialize"),
   configureIngestion: (folderPath: string) =>
-    request<{ active: boolean; folderPath: string; watchStartedAt?: string; counts: Record<string, number> }>("POST", "/ingestion-folder/configure", { folderPath }),
-  ingestionStatus: () => request<{ active: boolean; folderPath?: string; counts: Record<string, number> }>("GET", "/ingestion-folder/status"),
-  onboardingStatus: () => request<{ onboardingStatus: string; missingSteps?: string[] }>("GET", "/onboarding/status"),
-  completeOnboarding: () => request<{ onboardingStatus: string; next?: string }>("POST", "/onboarding/complete"),
+    request<IngestionConfigureResult>("POST", "/ingestion-folder/configure", { folderPath }),
+  getIngestionStatus: () => request<IngestionStatusResult>("GET", "/ingestion-folder/status"),
+  listDocuments: () => request<DocumentItem[]>("GET", "/documents"),
+  getOnboardingStatus: () => request<OnboardingStatusResult>("GET", "/onboarding/status"),
+  completeOnboarding: () => request<CompleteOnboardingResult>("POST", "/onboarding/complete"),
 };
