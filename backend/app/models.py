@@ -439,3 +439,32 @@ class ProcessingJob(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
+
+
+class OrganizationOnboarding(Base):
+    """US-008 one-time completion marker (once per Organization).
+
+    A row here means the organization's Bootstrap is complete (US-001..US-005 +
+    US-007 folder watch active) and the Owner has been handed off to the Hive
+    Mind chat entry point (EPIC-09). ``completed_at`` records *when*; the
+    UNIQUE ``organization_id`` (``uq_organization_onboarding_one_per_org``)
+    makes completion idempotent — a second POST /onboarding/complete returns
+    the existing ``completed`` state without re-auditing.
+    """
+
+    __tablename__ = "organization_onboarding"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", name="uq_organization_onboarding_one_per_org"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

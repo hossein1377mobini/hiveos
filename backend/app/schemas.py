@@ -283,3 +283,41 @@ class DocumentStatusResponse(BaseModel):
     id: UUID
     status: _DOCUMENT_STATUS
     error: str | None = None
+
+
+# ---------------------------------------------------------------- US-008
+OnboardingStep = Literal[
+    "register-organization",
+    "owner-account",
+    "verify-owner",
+    "workspace",
+    "brain",
+    "ingestion-folder",
+]
+
+
+class OnboardingStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    onboardingStatus: Literal["pending", "in_progress", "completed"]
+    missingSteps: list[OnboardingStep] | None = None
+
+
+# ----- wave-4 (US-008) Onboarding -----
+
+class OnboardingCompleted(BaseModel):
+    """POST /onboarding/complete, 200 (handoff to Hive Mind chat)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    onboardingStatus: Literal["completed"] = "completed"
+    next: Literal["hive-mind-chat"] = "hive-mind-chat"
+
+
+class OnboardingIncomplete(BaseModel):
+    """POST /onboarding/complete, 409 (bootstrap not finished)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    onboardingStatus: Literal["in_progress"] = "in_progress"
+    missingSteps: list[OnboardingStep]
