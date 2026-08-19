@@ -25,7 +25,7 @@ describe("api request()", () => {
     const payload = {
       displayName: "شرکت آریا",
       industry: "فناوری اطلاعات",
-      companySize: "10_50",
+      companySize: "10_to_49",
       businessDescription: { whatYouDo: "1234567890", productsServices: "1234567890" },
       aiModel: { provider: "DeepSeek", apiKey: "sk-test" },
     };

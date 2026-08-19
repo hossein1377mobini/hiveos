@@ -15,7 +15,7 @@ export const STRONG_PW = "Abcdef1!";
 export async function fillValidOrg(user: UserEvent) {
   await user.type(screen.getByPlaceholderText(/شرکت/), ORG_NAME);
   await user.selectOptions(screen.getAllByRole("combobox")[0], "فناوری اطلاعات");
-  await user.selectOptions(screen.getAllByRole("combobox")[1], "10_50");
+  await user.selectOptions(screen.getAllByRole("combobox")[1], "10_to_49");
   const [what, products] = screen.getAllByPlaceholderText(/توضیح دهید/);
   await user.type(what, WHAT);
   await user.type(products, PRODUCTS);

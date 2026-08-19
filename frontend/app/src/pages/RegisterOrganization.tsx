@@ -7,10 +7,10 @@ const PROVIDERS = ["OpenAI", "Anthropic", "DeepSeek", "Google", "LiteLLM"];
 const INDUSTRIES = ["فناوری اطلاعات", "مشاوره مدیریت", "خدمات مالی", "آموزش و دانشگاه", "تولید و صنعت", "بهداشت و درمان", "سایر"];
 const SIZES = [
   { v: "lt_10", l: "کمتر از ۱۰ نفر" },
-  { v: "10_50", l: "۱۰ تا ۵۰ نفر" },
-  { v: "50_250", l: "۵۰ تا ۲۵۰ نفر" },
-  { v: "250_1000", l: "۲۵۰ تا ۱۰۰۰ نفر" },
-  { v: "gt_1000", l: "بیش از ۱۰۰۰ نفر" },
+  { v: "10_to_49", l: "۱۰ تا ۴۹ نفر" },
+  { v: "50_to_199", l: "۵۰ تا ۱۹۹ نفر" },
+  { v: "200_to_499", l: "۲۰۰ تا ۴۹۹ نفر" },
+  { v: "ge_500", l: "بیش از ۵۰۰ نفر" },
 ];
 
 export default function RegisterOrganization({ onDone }: { onDone: (org: Organization) => void }) {

@@ -60,7 +60,7 @@ describe("RegisterOrganization", () => {
     renderForm();
     await user.type(screen.getByPlaceholderText(/شرکت/), "آریا");
     await user.selectOptions(screen.getAllByRole("combobox")[0], "فناوری اطلاعات");
-    await user.selectOptions(screen.getAllByRole("combobox")[1], "10_50");
+    await user.selectOptions(screen.getAllByRole("combobox")[1], "10_to_49");
     const [what] = screen.getAllByPlaceholderText(/توضیح دهید/);
     await user.type(what, "کوتاه");
     await user.click(submit());
@@ -101,7 +101,7 @@ describe("RegisterOrganization", () => {
       expect.objectContaining({
         displayName: ORG_NAME,
         industry: "فناوری اطلاعات",
-        companySize: "10_50",
+        companySize: "10_to_49",
         businessDescription: { whatYouDo: WHAT, productsServices: PRODUCTS },
         aiModel: { provider: "DeepSeek", apiKey: API_KEY },
       }),
