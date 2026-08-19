@@ -24,10 +24,19 @@ class ApiError(Exception):
     # doesn't have.
     audit_logged: bool = False
 
-    def __init__(self, message: str | None = None, error_code: str | None = None):
+    def __init__(
+        self,
+        message: str | None = None,
+        error_code: str | None = None,
+        audit_logged: bool | None = None,
+    ):
         self.message = message
         if error_code:
             self.error_code = error_code
+        if audit_logged is not None:
+            # Per-instance override: only the failure paths that genuinely
+            # committed an AuditLog row may claim auditLogged=True (honest gate).
+            self.audit_logged = audit_logged
         super().__init__(message or self.error_code)
 
 
@@ -57,12 +66,11 @@ class RateLimitedError(ApiError):
 
 
 class InternalError(ApiError):
-    # 500 for unexpected server-side failures. The US-004/US-005 failure paths
-    # write a ``*.initialization.failed`` AuditLog row before raising this, so
-    # auditLogged=True is honest (retry by the caller is permitted).
+    # 500 for unexpected server-side failures. auditLogged is set per-instance
+    # by the US-004/US-005 failure paths — True ONLY when the
+    # ``*.initialization.failed`` AuditLog row actually committed (honest gate).
     status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
     error_code = "internal_error"
-    audit_logged = True
 
 
 class GatewayUnavailableError(ApiError):

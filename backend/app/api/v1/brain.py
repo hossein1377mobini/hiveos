@@ -22,6 +22,11 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
     status_code=status.HTTP_201_CREATED,
     operation_id="initializeBrain",
     tags=["Onboarding"],
+    responses={
+        401: {"description": "سشن معتبر نیست"},
+        409: {"description": "تعارض — سازمان فعال نیست / Workspace آماده نیست"},
+        500: {"description": "راهاندازی ناموفق (audit-logged) — retry مجاز"},
+    },
 )
 async def initialize_brain(
     session: DbSession,

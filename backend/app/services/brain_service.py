@@ -15,6 +15,7 @@ structures survive — FR "هیچ ساختار ناقصی باقی نماند"),
 """
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ConflictError, InternalError
@@ -188,8 +189,17 @@ async def initialize_brain(session: AsyncSession, org: Organization) -> BrainIni
             ]
         )
         await session.commit()
+    except IntegrityError:
+        # Concurrent initialize_brain won the race for this org (UNIQUE
+        # organization_id) — roll back and return the winner's ready brain.
+        await session.rollback()
+        existing = await _load_existing_ready_brain(session, org)
+        if existing is not None:
+            return _brain_response(*existing)
+        raise ConflictError("brain already initialized") from None
     except Exception as exc:  # noqa: BLE001 — roll back, audit failure in a fresh tx, surface.
         await session.rollback()
+        audit_ok = True
         try:
             async with session.begin():
                 session.add(
@@ -202,8 +212,11 @@ async def initialize_brain(session: AsyncSession, org: Organization) -> BrainIni
                     )
                 )
         except Exception:  # noqa: BLE001 — audit best-effort; never mask the original failure.
+            audit_ok = False
             pass
-        raise InternalError("brain initialization failed") from exc
+        raise InternalError(
+            "brain initialization failed", audit_logged=audit_ok
+        ) from exc
 
 
     return _brain_response(brain, repo, index)

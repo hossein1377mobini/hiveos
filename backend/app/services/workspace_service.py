@@ -20,7 +20,7 @@ Behaviour:
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.errors import ConflictError, InternalError, NotFoundError
+from app.errors import ConflictError, InternalError
 from app.models import AuditLog, Organization, Workspace
 from app.schemas import WorkspaceInitialized, WorkspaceSettings
 
@@ -76,7 +76,7 @@ async def initialize_workspace(
     )
     ws = result.scalar_one_or_none()
     if ws is None:
-        raise NotFoundError("workspace not found")
+        raise ConflictError("workspace not found (inconsistent state)")
 
     # Capture identifiers up front so the failure path does not depend on
     # objects that expire after a rollback.
@@ -114,11 +114,15 @@ async def initialize_workspace(
         # Persist the failure state + audit so it is observable and retryable
         # (failed -> ready on a later call), rather than leaving the workspace
         # silently stuck in pending.
+        audit_ok = True
         try:
             await _mark_failed(session, org_id=org_id, tenant_id=tenant_id, ws_id=ws_id)
         except Exception:
+            audit_ok = False
             await session.rollback()
-        raise InternalError("workspace initialization failed") from exc
+        raise InternalError(
+            "workspace initialization failed", audit_logged=audit_ok
+        ) from exc
 
     return WorkspaceInitialized(
         workspaceId=ws_id,
