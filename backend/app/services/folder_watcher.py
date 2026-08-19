@@ -224,6 +224,16 @@ def stop_watcher(org_id: uuid.UUID) -> None:
         watcher.join(timeout=1.0)
 
 
+def stop_all_watchers() -> None:
+    """Stop + join every running watcher (called on app shutdown)."""
+    with _REGISTRY_LOCK:
+        watchers = list(PER_ORG_WATCHERS.values())
+        PER_ORG_WATCHERS.clear()
+    for w in watchers:
+        w.stop()
+        w.join(timeout=1.0)
+
+
 async def start_all_persisted_watchers() -> int:
     """FR-009: re-start watchers for every org with an active IngestionFolderConfig.
 

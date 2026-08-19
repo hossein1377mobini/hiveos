@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     )
     allowed_document_extensions: list[str] = [".pdf", ".docx", ".txt", ".md"]
     max_document_size_mb: int = 20
+    ingestion_chunk_size: int = 512
+    ingestion_chunk_overlap: int = 64
+    ingestion_worker_poll_seconds: float = 2.0
+    enable_ingestion_background: bool = True  # start folder watchers + job worker at boot
 
 
 @lru_cache

@@ -15,6 +15,10 @@ dependencies = [
     "alembic>=1.13",
     "python-multipart>=0.0.9",
     "cryptography>=42.0",
+    # WAVE-3B: local embedding pipeline (v0.1 on-prem; no Avalai tokens)
+    "fastembed>=0.4",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
 ]
 
 [dependency-groups]

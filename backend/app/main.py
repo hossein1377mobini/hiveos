@@ -10,13 +10,37 @@ from app.api.v1 import auth, brain, health, ingestion, organizations, owners, wo
 from app.config import get_settings, validate_runtime_security
 from app.db import init_models
 from app.errors import install_handlers
+from app.services import folder_watcher, ingestion_worker
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    if get_settings().create_tables_on_startup:
+    settings = get_settings()
+    if settings.create_tables_on_startup:
         await init_models()
+    # FR-009 (US-007): resume folder watchers + start the ingest job worker on
+    # boot so docs added while the server was down are re-detected and processed.
+    if settings.enable_ingestion_background:
+        try:
+            resumed = await folder_watcher.start_all_persisted_watchers()
+            # Prewarm the local embedding model in the MAIN loop so the worker
+            # thread never constructs an onnxruntime session (unstable in a
+            # non-main thread on Windows/Py3.14); it only runs inference after.
+            from app.services import ingestion_pipeline
+
+            ingestion_pipeline.embedding_dim()
+            ingestion_worker.start_worker()
+            import logging
+
+            logging.getLogger("uvicorn.error").info(
+                "ingestion background started: %d watcher(s)", resumed
+            )
+        except Exception:  # noqa: BLE001 — never block app boot on background failures
+            pass
     yield
+    ingestion_worker.stop_worker()
+    folder_watcher.stop_all_watchers()
+
 
 
 def create_app() -> FastAPI:

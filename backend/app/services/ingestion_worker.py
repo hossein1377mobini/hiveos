@@ -1,0 +1,231 @@
+"""WAVE-3B: background worker that consumes pending ingest jobs.
+
+Loop-safe design (matches ``folder_watcher``): each unit of work creates a
+SHORT-LIVED async engine inside ``asyncio.run`` so the worker thread never
+shares the request loop's engine (asyncpg connections are event-loop-bound).
+
+Seam: ``process_job(job_id)`` runs the real chunk -> embed -> index pipeline for
+one ``ProcessingJob`` and drives the ``Document`` + ``Job`` status lifecycle
+(detected/processing -> ready|failed; pending -> running -> succeeded|failed,
+honoring ``attempts`` for retry).
+"""
+
+import asyncio
+import contextlib
+import os
+import threading
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.config import get_settings
+from app.models import (
+    AuditLog,
+    Document,
+    DocumentChunk,
+    IngestionFolderConfig,
+    ProcessingJob,
+)
+from app.services import ingestion_pipeline
+
+_WORKER: "JobWorker" | None = None
+_WORKER_LOCK = threading.Lock()
+
+
+async def _process_one(job_id: UUID, settings, engine) -> None:
+    """Real pipeline for a single job (success or failed state — always settles)."""
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        job = await session.get(ProcessingJob, job_id)
+        if job is None or job.status in ("succeeded", "running"):
+            return  # gone or already owned by another worker slot
+        doc = await session.get(Document, job.document_id)
+
+        job.status = "running"
+        job.attempts = (job.attempts or 0) + 1
+        job.updated_at = datetime.now(UTC)
+        if doc is not None:
+            doc.status = "processing"
+            doc.updated_at = datetime.now(UTC)
+        await session.commit()
+
+        # ---- the real pipeline (chunk -> embed -> index) ----
+        try:
+            cfg = (
+                await session.execute(
+                    select(IngestionFolderConfig).where(
+                        IngestionFolderConfig.organization_id == job.organization_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if cfg is None:
+                raise RuntimeError("no ingestion folder configured for this organization")
+
+            if doc is None:
+                raise RuntimeError("document row missing")
+            if doc.brain_id is None:
+                # US-005 precondition: DocumentChunk.brain_id is NOT NULL; the
+                # org's Brain (and workspace) must be initialized before ingest.
+                raise RuntimeError(
+                    "organization brain not initialized — run US-005 before ingestion"
+                )
+
+            file_path = os.path.join(cfg.folder_path, os.path.basename(doc.filename))
+            text = ingestion_pipeline.read_document_text(file_path, doc.format)
+            chunk_cfg = ingestion_pipeline.default_chunk_config()
+            chunks = ingestion_pipeline.chunk_text(
+                text, chunk_size=chunk_cfg["chunk_size"], overlap=chunk_cfg["overlap"]
+            )
+            vectors = ingestion_pipeline.embed_texts(chunks)
+
+            for chunk, vec in zip(chunks, vectors, strict=True):
+                session.add(
+                    DocumentChunk(
+                        tenant_id=doc.tenant_id,
+                        organization_id=doc.organization_id,
+                        brain_id=doc.brain_id,
+                        source_document_id=str(doc.id),  # column is String(64)
+                        content=chunk,
+                        embedding=vec,
+                        chunk_metadata={
+                            "format": doc.format, "chunk_size": chunk_cfg["chunk_size"]
+                        },
+                    )
+                )
+
+            doc.status = "ready"
+            doc.error = None
+            doc.updated_at = datetime.now(UTC)
+            job.status = "succeeded"
+            job.last_error = None
+            job.updated_at = datetime.now(UTC)
+            session.add(
+                AuditLog(
+                    tenant_id=doc.tenant_id,
+                    action="document.ready",
+                    payload={
+                        "organization_id": str(doc.organization_id),
+                        "document_id": str(doc.id),
+                        "chunks": len(chunks),
+                        "dim": len(vectors[0]) if vectors else 0,
+                    },
+                )
+            )
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001 — per-file failure stays isolated (FR-008)
+            await session.rollback()
+            try:
+                async with session.begin():
+                    job2 = await session.get(ProcessingJob, job_id)
+                    doc2 = await session.get(Document, job2.document_id) if job2 else None
+                    if doc2 is not None:
+                        doc2.status = "failed"
+                        doc2.error = str(exc)
+                        doc2.updated_at = datetime.now(UTC)
+                    if job2 is not None:
+                        job2.status = "failed"
+                        job2.last_error = str(exc)
+                        job2.updated_at = datetime.now(UTC)
+                        session.add(
+                            AuditLog(
+                                tenant_id=job2.tenant_id,
+                                action="document.processing.failed",
+                                payload={
+                                    "organization_id": str(job2.organization_id),
+                                    "document_id": str(job.document_id),
+                                    "error": str(exc),
+                                    "attempts": job2.attempts,
+                                },
+                            )
+                        )
+            except Exception:  # noqa: BLE001 — best effort; never mask the pipeline error
+                await session.rollback()
+
+
+def process_job(job_id: UUID) -> None:
+    """Synchronous entry point for one job (loop-safe, callable from any thread)."""
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url)
+
+    async def _run():
+        await _process_one(job_id, settings, engine)
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def _pending_job_ids(engine) -> list[UUID]:
+    container: list[UUID] = []
+
+    async def _q():
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            rows = (
+                await session.execute(
+                    select(ProcessingJob.id).where(ProcessingJob.status == "pending")
+                )
+            ).scalars().all()
+            container.extend(rows)
+
+    asyncio.run(_q())
+    return container
+
+
+def process_pending_jobs() -> int:
+    """Process all currently-pending jobs. Returns how many were attempted."""
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url)
+    container: list[UUID] = []
+
+    async def _run():
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            rows = (
+                await session.execute(
+                    select(ProcessingJob.id).where(ProcessingJob.status == "pending")
+                )
+            ).scalars().all()
+            container.extend(rows)
+        await engine.dispose()
+
+    asyncio.run(_run())
+    for jid in container:
+        process_job(jid)
+    return len(container)
+
+
+class JobWorker(threading.Thread):
+    """Daemon loop that periodically drains the pending ingest queue."""
+
+    def __init__(self, interval: float = 0.0) -> None:
+        super().__init__(daemon=True, name="ingestion-job-worker")
+        self.interval = interval or get_settings().ingestion_worker_poll_seconds
+        self._stop = threading.Event()
+
+    def run(self) -> None:
+        while not self._stop.wait(self.interval):
+            with contextlib.suppress(Exception):  # keep the worker alive on transient errors
+                process_pending_jobs()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+def start_worker() -> JobWorker:
+    """Start (idempotent) the single background job worker."""
+    global _WORKER
+    with _WORKER_LOCK:
+        if _WORKER is not None and _WORKER.is_alive():
+            return _WORKER
+        _WORKER = JobWorker()
+        _WORKER.start()
+        return _WORKER
+
+
+def stop_worker() -> None:
+    global _WORKER
+    with _WORKER_LOCK:
+        w = _WORKER
+        _WORKER = None
+    if w is not None:
+        w.stop()
+        w.join(timeout=1.0)

@@ -20,6 +20,9 @@ from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.main import create_app
 
+# Disable the ingestion background worker/watcher auto-start for deterministic tests.
+get_settings().enable_ingestion_background = False
+
 _TRUNCATE_SQL = (
     "TRUNCATE TABLE processing_jobs, documents, ingestion_folder_configs, "
     "document_chunks, vector_indexes, knowledge_repositories, "

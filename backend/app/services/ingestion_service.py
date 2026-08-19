@@ -24,7 +24,6 @@ from app.models import (
     Document,
     IngestionFolderConfig,
     Organization,
-    ProcessingJob,
 )
 from app.services import folder_watcher
 
@@ -205,35 +204,11 @@ async def get_document_status(
 
 
 async def process_job(job_id) -> None:
-    """WAVE-3B SEAM — consume a pending ingest job (chunk -> embed -> index).
+    """WAVEB seam: delegate to the loop-safe background worker.
 
-    WAVE-3A has no real pipeline, so this stub transitions the job
-    ``pending -> running -> succeeded`` and the document ``detected -> ready`` so the
-    full status flow is observable. WAVE-3B replaces the body with the real worker:
-    read the file, chunk it, embed via ``org.ai_provider``, write pgvector
-    ``DocumentChunk`` rows, then set ``ready`` (or ``failed`` + ``last_error`` on
-    exception, honoring ``ProcessingJob.attempts`` for retry).
+    WAVE-3A left a stub; WAVE-3B implements the real chunk -> embed -> index
+    pipeline in ``app.services.ingestion_worker``.
     """
-    from app.db import get_session_factory
+    from app.services import ingestion_worker
 
-    async with get_session_factory()() as session:
-        job = await session.get(ProcessingJob, job_id)
-        if job is None or job.status in ("succeeded", "running"):
-            return
-
-        job.status = "running"
-        job.attempts = (job.attempts or 0) + 1
-        job.updated_at = datetime.now(UTC)
-        await session.commit()
-
-        # TODO(WAVE-3B): real chunk -> embed -> index pipeline goes here.
-        doc = await session.get(Document, job.document_id)
-        if doc is not None:
-            doc.status = "ready"
-            doc.error = None
-            doc.updated_at = datetime.now(UTC)
-
-        job.status = "succeeded"
-        job.last_error = None
-        job.updated_at = datetime.now(UTC)
-        await session.commit()
+    ingestion_worker.process_job(job_id)
