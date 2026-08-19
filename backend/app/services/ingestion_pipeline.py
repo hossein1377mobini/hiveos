@@ -84,7 +84,9 @@ def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]
     """
     if not text or not text.strip():
         return []
-    step = max(1, chunk_size - max(0, overlap))
+    if chunk_size < 1 or overlap < 0 or overlap >= chunk_size:
+        raise ValueError(f"invalid chunk config: chunk_size={chunk_size}, overlap={overlap}")
+    step = max(1, chunk_size - overlap)
     chunks: list[str] = []
     for start in range(0, len(text), step):
         piece = text[start : start + chunk_size].strip()

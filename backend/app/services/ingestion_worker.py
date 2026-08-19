@@ -14,7 +14,7 @@ import asyncio
 import contextlib
 import os
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -38,7 +38,7 @@ async def _process_one(job_id: UUID, settings, engine) -> None:
     """Real pipeline for a single job (success or failed state — always settles)."""
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         job = await session.get(ProcessingJob, job_id)
-        if job is None or job.status in ("succeeded", "running"):
+        if job is None or job.status == "succeeded":
             return  # gone or already owned by another worker slot
         doc = await session.get(Document, job.document_id)
 
@@ -149,48 +149,63 @@ def process_job(job_id: UUID) -> None:
     engine = create_async_engine(settings.database_url)
 
     async def _run():
-        await _process_one(job_id, settings, engine)
-        await engine.dispose()
+        try:
+            await _process_one(job_id, settings, engine)
+        finally:
+            await engine.dispose()
 
     asyncio.run(_run())
 
 
-def _pending_job_ids(engine) -> list[UUID]:
+def _claim_pending_ids(engine) -> list[UUID]:
+    """Atomically claim pending jobs (and reclaim stale 'running' ones).
+
+    One worker slot reserves each job via ``UPDATE ... WHERE status='pending'
+    RETURNING id`` (committed), so concurrent worker slots never process the same
+    job twice. Jobs stuck in ``running`` beyond ``ingestion_job_stale_seconds``
+    are treated as abandoned by a crashed worker and reset to ``pending`` for
+    retry (crash recovery).
+    """
     container: list[UUID] = []
 
-    async def _q():
+    async def _claim():
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-            rows = (
+            settings = get_settings()
+            now = datetime.now(UTC)
+            await session.execute(
+                ProcessingJob.__table__.update()
+                .where(
+                    ProcessingJob.status == "running",
+                    ProcessingJob.updated_at
+                    < now - timedelta(seconds=settings.ingestion_job_stale_seconds),
+                )
+                .values(status="pending", last_error="reclaimed after worker stall")
+            )
+            ids = (
                 await session.execute(
-                    select(ProcessingJob.id).where(ProcessingJob.status == "pending")
+                    ProcessingJob.__table__.update()
+                    .where(ProcessingJob.status == "pending")
+                    .values(status="running", updated_at=now)
+                    .returning(ProcessingJob.id)
                 )
             ).scalars().all()
-            container.extend(rows)
+            container.extend(ids)
+            await session.commit()
 
-    asyncio.run(_q())
+    asyncio.run(_claim())
     return container
 
 
 def process_pending_jobs() -> int:
     """Process all currently-pending jobs. Returns how many were attempted."""
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url)
-    container: list[UUID] = []
-
-    async def _run():
-        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-            rows = (
-                await session.execute(
-                    select(ProcessingJob.id).where(ProcessingJob.status == "pending")
-                )
-            ).scalars().all()
-            container.extend(rows)
-        await engine.dispose()
-
-    asyncio.run(_run())
-    for jid in container:
+    engine = create_async_engine(get_settings().database_url)
+    try:
+        ids = _claim_pending_ids(engine)
+    finally:
+        asyncio.run(engine.dispose())
+    for jid in ids:
         process_job(jid)
-    return len(container)
+    return len(ids)
 
 
 class JobWorker(threading.Thread):

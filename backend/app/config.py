@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     ingestion_chunk_size: int = 512
     ingestion_chunk_overlap: int = 64
     ingestion_worker_poll_seconds: float = 2.0
+    ingestion_job_stale_seconds: int = 300  # a job stuck in 'running' this long is reclaimed
     enable_ingestion_background: bool = True  # start folder watchers + job worker at boot
 
 
