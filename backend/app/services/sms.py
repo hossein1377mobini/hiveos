@@ -32,8 +32,11 @@ class MockOtpProvider:
     async def send(self, phone: str, code: str) -> None:
         if get_settings().mock_otp_offline:
             raise GatewayUnavailableError("sms gateway unreachable (offline simulation)")
-        # DEV ONLY — a real provider must never log the code.
-        print(f"[MOCK-SMS] (developers only) OTP for {phone}: {code}")
+        # DEV ONLY — the code is surfaced only in dev/test envs; a real provider
+        # must never log it, and this guard guarantees the mock never leaks a
+        # code outside the allowed environments either.
+        if get_settings().env in ("dev", "test"):
+            print(f"[MOCK-SMS] (developers only) OTP for {phone}: {code}")
 
 
 def get_sms_provider() -> ISmsProvider:

@@ -169,8 +169,12 @@ paths:
     post:
       summary: راه‌اندازی Workspace سازمان (US-004)
       description: >
-        دقیقاً یک Workspace برای سازمانِ سشن جاری می‌سازد، تنظیمات پیش‌فرض را از
-        اطلاعات US-001 به‌ارث می‌برد (زبان/منطقه زمانی/لوکال) و وضعیت را `ready` می‌کند.
+        Workspace سازمانِ سشن جاری را که در US-001 ساخته شده است راه‌اندازی
+        می‌کند: تنظیمات پیش‌فرض را از اطلاعات US-001 به‌ارث می‌برد
+        (زبان/منطقه زمانی/لوکال) و وضعیت آن را از `pending` به `ready` می‌برد.
+        دقیقاً یک Workspace به‌ازای هر سازمان وجود دارد (محدودیت یکتای
+        organization_id در DB اجباری است) — این عملیات هرگز Workspace دوم
+        نمی‌سازد.
       operationId: initializeWorkspace
       tags: [Onboarding]
       responses:
@@ -467,7 +471,8 @@ components:
       properties:
         phone:
           type: string
-          pattern: '^\+[1-9]\d{1,14}$'
+          description: شماره موبایل ایران؛ پیشوند ثابت +98 و دقیقاً ۱۰ رقم.
+          pattern: '^\+98\d{10}$'
 
     OtpSendResponse:
       type: object
@@ -484,7 +489,8 @@ components:
       properties:
         phone:
           type: string
-          pattern: '^\+[1-9]\d{1,14}$'
+          description: شماره موبایل ایران؛ پیشوند ثابت +98 و دقیقاً ۱۰ رقم.
+          pattern: '^\+98\d{10}$'
         code:
           type: string
           description: کد ۶ رقمی یک‌بارمصرف.
@@ -536,11 +542,11 @@ components:
       properties:
         whatYouDo:
           type: string
-          description: کسب‌وکار سازمان دقیقاً چه می‌کند (۱-۲ جمله).
+          description: کسب‌وکار سازمان دقیقاً چه می‌کند (۱-۲ جمله). فاصله‌های ابتدا/انتهای حذف و سپس حداقل طول سنجیده می‌شود.
           minLength: 10
         productsServices:
           type: string
-          description: مهم‌ترین محصولات/خدمات سازمان.
+          description: مهم‌ترین محصولات/خدمات سازمان. فاصله‌های ابتدا/انتهای حذف و سپس حداقل طول سنجیده می‌شود.
           minLength: 10
 
     AIModelConfiguration:

@@ -109,3 +109,29 @@ def test_send_otp_cooldown_rate_limited(client, make_org, make_owner, sms_provid
     # Issuing again within the 60s cooldown must be rate-limited (429).
     second = client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
     assert second.status_code == 429
+
+
+def test_resend_voids_previous_code(client, make_org, make_owner, sms_provider, monkeypatch):
+    # Kill the cooldown so resend can issue immediately (void behavior is what
+    # we're exercising, not the rate limit).
+    import app.services.otp_service as otp_service
+
+    monkeypatch.setattr(otp_service, "_COOLDOWN_SECONDS", 0)
+
+    org = make_org()
+    make_owner(org, phone=PHONE)
+
+    first = client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
+    assert first.status_code == 200
+    first_code = sms_provider.sent[-1][1]
+
+    second = client.post("/api/v1/auth/resend-otp", json={"phone": PHONE})
+    assert second.status_code == 200
+    second_code = sms_provider.sent[-1][1]
+    assert second_code != first_code
+
+    # The voided first code must NOT verify anymore; the fresh code must.
+    old = client.post("/api/v1/auth/verify-otp", json={"phone": PHONE, "code": first_code})
+    assert old.status_code in (400, 410)
+    fresh = client.post("/api/v1/auth/verify-otp", json={"phone": PHONE, "code": second_code})
+    assert fresh.status_code == 200

@@ -73,7 +73,6 @@ def _reset_db(client: TestClient) -> Iterator[None]:
     *before* the first TRUNCATE of the run. Without that ordering the truncate
     would hit non-existent tables on the very first test.
     """
-    assert client is not None  # dependency trigger, nothing else to do with it
     # F-2 makes scoping cookie-based; clear the shared client jar so an earlier
     # test's `onboarding`/`session` cookies cannot leak into this one.
     client.cookies.clear()

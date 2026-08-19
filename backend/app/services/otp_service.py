@@ -184,6 +184,23 @@ async def verify_otp(session: AsyncSession, phone: str, code: str) -> OtpVerifyR
             raise RateLimitedError("too many failed attempts")
         raise ApiError("invalid verification code")
 
+    # Atomically claim the code (conditional UPDATE). Only ONE concurrent
+    # verify can flip used=False -> True, so the "used" replay race is closed
+    # even under parallel requests; the loser gets 410 instead of a double
+    # activation.
+    claimed = await session.execute(
+        update(OtpCode)
+        .where(
+            OtpCode.id == otp.id,
+            OtpCode.used.is_(False),
+            OtpCode.expires_at > now,
+        )
+        .values(used=True)
+        .returning(OtpCode.id)
+    )
+    if claimed.scalar_one_or_none() is None:
+        raise GoneError("otp expired or already used")
+
     owner = await session.get(Owner, otp.owner_id) if otp.owner_id else None
     if owner is None:
         owner = (
@@ -197,7 +214,6 @@ async def verify_otp(session: AsyncSession, phone: str, code: str) -> OtpVerifyR
     owner.status = "active"
     if organization is not None:
         organization.status = "active"
-    otp.used = True
     await session.commit()
 
     return OtpVerifyResponse(verified=True, userStatus="active", organizationStatus="active")

@@ -10,6 +10,7 @@ Semantic rules carried over from the user stories (US-001..US-003):
 - email optional but validated (format + global-unique enforced at DB/service).
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -24,6 +25,13 @@ from pydantic import (
 )
 
 _COMPANY_SIZE = Literal["lt_10", "10_to_49", "50_to_199", "200_to_499", "ge_500"]
+
+# Exact regex from the OpenAPI contract (OwnerCreate.password). The symbol class
+# is ASCII-only, so Persian letters can never count as a "symbol" (PO rule).
+_PASSWORD_PATTERN = re.compile(
+    r"^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)"
+    r"(?=.*[!@#$%^&*()_+\-=\[\]{};:'\"\\|,.<>/?~`]).{8,}$"
+)
 
 
 # ---------------------------------------------------------------- responses / shared
@@ -134,19 +142,14 @@ class OwnerCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def _password_strength(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("password must be at least 8 characters")
-        if not any(c.isupper() for c in v):
-            raise ValueError("password must contain an uppercase letter")
-        if not any(c.islower() for c in v):
-            raise ValueError("password must contain a lowercase letter")
-        if not any(c.isdigit() for c in v):
-            raise ValueError("password must contain a digit")
-        # PO decision: only Latin/ASCII symbols count; Persian letters are not symbols.
-        ascii_symbols = set("!@#$%^&*()_+-=[]{};:'\"\\|,.<>/?~`")
-        if not any(c in ascii_symbols for c in v):
-            raise ValueError("password must contain a Latin symbol such as !@#$%^&*")
-        return v
+            # Single source of truth = the contract regex (ASCII symbols only; a
+            # Persian letter never counts as a symbol — PO decision).
+            if not _PASSWORD_PATTERN.fullmatch(v):
+                raise ValueError(
+                    "password must be 8+ chars with an uppercase, a lowercase, a digit "
+                    "and a Latin symbol such as !@#$%^&*"
+                )
+            return v
 
     @model_validator(mode="after")
     def _passwords_match(self) -> "OwnerCreate":
@@ -171,7 +174,7 @@ class OtpSendRequest(BaseModel):
     # Contract E.164 `^\+[1-9]\d{1,14}$`; `[0-9]` keeps it ASCII-only so
     # Persian/Arabic digits are rejected (PO rule). Canonical +98 is enforced
     # in the service layer (400 for non-Iranian numbers).
-    phone: str = Field(pattern=r"^\+[1-9][0-9]{1,14}$")
+    phone: str = Field(pattern=r"^\+98\d{10}$", description="+98 + 10 digits (Iran mobile)")
 
 
 class OtpSendResponse(BaseModel):
@@ -185,7 +188,7 @@ class OtpSendResponse(BaseModel):
 class OtpVerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    phone: str = Field(pattern=r"^\+[1-9][0-9]{1,14}$")
+    phone: str = Field(pattern=r"^\+98\d{10}$", description="+98 + 10 digits (Iran mobile)")
     code: str = Field(pattern=r"^[0-9]{6}$", description="6-digit one-time code")
 
 
