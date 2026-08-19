@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
-import { api, ApiError } from "../api";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { api, ApiError, describeError } from "../api";
 import Stepper from "../Stepper";
 
 const FA = "۰۱۲۳۴۵۶۷۸۹";
-const toFa = (s: string) => String(s).replace(/\d/g, (d) => FA[+d]);
+const toFa = (s: string | number) => String(s).replace(/\d/g, (d) => FA[+d]);
 
 // Show the canonical "+98XXXXXXXXXX" as Persian-grouped digits: "+۹۸ ۹۱۲ ۳۴۵ ۶۷۸۹".
 function phoneFa(phone: string): string {
@@ -14,6 +14,11 @@ function phoneFa(phone: string): string {
   return "+" + toFa("98") + " " + toFa(g);
 }
 
+// "MM:SS" rendered with Persian digits.
+function mmss(total: number): string {
+  return toFa(String(Math.floor(total / 60)).padStart(2, "0")) + ":" + toFa(String(total % 60).padStart(2, "0"));
+}
+
 interface Props {
   phone: string;
   onDone: () => void;
@@ -22,40 +27,64 @@ interface Props {
 
 export default function OtpVerify({ phone, onDone, onBack }: Props) {
   const [digits, setDigits] = useState<string[]>(Array(6).fill(""));
-  const [countdown, setCountdown] = useState(0);
+  const [expiresIn, setExpiresIn] = useState(0); // OTP lifetime countdown
+  const [resendIn, setResendIn] = useState(0); // independent resend cooldown
   const [sending, setSending] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState("");
   const [codeErr, setCodeErr] = useState(false);
   const refs = useRef<(HTMLInputElement | null)[]>([]);
   const didInit = useRef(false);
+  const mounted = useRef(true);
 
-  async function send() {
+  const send = useCallback(async (kind: "send" | "resend" = "send") => {
+    if (!mounted.current) return;
     setError("");
     setSending(true);
     try {
-      const r = await api.sendOtp({ phone });
-      setCountdown(r.expiresInSeconds);
+      const r =
+        kind === "resend" ? await api.resendOtp({ phone }) : await api.sendOtp({ phone });
+      if (!mounted.current) return;
+      setExpiresIn(r.expiresInSeconds);
+      setResendIn(r.resendAfterSeconds);
       setDigits(Array(6).fill(""));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 429) setError("برای ارسال مجدد کمی صبر کنید.");
-      else setError((e as Error).message || "خطا در ارسال کد");
+      if (!mounted.current) return;
+      if (e instanceof ApiError && e.status === 429) {
+        // Carry the server's resend cooldown forward.
+        const rs = (e.details as { resendAfterSeconds?: number } | undefined)?.resendAfterSeconds;
+        if (typeof rs === "number" && rs > 0) setResendIn(rs);
+        setError("درخواست‌ها زیاد شده است؛ کمی صبر کنید و دوباره تلاش کنید.");
+      } else {
+        setError(describeError(e, "خطا در ارسال کد"));
+      }
     } finally {
-      setSending(false);
+      if (mounted.current) setSending(false);
     }
-  }
+  }, [phone]);
 
-  // Send the first OTP on mount. The didInit ref guards against React 18 StrictMode
+  // Unmount guard: stop all setState once the component goes away.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Send the first OTP on mount. The didInit ref guards against React StrictMode
   // double-invoking effects in dev (which would otherwise fire send-otp twice -> 429).
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    send();
-  }, []);
+    void send();
+  }, [send]);
 
-  // Single countdown clock; decrements to 0 and clamps there.
+  // Two independent countdowns: OTP expiry and resend cooldown.
   useEffect(() => {
-    const id = setInterval(() => setCountdown((c) => (c > 0 ? c - 1 : 0)), 1000);
+    const id = setInterval(() => {
+      setExpiresIn((c) => (c > 0 ? c - 1 : 0));
+      setResendIn((c) => (c > 0 ? c - 1 : 0));
+    }, 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -82,7 +111,9 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
     const lat = txt.replace(/[۰-۹]/g, (d) => String(FA.indexOf(d))).replace(/\D/g, "").slice(0, 6);
     if (!lat) return;
     const nd = Array(6).fill("");
-    lat.split("").forEach((c, idx) => { nd[idx] = c; });
+    lat.split("").forEach((c, idx) => {
+      nd[idx] = c;
+    });
     setDigits(nd);
     refs.current[Math.min(lat.length, 5)]?.focus();
   }
@@ -90,40 +121,30 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
   const filled = digits.every((d) => d !== "");
 
   async function verify() {
-    if (!filled || verifying) return;
+    const code = digits.join("");
+    if (code.length !== 6 || verifying) return;
     setVerifying(true);
     setError("");
     setCodeErr(false);
     try {
-      const r = await api.verifyOtp({ phone, code: digits.join("") });
+      const r = await api.verifyOtp({ phone, code });
+      if (!mounted.current) return;
       if (r.verified && r.userStatus === "active") onDone();
       else setError("تأیید انجام نشد.");
     } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 400) {
-          setError("کد واردشده درست نیست.");
-          setCodeErr(true);
-          setDigits(Array(6).fill(""));
-          refs.current[0]?.focus();
-        } else if (e.status === 410) {
-          setError("کد منقضی شده است. روی «ارسال مجدد» بزنید تا کد تازه دریافت کنید.");
-        } else if (e.status === 429) {
-          setError("ورود کد به‌طور موقت قفل شد. کمی بعد دوباره تلاش کنید.");
-        } else {
-          setError(e.message || "خطا در تأیید کد");
-        }
+      if (!mounted.current) return;
+      if (e instanceof ApiError && e.status === 400) {
+        setError("کد واردشده درست نیست.");
+        setCodeErr(true);
+        setDigits(Array(6).fill(""));
+        refs.current[0]?.focus();
       } else {
-        setError((e as Error).message || "خطا در تأیید کد");
+        setError(describeError(e, "خطا در تأیید کد"));
       }
     } finally {
-      setVerifying(false);
+      if (mounted.current) setVerifying(false);
     }
   }
-
-  const timerLabel =
-    toFa(String(Math.floor(countdown / 60)).padStart(2, "0")) +
-    ":" +
-    toFa(String(countdown % 60).padStart(2, "0"));
 
   return (
     <div style={{ maxWidth: 620, margin: "0 auto", padding: "40px 0" }}>
@@ -136,11 +157,13 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
           <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={onBack} type="button">ویرایش</button>
         </div>
 
-        <div className="otp" onPaste={onPaste}>
+        <div className="otp" role="group" aria-label="کد تأیید ۶ رقمی" onPaste={onPaste}>
           {digits.map((d, i) => (
             <input
               key={i}
-              ref={(el) => { refs.current[i] = el; }}
+              ref={(el) => {
+                refs.current[i] = el;
+              }}
               value={d ? toFa(d) : ""}
               onChange={(e) => setDig(i, e.target.value.slice(-1))}
               onKeyDown={(e) => onKeyDown(i, e)}
@@ -153,16 +176,24 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
         </div>
 
         <div className="timer">
-          {countdown > 0 ? (
-            <>
-              <span>کد تا</span>
-              <span className="count">{timerLabel}</span>
-              <span>معتبر است.</span>
-            </>
+          {expiresIn > 0 ? (
+            <span>
+              کد تا <span className="count">{mmss(expiresIn)}</span> معتبر است.
+            </span>
           ) : (
-            <button className="btn-ghost" onClick={send} disabled={sending} type="button">
-              {sending ? "در حال ارسال…" : "ارسال مجدد کد"}
+            <span>کد منقضی شده است.</span>
+          )}
+        </div>
+
+        <div className="timer">
+          {sending ? (
+            <button className="btn-ghost" type="button" disabled>در حال ارسال…</button>
+          ) : resendIn > 0 ? (
+            <button className="btn-ghost" type="button" disabled>
+              ارسال مجدد تا {mmss(resendIn)}
             </button>
+          ) : (
+            <button className="btn-ghost" type="button" onClick={() => void send("resend")}>ارسال مجدد کد</button>
           )}
         </div>
 

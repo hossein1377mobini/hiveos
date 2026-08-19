@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, describeError } from "../api";
 import type { DocumentItem, IngestionCounts } from "../api";
 import Stepper from "../Stepper";
 
@@ -41,10 +41,14 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
     let active = true;
     async function load() {
       try {
-        const d = await api.listDocuments();
-        if (active) setDocs(d);
+        // Poll the status (counts) together with the document list on the same
+        // interval so the chips and the table stay in sync.
+        const [d, s] = await Promise.all([api.listDocuments(), api.getIngestionStatus()]);
+        if (!active) return;
+        setDocs(d);
+        if (s.counts) setCounts(s.counts);
       } catch {
-        /* keep last known list on transient failure */
+        /* keep last known list + counts on transient failure */
       }
     }
     load();
@@ -70,13 +74,10 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
       setCounts(r.counts);
       setConfigured(true);
     } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.status === 400) setError("مسیر نادرست");
-        else if (err.status === 403) setError("خارج از محدوده مجاز");
-        else if (err.status === 409) setError("سازمان فعال نیست");
-        else setError(err.message || "خطا در فعال‌سازی پوشه اسناد");
+      if (err instanceof ApiError && err.status === 400) {
+        setError("مسیر واردشده نادرست است.");
       } else {
-        setError((err as Error).message || "خطا در فعال‌سازی پوشه اسناد");
+        setError(describeError(err, "خطا در فعال‌سازی پوشه اسناد", "سازمان فعال نیست."));
       }
     } finally {
       setBusy(false);
@@ -95,8 +96,9 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
           </p>
           <form onSubmit={submit}>
             <div className="field">
-              <label>مسیر پوشه <span style={{ color: "var(--err)" }}>*</span></label>
+              <label htmlFor="folder-path">مسیر پوشه <span style={{ color: "var(--err)" }}>*</span></label>
               <input
+                id="folder-path"
                 className="monospace"
                 type="text"
                 dir="ltr"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, describeError } from "../api";
 import type { DocumentItem } from "../api";
 import Stepper from "../Stepper";
 
@@ -37,33 +37,38 @@ export default function Done({ orgName, documents, onJump }: Props) {
   const [error, setError] = useState("");
   const didInit = useRef(false);
 
-  async function run() {
-    setLoading(true);
-    setError("");
-    try {
-      const status = await api.getOnboardingStatus();
-      if (status.missingSteps && status.missingSteps.length > 0) {
-        setMissing(status.missingSteps);
-        return;
-      }
-      const r = await api.completeOnboarding();
-      if (r.onboardingStatus === "completed") setCompleted(true);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        const d = e.details as { missingSteps?: string[] } | undefined;
-        setMissing(d?.missingSteps ?? []);
-      } else {
-        setError((e as Error).message || "خطا در تکمیل راه‌اندازی");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    run();
+    let active = true;
+    (async () => {
+      try {
+        const status = await api.getOnboardingStatus();
+        if (!active) return;
+        if (status.missingSteps && status.missingSteps.length > 0) {
+          setMissing(status.missingSteps);
+          return;
+        }
+        const r = await api.completeOnboarding();
+        if (!active) return;
+        if (r.onboardingStatus === "completed") setCompleted(true);
+        else setError("راه‌اندازی هنوز کامل نشده است. کمی بعد دوباره تلاش کنید.");
+      } catch (e) {
+        if (!active) return;
+        if (e instanceof ApiError && e.status === 409) {
+          const d = e.details as { missingSteps?: string[] } | undefined;
+          if (d?.missingSteps && d.missingSteps.length > 0) setMissing(d.missingSteps);
+          else setError(describeError(e, "خطا در تکمیل راه‌اندازی", "مراحلی از راه‌اندازی ناتمام مانده است."));
+        } else {
+          setError(describeError(e, "خطا در تکمیل راه‌اندازی"));
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const readyDocs = documents?.filter((d) => d.status === "ready").length ?? 0;
@@ -124,7 +129,10 @@ export default function Done({ orgName, documents, onJump }: Props) {
               ))}
             </div>
 
-            <button className="btn-primary" style={{ width: "100%" }}>شروع گفتگو با هوش سازمان</button>
+            <button className="btn-primary" disabled style={{ width: "100%" }}>شروع گفتگو با هوش سازمان</button>
+            <p style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", marginTop: 8 }}>
+              راه‌اندازی گفتگو در فاز بعد
+            </p>
 
             <div className="quickstart">
               <h3>
@@ -163,7 +171,12 @@ export default function Done({ orgName, documents, onJump }: Props) {
               ))}
             </div>
           </>
-        ) : null}
+        ) : (
+          <div className="loading-head">
+            <span className="spinner" />
+            <span style={{ fontSize: 13, color: "var(--muted)" }}>در حال تکمیل راه‌اندازی…</span>
+          </div>
+        )}
       </div>
     </div>
   );

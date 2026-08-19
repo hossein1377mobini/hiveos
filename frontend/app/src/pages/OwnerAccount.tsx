@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { api, ApiError } from "../api";
+import { api, describeError } from "../api";
 import Stepper from "../Stepper";
 
 // Contract (docs/openapi.yaml): phone ^\+98\d{10}$; password >=8 with upper, lower,
 // digit and an ASCII symbol (Persian symbols REJECTED); confirmPassword === password.
-const ASCII_SYMBOL_RE = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/;
+const ASCII_SYMBOL_RE = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/;
 const FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
 
 // Accepts Persian + Latin digits, strips everything else, forces the +98 prefix,
@@ -28,10 +28,11 @@ function formatPhone(canonical: string): string {
 interface Props {
   onDone: (r: { userId: string; phone: string }) => void;
   onBack: () => void;
+  initialPhone?: string;
 }
 
-export default function OwnerAccount({ onDone, onBack }: Props) {
-  const [phone, setPhone] = useState("+98");
+export default function OwnerAccount({ onDone, onBack, initialPhone }: Props) {
+  const [phone, setPhone] = useState(initialPhone ?? "+98");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -68,8 +69,7 @@ export default function OwnerAccount({ onDone, onBack }: Props) {
       const res = await api.createOwner({ phone, password, confirmPassword: confirm });
       onDone({ userId: res.userId, phone });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) setApiError("این شماره پیش‌تر ثبت شده است.");
-      else setApiError((err as Error).message || "خطا در ایجاد حساب مدیر");
+      setApiError(describeError(err, "خطا در ایجاد حساب مدیر", "این شماره پیش‌تر ثبت شده است."));
     } finally {
       setBusy(false);
     }
@@ -83,8 +83,9 @@ export default function OwnerAccount({ onDone, onBack }: Props) {
 
         <form onSubmit={submit}>
           <div className={`field ${fieldErrs.phone ? "invalid" : ""}`}>
-            <label>شماره موبایل <span style={{ color: "var(--err)" }}>*</span></label>
+            <label htmlFor="owner-phone">شماره موبایل <span style={{ color: "var(--err)" }}>*</span></label>
             <input
+              id="owner-phone"
               className="monospace"
               type="tel"
               inputMode="numeric"
@@ -101,9 +102,10 @@ export default function OwnerAccount({ onDone, onBack }: Props) {
           </div>
 
           <div className="field">
-            <label>رمز عبور <span style={{ color: "var(--err)" }}>*</span></label>
+            <label htmlFor="owner-password">رمز عبور <span style={{ color: "var(--err)" }}>*</span></label>
             <div className="pw-wrap">
               <input
+                id="owner-password"
                 type={showPwd ? "text" : "password"}
                 value={password}
                 onChange={(e) => {
@@ -131,8 +133,9 @@ export default function OwnerAccount({ onDone, onBack }: Props) {
           </div>
 
           <div className={`field ${fieldErrs.confirm ? "invalid" : ""}`}>
-            <label>تکرار رمز عبور <span style={{ color: "var(--err)" }}>*</span></label>
+            <label htmlFor="owner-confirm">تکرار رمز عبور <span style={{ color: "var(--err)" }}>*</span></label>
             <input
+              id="owner-confirm"
               type={showPwd ? "text" : "password"}
               value={confirm}
               onChange={(e) => {

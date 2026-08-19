@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, describeError } from "../api";
 import type { OrganizationCreate, Organization } from "../api";
 import Stepper from "../Stepper";
 
@@ -39,7 +39,7 @@ export default function RegisterOrganization({ onDone }: { onDone: (org: Organiz
       const org = await api.createOrganization(form);
       onDone(org);
     } catch (e) {
-      setError((e as Error).message || "خطا در ساخت سازمان");
+      setError(describeError(e, "خطا در ساخت سازمان"));
     } finally {
       setBusy(false);
     }

@@ -1,16 +1,30 @@
 // Typed API client for the HiveOS onboarding backend (v1).
 // Same-origin calls go through the Vite dev-server proxy (/api -> :8100) so the
-// onb...ding/session cookies set by US-001/US-002 are stored on the SPA origin
+// onboarding/session cookies set by US-001/US-002 are stored on the SPA origin
 // and sent automatically (HttpOnly cookies still flow over the proxy).
 
 const BASE = "/api/v1";
 
+// --- Envelope + error types -------------------------------------------------
+
+// Consistent, typed error envelope surfaced to the UI. `code` is a stable
+// machine identifier; `message` is the server's human-readable text and is
+// NEVER rendered directly to users (always mapped through describeError).
+export interface ApiErrorBody {
+  status: number;
+  code: string;
+  message: string;
+}
+
 export class ApiError extends Error {
   status: number;
+  code: string;
   details?: unknown;
-  constructor(status: number, message: string, details?: unknown) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
+    this.name = "ApiError";
     this.status = status;
+    this.code = code;
     this.details = details;
   }
 }
@@ -20,7 +34,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     method,
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: "same-origin", // always carry onb...ding/session cookies
+    credentials: "same-origin", // always carry onboarding/session cookies
   });
   if (res.status === 204) return undefined as T;
   const text = await res.text();
@@ -31,11 +45,42 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     /* non-JSON body */
   }
   if (!res.ok) {
-    const msg = (json as { message?: string } | null)?.message ?? `${method} ${path} failed (${res.status})`;
-    throw new ApiError(res.status, msg, json ?? undefined);
+    const body = (json as Partial<ApiErrorBody> | null) ?? {};
+    const message = body.message ?? `${method} ${path} failed (${res.status})`;
+    throw new ApiError(res.status, body.code ?? "unknown", message, json ?? undefined);
   }
   return json as T;
 }
+
+// --- Curated Persian error mapping ------------------------------------------
+// Central place that maps every HTTP/network failure to a known, curated
+// Persian message. Raw server messages (e.message / response bytes) are never
+// surfaced to the user. `generic` is the page-specific fallback for unknown
+// statuses and non-API errors; `conflict` overrides the 409 message per page.
+
+export function describeError(e: unknown, generic: string, conflict?: string): string {
+  if (!(e instanceof ApiError)) return generic;
+  switch (e.status) {
+    case 401:
+      return "نشست شما منقضی شده است. برای ادامه دوباره وارد شوید.";
+    case 403:
+    case 404:
+      return "این محتوا در دسترس نیست.";
+    case 409:
+      return conflict ?? "داده‌های واردشده با وضعیت فعلی تعارض دارد.";
+    case 410:
+      return "کد منقضی شده است. کد تازه دریافت کنید.";
+    case 429:
+      return "درخواست‌ها زیاد شده است؛ کمی صبر کنید و دوباره تلاش کنید.";
+    default:
+      return generic;
+  }
+}
+
+// --- Domain types -----------------------------------------------------------
+
+export type OnboardingStatus = "pending" | "in_progress" | "completed";
+export type DocumentStatus = "detected" | "processing" | "ready" | "failed";
 
 export interface OrganizationCreate {
   displayName: string;
@@ -105,15 +150,15 @@ export interface DocumentItem {
   id: string;
   filename: string;
   format: string;
-  status: string;
+  status: DocumentStatus;
   error?: string;
 }
 export interface OnboardingStatusResult {
-  onboardingStatus: string;
+  onboardingStatus: OnboardingStatus;
   missingSteps?: string[];
 }
 export interface CompleteOnboardingResult {
-  onboardingStatus: string;
+  onboardingStatus: OnboardingStatus;
   next?: string;
 }
 
@@ -121,6 +166,7 @@ export const api = {
   createOrganization: (p: OrganizationCreate) => request<Organization>("POST", "/organizations", p),
   createOwner: (p: OwnerCreate) => request<{ userId: string; organizationId: string; status: string; sessionIssued: boolean }>("POST", "/users/owner", p),
   sendOtp: (p: OtpSendRequest) => request<{ status: string; resendAfterSeconds: number; expiresInSeconds: number }>("POST", "/auth/send-otp", p),
+  resendOtp: (p: OtpSendRequest) => request<{ status: string; resendAfterSeconds: number; expiresInSeconds: number }>("POST", "/auth/resend-otp", p),
   verifyOtp: (p: OtpVerifyRequest) => request<{ verified: boolean; userStatus: string; organizationStatus: string }>("POST", "/auth/verify-otp", p),
   initializeWorkspace: () => request<WorkspaceInitResult>("POST", "/workspaces/initialize"),
   initializeBrain: () => request<BrainInitResult>("POST", "/brain/initialize"),

@@ -1,6 +1,15 @@
-@import url("https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap");
-
 /* HiveOS SPA theme — flat, RTL, Persian (Vazirmatn), following the approved mockups. */
+
+/* Self-hosted Vazirmatn (variable font, wght 100–900) — no Google Fonts CDN.
+   Registers the same family name and covers every weight used by the theme
+   so the visual result is pixel-identical to the previous @import. */
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("./assets/fonts/Vazirmatn.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   --bg: #f6f7fb;
   --surface: #ffffff;
@@ -66,7 +75,8 @@ button {
 .btn-primary:hover:not(:disabled) { background: var(--brand-strong); }
 .btn-primary:disabled { opacity: .55; cursor: not-allowed; }
 .btn-ghost { background: var(--brand-weak); color: var(--brand); }
-.btn-ghost:hover { background: #e3e6ff; }
+.btn-ghost:hover:not(:disabled) { background: #e3e6ff; }
+.btn-ghost:disabled { opacity: .55; cursor: not-allowed; }
 .alerts { margin-bottom: 16px; }
 .alert { border-radius: 10px; padding: 12px 14px; font-size: 13.5px; margin-bottom: 8px; }
 .alert.error { background: var(--err-weak); color: var(--err); }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../api";
+import { api, describeError } from "../api";
 import type { BrainInitResult } from "../api";
 import Stepper from "../Stepper";
 
@@ -29,29 +29,23 @@ export default function InitializeBrain({ onDone, onBack }: Props) {
   const [error, setError] = useState("");
   const didInit = useRef(false);
 
-  async function init() {
-    setLoading(true);
-    setError("");
-    try {
-      const r = await api.initializeBrain();
-      setResult(r);
-    } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 401) setError("نشست شما منقضی شده است. برای ادامه دوباره وارد شوید.");
-        else if (e.status === 409) setError("فضای کار هنوز آماده نیست.");
-        else setError(e.message || "خطا در راه‌اندازی هوش سازمان");
-      } else {
-        setError((e as Error).message || "خطا در راه‌اندازی هوش سازمان");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    init();
+    let active = true;
+    (async () => {
+      try {
+        const r = await api.initializeBrain();
+        if (active) setResult(r);
+      } catch (e) {
+        if (active) setError(describeError(e, "خطا در راه‌اندازی هوش سازمان", "فضای کار هنوز آماده نیست."));
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   return (
