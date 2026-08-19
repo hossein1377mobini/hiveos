@@ -184,6 +184,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/WorkspaceInitialized' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: تعارض (سازمان فعال نیست / Workspace آماده نیست / وضعیت ناسازگار)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '500':
           description: راه‌اندازی ناموفق (audit-logged) — retry مجاز
           content:
@@ -206,6 +211,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BrainInitialized' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: تعارض (سازمان فعال نیست / Workspace آماده نیست / وضعیت ناسازگار)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '500':
           description: راه‌اندازی ناموفق — retry مجاز
           content:

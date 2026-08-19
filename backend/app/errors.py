@@ -56,6 +56,15 @@ class RateLimitedError(ApiError):
     error_code = "rate_limited"
 
 
+class InternalError(ApiError):
+    # 500 for unexpected server-side failures. The US-004/US-005 failure paths
+    # write a ``*.initialization.failed`` AuditLog row before raising this, so
+    # auditLogged=True is honest (retry by the caller is permitted).
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+    error_code = "internal_error"
+    audit_logged = True
+
+
 class GatewayUnavailableError(ApiError):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     error_code = "gateway_unavailable"

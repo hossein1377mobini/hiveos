@@ -158,6 +158,42 @@ class OwnerCreate(BaseModel):
         return self
 
 
+
+# ---------------------------------------------------------------- US-004 / US-005
+class WorkspaceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: str
+    timeZone: str
+    dateFormat: str
+    numberFormat: str
+    defaultLocale: str
+
+
+class WorkspaceInitialized(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspaceId: UUID
+    status: Literal["ready", "failed"]
+    settings: WorkspaceSettings
+
+
+class BrainRagConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    embeddingProvider: str
+    defaultLanguage: str
+
+
+class BrainInitialized(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brainId: UUID
+    knowledgeRepositoryId: UUID
+    vectorIndexId: UUID
+    status: Literal["ready", "failed"]
+    rag: BrainRagConfig
+
 class OwnerCreated(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

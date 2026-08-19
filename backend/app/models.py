@@ -12,6 +12,7 @@ returned by the API (writeOnly per contract) and never logged.
 import uuid
 from datetime import UTC, datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -212,4 +213,108 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(64))  # e.g. "organization.created"
     actor_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class OrganizationBrain(Base):
+    """US-005 baseline Brain (v0.1). Exactly one per Organization (FR-001/FR-002).
+
+    The v0.1 baseline is *only* the simple RAG substrate — an empty Knowledge
+    Repository, a Vector Index, and basic retrieval config — not the full
+    ``Unified Organizational Brain`` (v1.0). ``embedding_provider`` is inherited
+    from ``Organization.ai_provider`` (FR-005: the US-001 AI model config), never
+    chosen independently; ``default_language`` inherits from Workspace settings.
+    """
+
+    __tablename__ = "organization_brains"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_brains_one_per_org"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|ready|failed
+    embedding_provider: Mapped[str] = mapped_column(String(64))
+    default_language: Mapped[str] = mapped_column(String(10))
+    retrieval_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class KnowledgeRepository(Base):
+    """US-005 empty knowledge repository, ready for the first document (US-007)."""
+
+    __tablename__ = "knowledge_repositories"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    brain_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organization_brains.id", ondelete="CASCADE"), index=True
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(16), default="empty")  # empty|ready
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class VectorIndex(Base):
+    """US-005 pgvector-backed index over the knowledge repository (dim=1024)."""
+
+    __tablename__ = "vector_indexes"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    brain_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organization_brains.id", ondelete="CASCADE"), index=True
+    )
+    knowledge_repository_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("knowledge_repositories.id", ondelete="CASCADE"),
+        index=True,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64))
+    dimensions: Mapped[int] = mapped_column(Integer, default=1024)
+    status: Mapped[str] = mapped_column(String(16), default="ready")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DocumentChunk(Base):
+    """US-005 real pgvector storage — the physical ``vector`` column.
+
+    This is what "vector storage initialized" means at the storage layer: the
+    1024-dim embedding column US-007 ingestion writes into. Scoped by tenant +
+    organization (FR isolation) and linked to the owning brain.
+    """
+
+    __tablename__ = "document_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    brain_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organization_brains.id", ondelete="CASCADE"), index=True
+    )
+    source_document_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(Vector(1024))
+    chunk_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
