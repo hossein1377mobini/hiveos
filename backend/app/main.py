@@ -16,7 +16,9 @@ from app.services import folder_watcher, ingestion_worker
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    if settings.create_tables_on_startup:
+    # MVP: auto-create schema ONLY in dev/test. Non-dev environments are brought
+    # up via `alembic upgrade head` (ADR-021 §2).
+    if settings.create_tables_on_startup and settings.env in ("dev", "test"):
         await init_models()
     # FR-009 (US-007): resume folder watchers + start the ingest job worker on
     # boot so docs added while the server was down are re-detected and processed.

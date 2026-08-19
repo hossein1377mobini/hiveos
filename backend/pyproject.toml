@@ -48,3 +48,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Enforced coverage floor (standards §testing + ADR-021 decision 9)
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=85"
