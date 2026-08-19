@@ -26,6 +26,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import get_settings
@@ -123,7 +124,13 @@ async def _enqueue_detected(org_id: uuid.UUID, file_path: str) -> None:
                         status="pending",
                     )
                 )
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                # Concurrent scan documented this file first (UNIQUE org+filename):
+                # treat as already-settled rather than surfacing a 500.
+                await session.rollback()
+                return
     finally:
         await engine.dispose()
 
@@ -192,8 +199,16 @@ def start_watcher(org_id: uuid.UUID, folder_path: str, on_detected=None) -> bool
     Idempotent: returns True only when a new watcher thread is actually started.
     """
     with _REGISTRY_LOCK:
-        if org_id in PER_ORG_WATCHERS:
-            return False
+        existing = PER_ORG_WATCHERS.get(org_id)
+        if existing is not None:
+            # Reconfigure/restart: if the folder path changed, or the watcher
+            # thread died, stop/evict it so a fresh watcher is started.
+            if existing.folder_path != folder_path or not existing.is_alive():
+                existing.stop()
+                existing.join(timeout=1.0)
+                PER_ORG_WATCHERS.pop(org_id, None)
+            else:
+                return False  # already watching this path
         callback = on_detected or _enqueue_detected
         watcher = FolderWatcher(org_id, folder_path, callback)
         PER_ORG_WATCHERS[org_id] = watcher
@@ -206,6 +221,7 @@ def stop_watcher(org_id: uuid.UUID) -> None:
         watcher = PER_ORG_WATCHERS.pop(org_id, None)
     if watcher is not None:
         watcher.stop()
+        watcher.join(timeout=1.0)
 
 
 async def start_all_persisted_watchers() -> int:

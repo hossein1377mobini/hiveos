@@ -17,6 +17,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -199,7 +200,9 @@ class OtpCode(Base):
     )
     code_hash: Mapped[str] = mapped_column(String(64))  # SHA-256 hex digest
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    attempts: Mapped[int] = mapped_column(
+        Integer, CheckConstraint("attempts >= 0", name="ck_processing_jobs_attempts"), default=0
+    )
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -375,9 +378,19 @@ class Document(Base):
         nullable=True,
     )
     filename: Mapped[str] = mapped_column(String(255))
-    format: Mapped[str] = mapped_column(String(8))  # pdf|docx|txt|md
+    format: Mapped[str] = mapped_column(
+        String(8),
+        CheckConstraint("format IN ('pdf','docx','txt','md')", name="ck_documents_format"),
+    )  # pdf|docx|txt|md
     size_bytes: Mapped[int] = mapped_column(BigInteger)
-    status: Mapped[str] = mapped_column(String(16), default="detected", index=True)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        CheckConstraint(
+            "status IN ('detected','processing','ready','failed')",
+            name="ck_documents_status",
+        ),
+        default="detected", index=True,
+    )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -406,9 +419,21 @@ class ProcessingJob(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), index=True
     )
-    job_type: Mapped[str] = mapped_column(String(32))
-    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
-    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    job_type: Mapped[str] = mapped_column(
+        String(32),
+        CheckConstraint("job_type IN ('ingest')", name="ck_processing_jobs_type"),
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        CheckConstraint(
+            "status IN ('pending','running','succeeded','failed')",
+            name="ck_processing_jobs_status",
+        ),
+        default="pending", index=True,
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, CheckConstraint("attempts >= 0", name="ck_processing_jobs_attempts"), default=0
+    )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(

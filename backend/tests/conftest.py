@@ -21,7 +21,8 @@ from app.config import get_settings
 from app.main import create_app
 
 _TRUNCATE_SQL = (
-    "TRUNCATE TABLE document_chunks, vector_indexes, knowledge_repositories, "
+    "TRUNCATE TABLE processing_jobs, documents, ingestion_folder_configs, "
+    "document_chunks, vector_indexes, knowledge_repositories, "
     "organization_brains, audit_logs, otp_codes, sessions, owners, workspaces, "
     "organizations, tenants RESTART IDENTITY CASCADE"
 )
