@@ -40,6 +40,7 @@ inside it and ``commit()`` explicitly — never a nested ``session.begin()``.
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -172,21 +173,14 @@ async def complete_onboarding(
 ) -> OnboardingCompleted | OnboardingIncomplete:
     """Mark onboarding complete when every mandatory step is satisfied.
 
-    Returns ``OnboardingIncomplete`` (409) when any step is missing, carrying a
-    cleaner body for the client. Returns ``OnboardingCompleted`` (200, with
-    ``next="hive-mind-chat"``) once all steps are satisfied.
+    Once-per-org: if an ``OrganizationOnboarding`` row already exists (a prior
+    run, or a concurrent one that won the UNIQUE race), return ``completed``
+    regardless of how the underlying steps look afterwards — re-entry never
+    un-completes onboarding.
 
-    Idempotent: if the org already has an ``OrganizationOnboarding`` row (a
-    prior successful run, or a concurrent one that won the UNIQUE race), the
-    existing ``completed`` state is returned without a second audit entry —
-    completion is once per org.
+    Returns ``OnboardingIncomplete`` (409) when any step is missing. Writes the
+    ``onboarding.completed`` audit exactly once.
     """
-    status, missing = await compute_onboarding_status(session, org)
-    if missing:
-        return OnboardingIncomplete(
-            onboardingStatus="in_progress", missingSteps=missing
-        )
-
     existing = (
         await session.execute(
             select(OrganizationOnboarding).where(
@@ -196,6 +190,35 @@ async def complete_onboarding(
     ).scalar_one_or_none()
     if existing is not None:
         return OnboardingCompleted()
+
+    status, missing = await compute_onboarding_status(session, org)
+    if missing:
+        return OnboardingIncomplete(onboardingStatus="in_progress", missingSteps=missing)
+
+    now = datetime.now(UTC)
+
+    session.add(
+        OrganizationOnboarding(
+            tenant_id=org.tenant_id,
+            organization_id=org.id,
+            completed_at=now,
+        )
+    )
+    session.add(
+        AuditLog(
+            tenant_id=org.tenant_id,
+            action="onboarding.completed",
+            actor_ref=None,
+            payload={"organization_id": str(org.id)},
+        )
+    )
+    try:
+        await session.commit()
+    except IntegrityError:
+        # a concurrent request won the once-per-org race — audit-once, idempotent.
+        await session.rollback()
+        return OnboardingCompleted()
+    return OnboardingCompleted()
 
     now = datetime.now(UTC)
 

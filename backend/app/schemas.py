@@ -21,6 +21,7 @@ from pydantic import (
     EmailStr,
     Field,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -301,6 +302,13 @@ class OnboardingStatus(BaseModel):
 
     onboardingStatus: Literal["pending", "in_progress", "completed"]
     missingSteps: list[OnboardingStep] | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_null_missing(self, handler):
+        d = handler(self)
+        if d.get("missingSteps") is None:
+            d.pop("missingSteps")
+        return d
 
 
 # ----- wave-4 (US-008) Onboarding -----
