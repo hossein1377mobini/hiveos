@@ -219,24 +219,3 @@ async def complete_onboarding(
         await session.rollback()
         return OnboardingCompleted()
     return OnboardingCompleted()
-
-    now = datetime.now(UTC)
-
-    session.add(
-        OrganizationOnboarding(
-            tenant_id=org.tenant_id,
-            organization_id=org.id,
-            completed_at=now,
-        )
-    )
-    session.add(
-        AuditLog(
-            tenant_id=org.tenant_id,
-            action="onboarding.completed",
-            actor_ref=None,
-            payload={"organization_id": str(org.id)},
-        )
-    )
-    await session.commit()
-
-    return OnboardingCompleted()

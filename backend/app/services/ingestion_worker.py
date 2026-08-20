@@ -71,7 +71,9 @@ async def _process_one(job_id: UUID, settings, engine) -> None:
                     "organization brain not initialized — run US-005 before ingestion"
                 )
 
-            file_path = os.path.join(cfg.folder_path, os.path.basename(doc.filename))
+            # ``doc.filename`` stores the folder-root-relative path (S1-03), so join
+            # it directly; basename() would flatten subfolders and break them.
+            file_path = os.path.join(cfg.folder_path, doc.filename)
             text = ingestion_pipeline.read_document_text(file_path, doc.format)
             chunk_cfg = ingestion_pipeline.default_chunk_config()
             chunks = ingestion_pipeline.chunk_text(

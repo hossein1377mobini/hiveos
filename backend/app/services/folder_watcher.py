@@ -42,12 +42,17 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-async def _enqueue_detected(org_id: uuid.UUID, file_path: str) -> None:
+async def _enqueue_detected(org_id: uuid.UUID, rel_path: str, full_path: str) -> None:
     """Default on_detected callback: create a Document + pending ProcessingJob.
 
     Idempotent: skips files already represented by a Document row (the explicit
     existence check mirrors the UNIQUE ``(org, filename)`` constraint and makes the
     restart/resume initial scan safe).
+
+    ``rel_path`` (folder-root-relative, forward-slash normalised) is stored as the
+    Document's ``filename`` so subfolder files keep their path and same-named files
+    in different subfolders no longer collide (S1-03). ``full_path`` is the absolute
+    on-disk path, used only for the size/oversize check.
 
     Format/size validation is minimal here by design: the watcher already filtered
     the file to an allowed extension, so ``format`` is known. Oversized files are
@@ -57,14 +62,14 @@ async def _enqueue_detected(org_id: uuid.UUID, file_path: str) -> None:
     from app.models import Document, Organization, OrganizationBrain, ProcessingJob
 
     settings = get_settings()
-    filename = os.path.basename(file_path)
+    filename = rel_path
     fmt = _FORMAT_BY_EXT.get(os.path.splitext(filename)[1].lower())
     if fmt is None:  # never expected (watcher filters) — defensive no-op.
         return
 
     size_bytes = 0
     try:
-        size_bytes = os.path.getsize(file_path)
+        size_bytes = os.path.getsize(full_path)
     except OSError:
         size_bytes = 0
 
@@ -153,7 +158,7 @@ class FolderWatcher(threading.Thread):
         super().__init__(daemon=True, name=f"folder-watcher-{org_id}")
         self.org_id = org_id
         self.folder_path = folder_path
-        self.on_detected = on_detected  # async callable(org_id, file_path)
+        self.on_detected = on_detected  # async callable(org_id, rel_path, full_path)
         self.interval = interval
         self._stop = threading.Event()
         self._known: dict[str, tuple[int, int]] = {}  # rel_path -> (mtime_ns, size)
@@ -170,7 +175,8 @@ class FolderWatcher(threading.Thread):
                     st = os.stat(full)
                 except OSError:
                     continue
-                yield os.path.relpath(full, self.folder_path), st.st_mtime_ns, st.st_size, full
+                rel = os.path.relpath(full, self.folder_path).replace(os.sep, "/")
+                yield rel, st.st_mtime_ns, st.st_size, full
 
     def run(self) -> None:
         self._scan()
@@ -187,7 +193,7 @@ class FolderWatcher(threading.Thread):
                 continue  # unchanged
             self._known[rel] = (mtime, size)
             with contextlib.suppress(Exception):  # isolate per-file failure; keep scanning.
-                asyncio.run(self.on_detected(self.org_id, full))
+                asyncio.run(self.on_detected(self.org_id, rel, full))
 
     def stop(self) -> None:
         self._stop.set()
