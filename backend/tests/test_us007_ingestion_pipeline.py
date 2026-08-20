@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from pypdf import PdfWriter
 
 from app.config import get_settings
 from app.services import folder_watcher, ingestion_worker
@@ -239,3 +240,103 @@ def test_unparseable_file_isolated_good_file_reaches_ready(
     assert len(chunks) >= 1
     assert {c["source_document_id"] for c in chunks} == {by_name["fine.txt"]["id"]}
     assert all(c["dims"] == 1024 for c in chunks)
+
+
+def test_zero_chunk_pdf_fails_not_ready(
+    client, db, make_org, make_owner, sms_provider, ingest_folder
+):
+    """S1-08: an image/scan-only PDF (no text layer) must fail with an explicit
+    reason, never sit 'ready' with zero chunks."""
+    org = _activate_org(client, make_org, make_owner, sms_provider)
+    _ready_workspace_and_brain(client)
+    assert _configure(client, ingest_folder).status_code == 201
+
+    scan_pdf = ingest_folder / "scan.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)  # page with no text operators
+    with open(scan_pdf, "wb") as fh:
+        writer.write(fh)
+
+    _scan(org["id"])
+
+    docs = client.get("/api/v1/documents").json()
+    assert len(docs) == 1
+    assert docs[0]["status"] == "detected"
+    job = _pending_job(db, org["id"], docs[0]["id"])
+    ingestion_worker.process_job(uuid.UUID(str(job["id"])))
+
+    doc_row = db.fetchone(
+        "SELECT status, error FROM documents WHERE id = $1::uuid", docs[0]["id"]
+    )
+    assert doc_row["status"] == "failed"
+    assert "no extractable text" in (doc_row["error"] or "")
+
+    job_row = db.fetchone(
+        "SELECT status, last_error FROM processing_jobs WHERE id = $1::uuid",
+        str(job["id"]),
+    )
+    assert job_row["status"] == "failed"
+    assert job_row["last_error"]
+
+    chunks = db.fetch(
+        "SELECT id FROM document_chunks WHERE organization_id = $1::uuid", org["id"]
+    )
+    assert chunks == []
+
+
+def test_changed_file_reingested_versions_chunks(
+    client, db, make_org, make_owner, sms_provider, ingest_folder
+):
+    """S1-09: a file whose (mtime, size) changed is re-detected and re-ingested —
+    old chunks are deleted and replaced by the new version's chunks."""
+    org = _activate_org(client, make_org, make_owner, sms_provider)
+    _ready_workspace_and_brain(client)
+    assert _configure(client, ingest_folder).status_code == 201
+
+    note = ingest_folder / "note.txt"
+    note.write_text("VERSION_ONE " * 60, encoding="utf-8")
+    _scan(org["id"])
+
+    docs = client.get("/api/v1/documents").json()
+    assert len(docs) == 1
+    doc_id = docs[0]["id"]
+
+    job = _pending_job(db, org["id"], doc_id)
+    ingestion_worker.process_job(uuid.UUID(str(job["id"])))
+    assert db.fetchone(
+        "SELECT status FROM documents WHERE id = $1::uuid", doc_id
+    )["status"] == "ready"
+
+    first_chunks = db.fetch(
+        "SELECT content FROM document_chunks WHERE organization_id = $1::uuid", org["id"]
+    )
+    assert first_chunks and all("VERSION_ONE" in c["content"] for c in first_chunks)
+
+    # Modify the file (size + mtime both change).
+    note.write_text("VERSION_TWO " * 90, encoding="utf-8")
+    _scan(org["id"])
+
+    # The same Document is reset to `detected` and its single job re-queued.
+    doc_row = db.fetchone(
+        "SELECT status, error FROM documents WHERE id = $1::uuid", doc_id
+    )
+    assert doc_row["status"] == "detected"
+    assert doc_row["error"] is None
+    job = _pending_job(db, org["id"], doc_id)
+    assert job["status"] == "pending"
+
+    ingestion_worker.process_job(uuid.UUID(str(job["id"])))
+
+    doc_row = db.fetchone(
+        "SELECT status, error FROM documents WHERE id = $1::uuid", doc_id
+    )
+    assert doc_row["status"] == "ready"
+    assert doc_row["error"] is None
+
+    # Versioning: the new chunks replace the old ones — no VERSION_ONE leftovers.
+    second_chunks = db.fetch(
+        "SELECT content FROM document_chunks WHERE organization_id = $1::uuid", org["id"]
+    )
+    assert second_chunks
+    assert all("VERSION_TWO" in c["content"] for c in second_chunks)
+    assert all("VERSION_ONE" not in c["content"] for c in second_chunks)

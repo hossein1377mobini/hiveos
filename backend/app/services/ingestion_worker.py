@@ -17,7 +17,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -80,7 +80,25 @@ async def _process_one(job_id: UUID, settings, engine) -> None:
             chunks = ingestion_pipeline.chunk_text(
                 text, chunk_size=chunk_cfg["chunk_size"], overlap=chunk_cfg["overlap"]
             )
+            # S1-08: a document that yields no chunks (empty/whitespace text, or a
+            # text layer absent on an image/scan PDF) must fail, never sit "ready"
+            # with zero rows. `read_document_text` already raises the PDF-specific
+            # reason; this is the general guard for every other format.
+            if not chunks:
+                raise ValueError(
+                    "document produced no text chunks — empty or unparseable content"
+                )
             vectors = ingestion_pipeline.embed_texts(chunks)
+
+            # S1-09: version — drop the previous version's chunks before inserting
+            # the new ones (delete old -> new), so a re-ingested file never leaves
+            # stale chunks behind.
+            await session.execute(
+                delete(DocumentChunk).where(
+                    DocumentChunk.source_document_id == str(doc.id),
+                    DocumentChunk.organization_id == doc.organization_id,
+                )
+            )
 
             session.add_all(
                 DocumentChunk(

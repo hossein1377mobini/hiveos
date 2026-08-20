@@ -395,6 +395,10 @@ class Document(Base):
         CheckConstraint("format IN ('pdf','docx','txt','md')", name="ck_documents_format"),
     )  # pdf|docx|txt|md
     size_bytes: Mapped[int] = mapped_column(BigInteger)
+    # S1-09: last-seen ``st_mtime_ns`` of the on-disk file. Together with
+    # ``size_bytes`` it forms the change signature the watcher compares against a
+    # fresh scan to decide whether a re-ingest (delete old chunks -> new) is due.
+    file_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[str] = mapped_column(
         String(16),
         CheckConstraint(

@@ -13,9 +13,18 @@ from itertools import pairwise
 
 import pytest
 from docx import Document as DocxDocument
+from pypdf import PdfWriter
 from pypdf.errors import PyPdfError
 
-from app.services.ingestion_pipeline import EMBED_DIM, chunk_text, embed_texts, read_document_text
+from app.services import ingestion_pipeline
+from app.services.ingestion_pipeline import (
+    EMBED_DIM,
+    _l2_normalize,
+    chunk_text,
+    embed_queries,
+    embed_texts,
+    read_document_text,
+)
 
 
 def _no_whitespace_text(length: int) -> str:
@@ -109,6 +118,19 @@ def test_read_document_text_malformed_pdf_raises(tmp_path):
         read_document_text(str(path), "pdf")
 
 
+def test_read_document_text_scanned_pdf_rejects(tmp_path):
+    """S1-08: an image/scan-only PDF (no text layer -> pypdf yields '') is rejected
+    with an explicit reason instead of silently returning an empty string."""
+    path = tmp_path / "scan.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)  # a page with no text operators
+    with open(path, "wb") as fh:
+        writer.write(fh)
+
+    with pytest.raises(ValueError, match="no extractable text"):
+        read_document_text(str(path), "pdf")
+
+
 # --------------------------------------------------------------- embed_texts
 
 
@@ -123,3 +145,45 @@ def test_embed_texts_returns_1024_dim_for_persian():
     assert len(vectors) == 1
     assert len(vectors[0]) == EMBED_DIM == 1024
     assert all(isinstance(x, float) for x in vectors[0])
+
+
+def test_l2_normalize_unit_norm():
+    assert sum(x * x for x in _l2_normalize([3.0, 4.0])) == pytest.approx(1.0)
+    assert _l2_normalize([0.0, 0.0]) == [0.0, 0.0]  # degenerate -> unchanged, no NaN
+
+
+class _StubModel:
+    """Capturing stub for the embedding model (no ONNX load)."""
+
+    def __init__(self) -> None:
+        self.inputs: list[list[str]] = []
+
+    def embed(self, texts: list[str]):
+        self.inputs.append(list(texts))
+        for _ in texts:
+            yield [3.0] + [0.0] * (EMBED_DIM - 1)  # blatantly non-unit norm
+
+
+def test_embed_texts_applies_passage_prefix_and_l2_normalizes(monkeypatch):
+    """S1-11: documents are embedded with the E5 ``passage: `` prefix and the raw
+    vectors are L2-normalized before they are returned for storage."""
+    stub = _StubModel()
+    monkeypatch.setattr(ingestion_pipeline, "_get_model", lambda: stub)
+
+    vectors = embed_texts(["سلام دنیا", "hello world"])
+
+    assert stub.inputs == [["passage: سلام دنیا", "passage: hello world"]]
+    assert len(vectors) == 2
+    for v in vectors:
+        assert sum(x * x for x in v) == pytest.approx(1.0)  # L2 unit norm
+        assert v[0] == pytest.approx(1.0)
+
+
+def test_embed_queries_applies_query_prefix(monkeypatch):
+    """S1-11: the query side carries the E5 ``query: `` prefix (completing the pair)."""
+    stub = _StubModel()
+    monkeypatch.setattr(ingestion_pipeline, "_get_model", lambda: stub)
+
+    embed_queries(["یک جستجو"])
+
+    assert stub.inputs == [["query: یک جستجو"]]

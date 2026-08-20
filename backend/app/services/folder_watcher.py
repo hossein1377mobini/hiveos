@@ -42,6 +42,36 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+async def _enqueue_pending_job(session, org, document_id: uuid.UUID) -> None:
+    """Ensure exactly ONE live ingest job for ``document_id``.
+
+    Reuses any existing job row (reset to ``pending``) so a document carries at
+    most one job across versions (S1-09); creates a fresh pending job otherwise.
+    """
+    from app.models import ProcessingJob
+
+    job = (
+        await session.execute(
+            select(ProcessingJob).where(ProcessingJob.document_id == document_id)
+        )
+    ).scalar_one_or_none()
+    if job is None:
+        session.add(
+            ProcessingJob(
+                tenant_id=org.tenant_id,
+                organization_id=org.id,
+                document_id=document_id,
+                job_type="ingest",
+                status="pending",
+            )
+        )
+        return
+    job.status = "pending"
+    job.attempts = 0
+    job.last_error = None
+    job.updated_at = _now()
+
+
 async def _enqueue_detected(org_id: uuid.UUID, rel_path: str, full_path: str) -> None:
     """Default on_detected callback: create a Document + pending ProcessingJob.
 
@@ -59,7 +89,7 @@ async def _enqueue_detected(org_id: uuid.UUID, rel_path: str, full_path: str) ->
     recorded as ``failed`` with a clear error (isolated per-file failure — FR-008).
     Full format/size/AV-scan enforcement lands with the WAVE-3B worker.
     """
-    from app.models import Document, Organization, OrganizationBrain, ProcessingJob
+    from app.models import Document, Organization, OrganizationBrain
 
     settings = get_settings()
     filename = rel_path
@@ -68,10 +98,14 @@ async def _enqueue_detected(org_id: uuid.UUID, rel_path: str, full_path: str) ->
         return
 
     size_bytes = 0
+    mtime_ns: int | None = None
     try:
-        size_bytes = os.path.getsize(full_path)
+        st = os.stat(full_path)
+        size_bytes = st.st_size
+        mtime_ns = st.st_mtime_ns
     except OSError:
         size_bytes = 0
+        mtime_ns = None
 
     engine = create_async_engine(get_settings().database_url)
     try:
@@ -79,17 +113,6 @@ async def _enqueue_detected(org_id: uuid.UUID, rel_path: str, full_path: str) ->
             org = await session.get(Organization, org_id)
             if org is None:
                 return
-
-            existing = (
-                await session.execute(
-                    select(Document).where(
-                        Document.organization_id == org_id,
-                        Document.filename == filename,
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing is not None:
-                return  # already documented — skip (resume idempotency / UNIQUE guard).
 
             brain = (
                 await session.execute(
@@ -102,33 +125,55 @@ async def _enqueue_detected(org_id: uuid.UUID, rel_path: str, full_path: str) ->
             max_bytes = settings.max_document_size_mb * 1024 * 1024
             oversize = size_bytes > max_bytes
 
-            doc = Document(
-                tenant_id=org.tenant_id,
-                organization_id=org_id,
-                brain_id=brain.id if brain is not None else None,
-                filename=filename,
-                format=fmt,
-                size_bytes=size_bytes,
-                status="failed" if oversize else "detected",
-                error=(
+            existing = (
+                await session.execute(
+                    select(Document).where(
+                        Document.organization_id == org_id,
+                        Document.filename == filename,
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if existing is not None:
+                # S1-09: only skip when the file signature ``(mtime_ns, size)`` is
+                # unchanged. A changed file is re-ingested: the Document is reset to
+                # ``detected`` and the worker replaces old chunks with new versions.
+                if existing.file_mtime_ns == mtime_ns and existing.size_bytes == size_bytes:
+                    return  # unchanged — resume idempotency / UNIQUE guard.
+                existing.size_bytes = size_bytes
+                existing.file_mtime_ns = mtime_ns
+                if brain is not None:
+                    existing.brain_id = brain.id
+                existing.status = "failed" if oversize else "detected"
+                existing.error = (
                     f"file exceeds max size ({settings.max_document_size_mb} MB)"
                     if oversize
                     else None
-                ),
-            )
-            session.add(doc)
-            await session.flush()
-
-            if not oversize:
-                session.add(
-                    ProcessingJob(
-                        tenant_id=org.tenant_id,
-                        organization_id=org_id,
-                        document_id=doc.id,
-                        job_type="ingest",
-                        status="pending",
-                    )
                 )
+                existing.updated_at = _now()
+                if not oversize:
+                    await _enqueue_pending_job(session, org, existing.id)
+            else:
+                doc = Document(
+                    tenant_id=org.tenant_id,
+                    organization_id=org_id,
+                    brain_id=brain.id if brain is not None else None,
+                    filename=filename,
+                    format=fmt,
+                    size_bytes=size_bytes,
+                    file_mtime_ns=mtime_ns,
+                    status="failed" if oversize else "detected",
+                    error=(
+                        f"file exceeds max size ({settings.max_document_size_mb} MB)"
+                        if oversize
+                        else None
+                    ),
+                )
+                session.add(doc)
+                await session.flush()
+
+                if not oversize:
+                    await _enqueue_pending_job(session, org, doc.id)
             try:
                 await session.commit()
             except IntegrityError:
