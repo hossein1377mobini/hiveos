@@ -2,13 +2,14 @@
 
 پلتفرم «کارمند دیجیتال» / سازمان‌آمیز (Organizational Intelligence Platform) — v0.1 (**Hive Mind**).
 
-اسکلت monorepo طبق **ADR-002** (Repository Structure). منبع رسمی مستندات: `docs/`.
+اسکلت monorepo طبق **ADR-002** (Repository Structure). قرارداد API (SSoT کد) در `docs/openapi.yaml`؛ ADRها/Standards/Architecture کانونی (CEO-governed) در `Dropbox/Hive/doc/` نگهداری می‌شوند.
 
 ## ساختار
 
 ```
 hiveos/
-├── docs/             # مستندات پروژه (ADR، PRD، Backlog، Architecture، Standards، API، Design)
+├── docs/             # قرارداد API (openapi.yaml) + تصمیمات repo-local (decisions/)
+│                     #   (ADR/Standards/Architecture کانونی در Dropbox/Hive/doc — CEO-governed)
 ├── frontend/app/     # رابط کاربری (React + TypeScript + Vite) — فقط UX/ارتباط با Backend
 ├── backend/          # thin API (Python/FastAPI، SQLAlchemy-2 async، asyncpg، pgvector) — v0.1
 ├── ai/               # موتور هوش مصنوعی (Agentها، LLM، RAG) — فاز بعد (خالی)
@@ -63,7 +64,7 @@ curl http://localhost:5199/api/v1/healthz   # → {"status":"ok"}
 - در مراحل «هوش سازمان/اسناد» اولین بار مدل embedding محلی (fastembed ~۲GB) دانلود/کش می‌شود.
 - **تست اتوماتیک:**
   - فرانت: `cd frontend/app && npm run test` (Vitest ۲۸ مورد) · `npm run build`
-  - بک‌اند: `cd backend && PYTHONPATH= ./.venv/Scripts/python.exe -m pytest -q` (۶۱ مورد، پوشش ≥۸۵٪)
+  - بک‌اند: `cd backend && PYTHONPATH= ./.venv/Scripts/python.exe -m pytest -q` (۸۹ مورد، پوشش ≥۸۵٪ — فعلاً ۸۹٪)
 
 ## قوانین ساختار (ADR-002)
 

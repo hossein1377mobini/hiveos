@@ -379,6 +379,28 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/OnboardingIncomplete' }
 
+  /api/v1/healthz:
+    get:
+      summary: سلامت سرویس (Operations)
+      description: >
+        Endpoint سلامت بدون نیاز به احراز هویت؛ برای پایش آمادگی سرویس (ready/liveness)
+        و تست اتصال dev استفاده می‌شود. خارج از USهای Epic-01 است و در `README.md`
+        (Getting Started) نیز ارجاع شده است. فقط `{"status": "ok"}` برمی‌گرداند.
+      security: []
+      operationId: healthz
+      tags: [Operations]
+      responses:
+        '200':
+          description: سرویس در دسترس است
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                additionalProperties: false
+                properties:
+                  status: { type: string, const: ok }
+
 components:
   securitySchemes:
     sessionCookie:
@@ -594,6 +616,12 @@ components:
     AIModelConfiguration:
       type: object
       required: [mode, provider, apiKey]
+      description: >
+        پیکربندی مدل AI سازمان (v0.1). ⚠️ DRIFT با ADR-020 (accepted): BYOK حذف شده و
+        کاربر دیگر apiKey نمی‌آورد (دسترسی مدیریت‌شدهٔ HiveOS + کیف پول اعتباری). apiKey
+        تا مهاجرت کد (روتر/metering/billing) در backend حفظ شده تا قرارداد با پیاده‌سازی
+        فعلی یکدست بماند. حذف آن یک change کد + تصمیم CEO/PO است (خارج از اسکوپ docs) —
+        رکورد تصمیم: `docs/decisions/2026-08-20-docs-contract-alignment.md`.
       properties:
         mode:
           type: string
