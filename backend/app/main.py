@@ -1,5 +1,6 @@
 """HiveOS v0.1 FastAPI application factory (ADR-019 Python-first thin API)."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -32,13 +33,15 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
             ingestion_pipeline.embedding_dim()
             ingestion_worker.start_worker()
-            import logging
-
             logging.getLogger("uvicorn.error").info(
                 "ingestion background started: %d watcher(s)", resumed
             )
         except Exception:  # noqa: BLE001 — never block app boot on background failures
-            pass
+            # S1-20: surface the startup failure with a traceback — never swallow
+            # watcher/worker boot errors silently.
+            logging.getLogger("uvicorn.error").exception(
+                "ingestion background startup failed"
+            )
     yield
     ingestion_worker.stop_worker()
     folder_watcher.stop_all_watchers()

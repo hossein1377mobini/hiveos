@@ -69,11 +69,21 @@ class RateLimitedError(ApiError):
     status_code = status.HTTP_429_TOO_MANY_REQUESTS
     error_code = "rate_limited"
 
-    def __init__(self, message: str | None = None, *, retry_after: int | None = None):
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        retry_after: int | None = None,
+        resend_after_seconds: int | None = None,
+    ):
         super().__init__(message)
         # Optional Retry-After (seconds) surfaced as the `Retry-After` header so
         # well-behaved clients can back off instead of polling (RFC 6585 §4).
         self.retry_after = retry_after
+        # S1-19: the OTP resend cooldown, surfaced in the 429 *body* so the
+        # frontend can keep its resend button disabled for the cooldown window
+        # instead of immediately re-hitting the endpoint (the old no-op 429 loop).
+        self.resend_after_seconds = resend_after_seconds
 
 
 class InternalError(ApiError):
@@ -95,7 +105,15 @@ class ValidationError422(ApiError):
 
 
 def _error_payload(err: ApiError) -> dict:
-    return {"error": err.error_code, "message": err.message, "auditLogged": err.audit_logged}
+    payload = {
+        "error": err.error_code,
+        "message": err.message,
+        "auditLogged": err.audit_logged,
+    }
+    resend_after = getattr(err, "resend_after_seconds", None)
+    if resend_after is not None:
+        payload["resendAfterSeconds"] = resend_after
+    return payload
 
 
 def _validation_problem(errors: dict[str, list[str]]) -> dict:

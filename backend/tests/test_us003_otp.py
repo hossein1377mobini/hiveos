@@ -111,6 +111,23 @@ def test_send_otp_cooldown_rate_limited(client, make_org, make_owner, sms_provid
     assert second.status_code == 429
 
 
+def test_send_otp_cooldown_body_carries_resend_after(client, make_org, make_owner, sms_provider):
+    """S1-19: the 429 body carries `resendAfterSeconds` so the frontend can keep
+    its resend button disabled for the cooldown window (no 429 loop)."""
+    org = make_org()
+    make_owner(org, phone=PHONE)
+
+    first = client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
+    assert first.status_code == 200
+
+    second = client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
+    assert second.status_code == 429
+    body = second.json()
+    assert "resendAfterSeconds" in body
+    assert isinstance(body["resendAfterSeconds"], int)
+    assert 1 <= body["resendAfterSeconds"] <= 60
+
+
 def test_resend_voids_previous_code(client, make_org, make_owner, sms_provider, monkeypatch):
     # Kill the cooldown so resend can issue immediately (void behavior is what
     # we're exercising, not the rate limit).

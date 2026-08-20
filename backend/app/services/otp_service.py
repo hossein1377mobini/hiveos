@@ -16,6 +16,7 @@ Behaviour:
 """
 
 import hmac
+import math
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -76,15 +77,26 @@ async def _pending_owner(session: AsyncSession, canonical: str) -> Owner:
 async def _enforce_cooldown(session: AsyncSession, canonical: str) -> None:
     now = datetime.now(UTC)
     recent = await session.execute(
-        select(OtpCode.id).where(
+        select(OtpCode.created_at)
+        .where(
             OtpCode.phone == canonical,
             OtpCode.used.is_(False),
             OtpCode.expires_at > now,
             OtpCode.created_at >= now - timedelta(seconds=_COOLDOWN_SECONDS),
         )
+        .order_by(OtpCode.created_at.desc())
+        .limit(1)
     )
-    if recent.scalar_one_or_none() is not None:
-        raise RateLimitedError("please wait before requesting another code")
+    created = recent.scalar_one_or_none()
+    if created is not None:
+        # S1-19: report the remaining cooldown in the 429 body so the frontend
+        # keeps its resend button disabled for the full window (no 429 loop).
+        remaining = (created + timedelta(seconds=_COOLDOWN_SECONDS) - now).total_seconds()
+        resend_after = max(1, math.ceil(remaining))
+        raise RateLimitedError(
+            "please wait before requesting another code",
+            resend_after_seconds=resend_after,
+        )
 
 
 async def _issue(

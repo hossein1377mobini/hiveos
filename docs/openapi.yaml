@@ -662,6 +662,10 @@ components:
           description: پیام قابل‌فهم برای کاربر.
         auditLogged:
           type: boolean
+        resendAfterSeconds:
+          type: integer
+          minimum: 0
+          description: زمان باقی‌ماندهٔ توقف پیش از ارسال مجدد OTP (فقط در پاسخ 429).
 
     ValidationProblem:
       type: object
