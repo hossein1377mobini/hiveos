@@ -8,14 +8,14 @@ this module only defines the router.
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import require_org_session
 from app.db import get_db
 from app.models import Organization
 from app.schemas import (
-    Document,
+    DocumentPage,
     DocumentStatusResponse,
     IngestionFolderConfigure,
     IngestionFolderStatus,
@@ -69,7 +69,7 @@ async def get_ingestion_folder_status(
 
 @router.get(
     "/documents",
-    response_model=list[Document],
+    response_model=DocumentPage,
     status_code=status.HTTP_200_OK,
     operation_id="listDocuments",
     tags=["Ingestion"],
@@ -78,8 +78,34 @@ async def get_ingestion_folder_status(
 async def list_documents(
     session: DbSession,
     org: OrgSession,
-) -> list[Document]:
-    return await ingestion_service.list_documents(session, org)
+    page: int = Query(1, ge=1, description="شمارهٔ صفحه (یک‌مبنا)"),
+    pageSize: int = Query(
+        20, ge=1, le=100, alias="pageSize", description="تعداد آیتم در هر صفحه (۱..۱۰۰)"
+    ),
+    sort: str = Query(
+        "-createdAt",
+        description="مرتب‌سازی: createdAt/filename/sizeBytes/status/format؛ پیشوند - برای نزولی",
+    ),
+    filter: str | None = Query(
+        None, description="جستجوی زیررشته‌ای (غیرحساس به بزرگی) در نام فایل"
+    ),
+    status_filter: str | None = Query(
+        None,
+        alias="status",
+        pattern="^(detected|processing|ready|failed)$",
+        description="فیلتر بر اساس وضعیت سند (detected/processing/ready/failed)",
+    ),
+) -> DocumentPage:
+    """فهرست صفحه‌بندی‌شدهٔ اسناد (S1-18)؛ بازگشت پاکت {items, meta} با meta.total."""
+    return await ingestion_service.list_documents(
+        session,
+        org,
+        page=page,
+        page_size=pageSize,
+        sort=sort,
+        status_filter=status_filter,
+        query=filter,
+    )
 
 
 @router.get(

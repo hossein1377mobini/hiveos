@@ -115,7 +115,7 @@ def test_full_pipeline_detect_to_ready(
 
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     assert len(docs) == 1
     assert docs[0]["status"] == "detected"
     job = _pending_job(db, org["id"], docs[0]["id"])
@@ -165,7 +165,7 @@ def test_process_job_fails_without_brain(
 
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     assert len(docs) == 1
     assert docs[0]["status"] == "detected"
 
@@ -207,7 +207,7 @@ def test_unparseable_file_isolated_good_file_reaches_ready(
 
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     by_name = {d["filename"]: d for d in docs}
     assert set(by_name) == {"broken.pdf", "fine.txt"}
     assert by_name["broken.pdf"]["status"] == "detected"
@@ -259,7 +259,7 @@ def test_zero_chunk_pdf_fails_not_ready(
 
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     assert len(docs) == 1
     assert docs[0]["status"] == "detected"
     job = _pending_job(db, org["id"], docs[0]["id"])
@@ -297,7 +297,7 @@ def test_changed_file_reingested_versions_chunks(
     note.write_text("VERSION_ONE " * 60, encoding="utf-8")
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     assert len(docs) == 1
     doc_id = docs[0]["id"]
 

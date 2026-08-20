@@ -272,18 +272,50 @@ paths:
 
   /api/v1/documents:
     get:
-      summary: فهرست اسناد (US-007)
-      description: فهرست اسناد شناسایی‌شده با وضعیت پردازش — برای نمایش زنده به Owner.
+      summary: فهرست صفحه‌بندی‌شدهٔ اسناد (US-007 / S1-18)
+      description: >-
+        فهرست اسناد شناسایی‌شده با وضعیت پردازش — برای نمایش زنده به Owner.
+        پاسخ در پاکت `{items, meta}` برمی‌گردد؛ `meta.total` اندازهٔ کامل
+        مجموعهٔ نتیجه پیش از صفحه‌بندی است. sort فقط فیلدهای مجاز را می‌پذیرد.
       operationId: listDocuments
       tags: [Ingestion]
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: شمارهٔ صفحه (یک‌مبنا)
+        - name: pageSize
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: تعداد آیتم در هر صفحه
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            default: '-createdAt'
+            enum: [createdAt, -createdAt, filename, -filename, sizeBytes, -sizeBytes, status, -status, format, -format]
+          description: کلید مرتب‌سازی؛ پیشوند `-` یعنی نزولی. مقدار نامعتبر به `-createdAt` می‌افتد.
+        - name: filter
+          in: query
+          required: false
+          schema: { type: string }
+          description: جستجوی زیررشته‌ای (غیرحساس به بزرگی) در نام فایل
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [detected, processing, ready, failed]
+          description: فیلتر بر اساس وضعیت سند
       responses:
         '200':
-          description: فهرست اسناد
+          description: فهرست صفحه‌بندی‌شدهٔ اسناد
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: '#/components/schemas/Document' }
+              schema: { $ref: '#/components/schemas/DocumentPage' }
 
   /api/v1/documents/{id}/status:
     get:
@@ -626,6 +658,29 @@ components:
           type: string
           enum: [detected, processing, ready, failed]
         error: { type: [string, 'null'] }
+
+    PageMeta:
+      type: object
+      required: [total, page, pageSize, totalPages]
+      properties:
+        total:
+          type: integer
+          description: اندازهٔ کامل مجموعهٔ نتیجه پیش از صفحه‌بندی
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalPages:
+          type: integer
+          description: 'ceil(total / pageSize)'
+
+    DocumentPage:
+      type: object
+      required: [items, meta]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Document' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+      description: پاکت صفحه‌بندی‌شدهٔ فهرست اسناد (S1-18)
 
     OnboardingStatus:
       type: object
