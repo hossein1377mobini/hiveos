@@ -7,24 +7,25 @@ const BASE = "/api/v1";
 
 // --- Envelope + error types -------------------------------------------------
 
-// Consistent, typed error envelope surfaced to the UI. `code` is a stable
-// machine identifier; `message` is the server's human-readable text and is
-// NEVER rendered directly to users (always mapped through describeError).
+// Consistent, typed error envelope surfaced to the UI. `error` is the stable
+// machine key returned by the backend (OpenAPI `Error.error`); `message` is the
+// server's human-readable text and is NEVER rendered directly to users (always
+// mapped through describeError).
 export interface ApiErrorBody {
   status: number;
-  code: string;
+  error: string;
   message: string;
 }
 
 export class ApiError extends Error {
   status: number;
-  code: string;
+  error: string;
   details?: unknown;
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  constructor(status: number, error: string, message: string, details?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
-    this.code = code;
+    this.error = error;
     this.details = details;
   }
 }
@@ -47,7 +48,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (!res.ok) {
     const body = (json as Partial<ApiErrorBody> | null) ?? {};
     const message = body.message ?? `${method} ${path} failed (${res.status})`;
-    throw new ApiError(res.status, body.code ?? "unknown", message, json ?? undefined);
+    throw new ApiError(res.status, body.error ?? "unknown", message, json ?? undefined);
   }
   return json as T;
 }
@@ -91,7 +92,7 @@ export interface OrganizationCreate {
 }
 export interface Organization {
   id: string;
-  displayName: string;
+  name: string;
   status: string;
   tenantId: string;
   workspaceId: string;
