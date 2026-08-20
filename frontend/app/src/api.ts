@@ -154,6 +154,18 @@ export interface DocumentItem {
   status: DocumentStatus;
   error?: string;
 }
+// S1-18 paginated-list envelope: GET /documents returns {items, meta} instead of
+// a bare array (see docs/decisions/2026-08-20-paginated-list-envelope.md).
+export interface PageMeta {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+export interface DocumentPage {
+  items: DocumentItem[];
+  meta: PageMeta;
+}
 export interface OnboardingStatusResult {
   onboardingStatus: OnboardingStatus;
   missingSteps?: string[];
@@ -174,7 +186,7 @@ export const api = {
   configureIngestion: (folderPath: string) =>
     request<IngestionConfigureResult>("POST", "/ingestion-folder/configure", { folderPath }),
   getIngestionStatus: () => request<IngestionStatusResult>("GET", "/ingestion-folder/status"),
-  listDocuments: () => request<DocumentItem[]>("GET", "/documents"),
+  listDocuments: () => request<DocumentPage>("GET", "/documents"),
   getOnboardingStatus: () => request<OnboardingStatusResult>("GET", "/onboarding/status"),
   completeOnboarding: () => request<CompleteOnboardingResult>("POST", "/onboarding/complete"),
 };

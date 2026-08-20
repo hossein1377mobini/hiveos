@@ -45,7 +45,7 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
         // interval so the chips and the table stay in sync.
         const [d, s] = await Promise.all([api.listDocuments(), api.getIngestionStatus()]);
         if (!active) return;
-        setDocs(d);
+        setDocs(d.items);
         if (s.counts) setCounts(s.counts);
       } catch {
         /* keep last known list + counts on transient failure */
