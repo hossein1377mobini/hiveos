@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, describeError } from "./api";
+import { ApiError, describeError } from "./http";
+import { organizationApi } from "./organizationApi";
+import { authApi } from "./authApi";
+import { onboardingApi } from "./onboardingApi";
 
 function jsonResponse(body: unknown, status: number) {
   return {
@@ -31,7 +34,7 @@ describe("api request()", () => {
     };
     fetchMock.mockResolvedValue(jsonResponse({ id: "o1", status: "pending" }, 201));
 
-    const res = await api.createOrganization(payload);
+    const res = await organizationApi.createOrganization(payload);
 
     expect(res).toEqual({ id: "o1", status: "pending" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -45,20 +48,20 @@ describe("api request()", () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ onboardingStatus: "in_progress", missingSteps: ["owner"] }, 200),
     );
-    const res = await api.getOnboardingStatus();
+    const res = await onboardingApi.getOnboardingStatus();
     expect(res).toEqual({ onboardingStatus: "in_progress", missingSteps: ["owner"] });
   });
 
   it("returns undefined for a 204", async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 204, text: async () => "" });
-    await expect(api.completeOnboarding()).resolves.toBeUndefined();
+    await expect(onboardingApi.completeOnboarding()).resolves.toBeUndefined();
   });
 
   it("throws ApiError{status, error, message} on a non-2xx", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ error: "PHONE_TAKEN", message: "this phone already exists" }, 409),
     );
-    const err = await api
+    const err = await authApi
       .createOwner({ phone: "+989123456789", password: "x", confirmPassword: "x" })
       .catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
@@ -69,7 +72,7 @@ describe("api request()", () => {
 
   it("falls back to error 'unknown' on a malformed error body", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500, text: async () => "<html>boom</html>" });
-    const err = await api.getOnboardingStatus().catch((e) => e);
+    const err = await onboardingApi.getOnboardingStatus().catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(500);
     expect(err.error).toBe("unknown");

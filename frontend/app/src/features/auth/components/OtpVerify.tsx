@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
-import { api, ApiError, describeError } from "../api";
-import Stepper from "../Stepper";
-
-const FA = "۰۱۲۳۴۵۶۷۸۹";
-const toFa = (s: string | number) => String(s).replace(/\d/g, (d) => FA[+d]);
+import { authApi } from "../../../services/authApi";
+import { ApiError, describeError } from "../../../services/http";
+import { FA_DIGITS, toFa } from "../../../utils/persian";
 
 // Show the canonical "+98XXXXXXXXXX" as Persian-grouped digits: "+۹۸ ۹۱۲ ۳۴۵ ۶۷۸۹".
 function phoneFa(phone: string): string {
@@ -43,7 +41,7 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
     setSending(true);
     try {
       const r =
-        kind === "resend" ? await api.resendOtp({ phone }) : await api.sendOtp({ phone });
+        kind === "resend" ? await authApi.resendOtp({ phone }) : await authApi.sendOtp({ phone });
       if (!mounted.current) return;
       setExpiresIn(r.expiresInSeconds);
       setResendIn(r.resendAfterSeconds);
@@ -92,7 +90,7 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
     let lat = "";
     if (/[0-9]/.test(ch)) lat = ch;
     else {
-      const idx = FA.indexOf(ch);
+      const idx = FA_DIGITS.indexOf(ch);
       if (idx >= 0) lat = String(idx);
     }
     const nd = [...digits];
@@ -108,7 +106,7 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
   function onPaste(e: ClipboardEvent<HTMLDivElement>) {
     e.preventDefault();
     const txt = e.clipboardData.getData("text");
-    const lat = txt.replace(/[۰-۹]/g, (d) => String(FA.indexOf(d))).replace(/\D/g, "").slice(0, 6);
+    const lat = txt.replace(/[۰-۹]/g, (d) => String(FA_DIGITS.indexOf(d))).replace(/\D/g, "").slice(0, 6);
     if (!lat) return;
     const nd = Array(6).fill("");
     lat.split("").forEach((c, idx) => {
@@ -127,7 +125,7 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
     setError("");
     setCodeErr(false);
     try {
-      const r = await api.verifyOtp({ phone, code });
+      const r = await authApi.verifyOtp({ phone, code });
       if (!mounted.current) return;
       if (r.verified && r.userStatus === "active") onDone();
       else setError("تأیید انجام نشد.");
@@ -147,68 +145,65 @@ export default function OtpVerify({ phone, onDone, onBack }: Props) {
   }
 
   return (
-    <div style={{ maxWidth: 620, margin: "0 auto", padding: "40px 0" }}>
-      <Stepper active={2} />
-      <div className="card" style={{ textAlign: "center" }}>
-        <h2 style={{ marginTop: 0 }}>کد ۶ رقمی</h2>
-        <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>کد ارسال‌شده به شماره</p>
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-          <span style={{ fontWeight: 700, fontSize: 15, direction: "ltr" }}>{phoneFa(phone)}</span>
-          <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={onBack} type="button">ویرایش</button>
-        </div>
-
-        <div className="otp" role="group" aria-label="کد تأیید ۶ رقمی" onPaste={onPaste}>
-          {digits.map((d, i) => (
-            <input
-              key={i}
-              ref={(el) => {
-                refs.current[i] = el;
-              }}
-              value={d ? toFa(d) : ""}
-              onChange={(e) => setDig(i, e.target.value.slice(-1))}
-              onKeyDown={(e) => onKeyDown(i, e)}
-              maxLength={1}
-              inputMode="numeric"
-              aria-label={`رقم ${toFa(String(i + 1))}`}
-              className={[d ? "filled" : "", codeErr ? "err" : ""].join(" ").trim()}
-            />
-          ))}
-        </div>
-
-        <div className="timer">
-          {expiresIn > 0 ? (
-            <span>
-              کد تا <span className="count">{mmss(expiresIn)}</span> معتبر است.
-            </span>
-          ) : (
-            <span>کد منقضی شده است.</span>
-          )}
-        </div>
-
-        <div className="timer">
-          {sending ? (
-            <button className="btn-ghost" type="button" disabled>در حال ارسال…</button>
-          ) : resendIn > 0 ? (
-            <button className="btn-ghost" type="button" disabled>
-              ارسال مجدد تا {mmss(resendIn)}
-            </button>
-          ) : (
-            <button className="btn-ghost" type="button" onClick={() => void send("resend")}>ارسال مجدد کد</button>
-          )}
-        </div>
-
-        {error && <div className="field-error" style={{ justifyContent: "center", marginTop: 12 }}>{error}</div>}
-
-        <button
-          className="btn-primary"
-          onClick={verify}
-          disabled={!filled || verifying}
-          type="button"
-          style={{ width: "100%", marginTop: 24 }}
-        >
-          {verifying ? "در حال تأیید…" : "تأیید"}
-        </button>
+    <div className="card" style={{ textAlign: "center" }}>
+      <h2 style={{ marginTop: 0 }}>کد ۶ رقمی</h2>
+      <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>کد ارسال‌شده به شماره</p>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+        <span style={{ fontWeight: 700, fontSize: 15, direction: "ltr" }}>{phoneFa(phone)}</span>
+        <button className="btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={onBack} type="button">ویرایش</button>
       </div>
+
+      <div className="otp" role="group" aria-label="کد تأیید ۶ رقمی" onPaste={onPaste}>
+        {digits.map((d, i) => (
+          <input
+            key={i}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            value={d ? toFa(d) : ""}
+            onChange={(e) => setDig(i, e.target.value.slice(-1))}
+            onKeyDown={(e) => onKeyDown(i, e)}
+            maxLength={1}
+            inputMode="numeric"
+            aria-label={`رقم ${toFa(String(i + 1))}`}
+            className={[d ? "filled" : "", codeErr ? "err" : ""].join(" ").trim()}
+          />
+        ))}
+      </div>
+
+      <div className="timer">
+        {expiresIn > 0 ? (
+          <span>
+            کد تا <span className="count">{mmss(expiresIn)}</span> معتبر است.
+          </span>
+        ) : (
+          <span>کد منقضی شده است.</span>
+        )}
+      </div>
+
+      <div className="timer">
+        {sending ? (
+          <button className="btn-ghost" type="button" disabled>در حال ارسال…</button>
+        ) : resendIn > 0 ? (
+          <button className="btn-ghost" type="button" disabled>
+            ارسال مجدد تا {mmss(resendIn)}
+          </button>
+        ) : (
+          <button className="btn-ghost" type="button" onClick={() => void send("resend")}>ارسال مجدد کد</button>
+        )}
+      </div>
+
+      {error && <div className="field-error" style={{ justifyContent: "center", marginTop: 12 }}>{error}</div>}
+
+      <button
+        className="btn-primary"
+        onClick={verify}
+        disabled={!filled || verifying}
+        type="button"
+        style={{ width: "100%", marginTop: 24 }}
+      >
+        {verifying ? "در حال تأیید…" : "تأیید"}
+      </button>
     </div>
   );
 }

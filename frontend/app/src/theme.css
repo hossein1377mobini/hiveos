@@ -1,36 +1,51 @@
-/* HiveOS SPA theme — flat, RTL, Persian (Vazirmatn), following the approved mockups. */
+/* HiveOS SPA theme — flat, RTL, Persian (IranYekanXFaNum), following the approved
+   design-system tokens (design-system.md §2). */
 
-/* Self-hosted Vazirmatn (variable font, wght 100–900) — no Google Fonts CDN.
-   Registers the same family name and covers every weight used by the theme
-   so the visual result is pixel-identical to the previous @import. */
+/* Self-hosted IranYekanXFaNum (variable font, wght 100–900) — no external CDN,
+   compatible with On-Prem / Air-gapped deployments. */
 @font-face {
-  font-family: "Vazirmatn";
-  src: url("./assets/fonts/Vazirmatn.woff2") format("woff2");
+  font-family: "IranYekanXFaNum";
+  src: url("./assets/fonts/IRANYekanXVFaNumVF.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 :root {
-  --bg: #f6f7fb;
-  --surface: #ffffff;
-  --border: #e4e7ef;
-  --text: #1f2430;
-  --muted: #6b7280;
-  --brand: #3b4fe0;
-  --brand-weak: #eef0ff;
-  --brand-strong: #2b3cb8;
+  /* Neutral scale (design-system.md §2.1) */
+  --neutral-0: #ffffff;
+  --neutral-50: #f7f7f5;
+  --neutral-200: #e4e4e1;
+  --neutral-400: #a8a79e;
+  --neutral-600: #57564f;
+  --neutral-900: #1c1c19;
+
+  /* Brand / accent — HiveOS Navy (design-system.md §2.1) */
+  --accent-50: #eef1fb;
+  --accent-200: #c4cdf0;
+  --accent-600: #2b3a73; /* primary */
+  --accent-800: #1b264d; /* strong / hover */
+
+  /* Semantic mapping (kept so existing class names keep working) */
+  --bg: var(--neutral-50);
+  --surface: var(--neutral-0);
+  --border: var(--neutral-200);
+  --text: var(--neutral-900);
+  --muted: var(--neutral-600);
+  --brand: var(--accent-600);
+  --brand-weak: var(--accent-50);
+  --brand-strong: var(--accent-800);
   --ok: #16a34a;
   --ok-weak: #e8f7ee;
   --err: #dc2626;
   --err-weak: #fdeeee;
-  --radius: 14px;
-  --shadow: 0 10px 30px rgba(31, 36, 48, 0.06);
+  --radius: 18px;
+  --shadow: 0 10px 30px rgba(28, 28, 25, 0.06);
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
 body {
   margin: 0;
-  font-family: "Vazirmatn", "Tahoma", system-ui, sans-serif;
+  font-family: "IranYekanXFaNum", "Vazirmatn", "Tahoma", system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
   direction: rtl;

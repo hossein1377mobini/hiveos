@@ -1,35 +1,24 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "./api";
 import App from "./App";
-import { fillValidOrg, fillValidOwner, fillOtp, ORG_NAME, PHONE } from "./test/helpers";
+import { organizationApi } from "../services/organizationApi";
+import { authApi } from "../services/authApi";
+import { fillValidOrg, fillValidOwner, fillOtp, ORG_NAME, PHONE } from "../test/helpers";
 
-vi.mock("./api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./api")>();
-  return {
-    ...actual,
-    api: {
-      createOrganization: vi.fn(),
-      createOwner: vi.fn(),
-      sendOtp: vi.fn(),
-      resendOtp: vi.fn(),
-      verifyOtp: vi.fn(),
-      initializeWorkspace: vi.fn(),
-      initializeBrain: vi.fn(),
-      configureIngestion: vi.fn(),
-      getIngestionStatus: vi.fn(),
-      listDocuments: vi.fn(),
-      getOnboardingStatus: vi.fn(),
-      completeOnboarding: vi.fn(),
-    },
-  };
-});
+vi.mock("../services/organizationApi", () => ({
+  organizationApi: { createOrganization: vi.fn() },
+}));
 
-const createOrg = () => vi.mocked(api.createOrganization);
-const createOwner = () => vi.mocked(api.createOwner);
-const sendOtp = () => vi.mocked(api.sendOtp);
-const verifyOtp = () => vi.mocked(api.verifyOtp);
+vi.mock("../services/authApi", () => ({
+  authApi: { createOwner: vi.fn(), sendOtp: vi.fn(), resendOtp: vi.fn(), verifyOtp: vi.fn() },
+}));
+
+const createOrg = () => vi.mocked(organizationApi.createOrganization);
+const createOwner = () => vi.mocked(authApi.createOwner);
+const sendOtp = () => vi.mocked(authApi.sendOtp);
+const verifyOtp = () => vi.mocked(authApi.verifyOtp);
 
 describe("App onboarding wizard", () => {
   beforeEach(() => {
@@ -58,7 +47,11 @@ describe("App onboarding wizard", () => {
 
   it("starts at RegisterOrganization and walks to OtpVerify with the owner's phone", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
 
     // step 0: RegisterOrganization
     expect(screen.getByRole("heading", { name: "اطلاعات سازمان" })).toBeInTheDocument();

@@ -1,31 +1,15 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { organizationApi } from "../../../services/organizationApi";
 import RegisterOrganization from "./RegisterOrganization";
-import { fillValidOrg, ORG_NAME, WHAT, PRODUCTS, API_KEY } from "../test/helpers";
+import { fillValidOrg, ORG_NAME, WHAT, PRODUCTS, API_KEY } from "../../../test/helpers";
 
-vi.mock("../api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../api")>();
-  return {
-    ...actual,
-    api: {
-      createOrganization: vi.fn(),
-      createOwner: vi.fn(),
-      sendOtp: vi.fn(),
-      verifyOtp: vi.fn(),
-      initializeWorkspace: vi.fn(),
-      initializeBrain: vi.fn(),
-      configureIngestion: vi.fn(),
-      getIngestionStatus: vi.fn(),
-      listDocuments: vi.fn(),
-      getOnboardingStatus: vi.fn(),
-      completeOnboarding: vi.fn(),
-    },
-  };
-});
+vi.mock("../../../services/organizationApi", () => ({
+  organizationApi: { createOrganization: vi.fn() },
+}));
 
-const createOrg = () => vi.mocked(api.createOrganization);
+const createOrg = () => vi.mocked(organizationApi.createOrganization);
 
 function renderForm() {
   const onDone = vi.fn();
