@@ -10,9 +10,12 @@ services:
     image: pgvector/pgvector:pg16
     container_name: hiveos-db
     environment:
-      POSTGRES_DB: hiveos
-      POSTGRES_USER: hiveos
-      POSTGRES_PASSWORD: hiveos
+      POSTGRES_DB: ${POSTGRES_DB:-hiveos}
+      POSTGRES_USER: ${POSTGRES_USER:-hiveos}
+      # S1-15: password is no longer hardcoded — comes from the environment
+      # (infrastructure/.env). Dev fallback is a non-secret placeholder only;
+      # production MUST set POSTGRES_PASSWORD (cp .env.example .env and rotate).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hiveos}
     ports:
       - "5434:5432"
     volumes:
@@ -52,7 +55,7 @@ services:
       PGPORT: "5432"
       PGUSER: hiveos
       PGDATABASE: hiveos
-      PGPASSWORD: hiveos
+      PGPASSWORD: ${POSTGRES_PASSWORD:-hiveos}
       BACKUP_DIR: /var/backups/hiveos
       BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
     volumes:
