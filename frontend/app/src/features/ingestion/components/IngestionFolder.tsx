@@ -1,10 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, ApiError, describeError } from "../api";
-import type { DocumentItem, IngestionCounts } from "../api";
-import Stepper from "../Stepper";
-
-const FA = "۰۱۲۳۴۵۶۷۸۹";
-const toFa = (n: number | string) => String(n).replace(/\d/g, (d) => FA[+d]);
+import { ingestionApi } from "../../../services/ingestionApi";
+import { ApiError, describeError } from "../../../services/http";
+import { toFa } from "../../../utils/persian";
+import type { DocumentItem, IngestionCounts } from "../../../types";
 
 // Mockup 07 status badges + count labels (Persian).
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
@@ -43,7 +41,7 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
       try {
         // Poll the status (counts) together with the document list on the same
         // interval so the chips and the table stay in sync.
-        const [d, s] = await Promise.all([api.listDocuments(), api.getIngestionStatus()]);
+        const [d, s] = await Promise.all([ingestionApi.listDocuments(), ingestionApi.getIngestionStatus()]);
         if (!active) return;
         setDocs(d.items);
         if (s.counts) setCounts(s.counts);
@@ -69,7 +67,7 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
     }
     setBusy(true);
     try {
-      const r = await api.configureIngestion(p);
+      const r = await ingestionApi.configureIngestion(p);
       setConfiguredPath(r.folderPath);
       setCounts(r.counts);
       setConfigured(true);
@@ -85,9 +83,7 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
   }
 
   return (
-    <div style={{ maxWidth: 620, margin: "0 auto", padding: "40px 0" }}>
-      <Stepper active={5} />
-
+    <>
       {!configured ? (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>انتخاب مسیر اسناد</h2>
@@ -183,6 +179,6 @@ export default function IngestionFolder({ onDone, onBack }: Props) {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }

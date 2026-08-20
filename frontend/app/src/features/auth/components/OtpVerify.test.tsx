@@ -1,34 +1,18 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError } from "../api";
+import { authApi } from "../../../services/authApi";
+import { ApiError } from "../../../services/http";
 import OtpVerify from "./OtpVerify";
-import { fillOtp, PHONE } from "../test/helpers";
+import { fillOtp, PHONE } from "../../../test/helpers";
 
-vi.mock("../api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../api")>();
-  return {
-    ...actual,
-    api: {
-      createOrganization: vi.fn(),
-      createOwner: vi.fn(),
-      sendOtp: vi.fn(),
-      resendOtp: vi.fn(),
-      verifyOtp: vi.fn(),
-      initializeWorkspace: vi.fn(),
-      initializeBrain: vi.fn(),
-      configureIngestion: vi.fn(),
-      getIngestionStatus: vi.fn(),
-      listDocuments: vi.fn(),
-      getOnboardingStatus: vi.fn(),
-      completeOnboarding: vi.fn(),
-    },
-  };
-});
+vi.mock("../../../services/authApi", () => ({
+  authApi: { createOwner: vi.fn(), sendOtp: vi.fn(), resendOtp: vi.fn(), verifyOtp: vi.fn() },
+}));
 
-const sendOtp = () => vi.mocked(api.sendOtp);
-const resendOtp = () => vi.mocked(api.resendOtp);
-const verifyOtp = () => vi.mocked(api.verifyOtp);
+const sendOtp = () => vi.mocked(authApi.sendOtp);
+const resendOtp = () => vi.mocked(authApi.resendOtp);
+const verifyOtp = () => vi.mocked(authApi.verifyOtp);
 
 function renderForm() {
   const onDone = vi.fn();
