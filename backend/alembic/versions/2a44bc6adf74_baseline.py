@@ -20,6 +20,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # S1-17: install the pgvector extension before the first ``vector(N)``
+    # column is created (document_chunks.embedding below). Idempotent, so it
+    # also covers a fresh volume that skipped the initdb hook
+    # (infrastructure/initdb/01-enable-vector.sql). Must precede any
+    # ``VECTOR(...)`` column DDL or the type will not exist yet.
+    op.execute('CREATE EXTENSION IF NOT EXISTS vector')
     op.create_table('tenants',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('slug', sa.String(length=64), nullable=False),
