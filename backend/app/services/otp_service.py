@@ -23,7 +23,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import security
+from app import ratelimit, security
 from app.config import get_settings
 from app.errors import ApiError, GoneError, NotFoundError, RateLimitedError
 from app.models import Organization, OtpCode, Owner
@@ -147,9 +147,28 @@ async def resend_otp(session: AsyncSession, phone: str) -> OtpSendResponse:
     return await _issue(session, owner, void_existing=True)
 
 
-async def verify_otp(session: AsyncSession, phone: str, code: str) -> OtpVerifyResponse:
+async def verify_otp(
+    session: AsyncSession, phone: str, code: str, ip: str | None = None
+) -> OtpVerifyResponse:
     canonical = _normalize_phone(phone)
+    ip = ip or "unknown"
     now = datetime.now(UTC)
+    settings = get_settings()
+    lockout_threshold = settings.otp_lockout_max_attempts
+    lockout_window = settings.otp_lockout_window_seconds
+
+    # S1-12: account/IP lockout checked BEFORE any per-code logic. It is
+    # independent of the per-code ``otp_max_attempts`` cap so that brute-force
+    # across resends (which mint a fresh code and thus a fresh per-code budget)
+    # still locks the account out.
+    locked, retry_after = await ratelimit.otp_lockout_status(
+        canonical, ip, lockout_threshold
+    )
+    if locked:
+        raise RateLimitedError(
+            "too many verification attempts; account locked",
+            retry_after=retry_after,
+        )
 
     result = await session.execute(
         select(OtpCode)
@@ -165,7 +184,7 @@ async def verify_otp(session: AsyncSession, phone: str, code: str) -> OtpVerifyR
     if otp is None:
         raise GoneError("otp expired or not found")
 
-    max_attempts = get_settings().otp_max_attempts
+    max_attempts = settings.otp_max_attempts
     if otp.attempts >= max_attempts:
         raise RateLimitedError("too many failed attempts")
 
@@ -180,6 +199,20 @@ async def verify_otp(session: AsyncSession, phone: str, code: str) -> OtpVerifyR
         )
         new_attempts = result.scalar_one()
         await session.commit()
+
+        # S1-12: every wrong attempt also counts toward the account/IP lockout
+        # (spans codes). Handled ahead of the per-code 429 so an account that
+        # crossed the lockout threshold is reported as locked, not just
+        # capped on this single code.
+        over, lock_retry_after = await ratelimit.otp_lockout_record(
+            canonical, ip, lockout_threshold, lockout_window
+        )
+        if over:
+            raise RateLimitedError(
+                "too many verification attempts; account locked",
+                retry_after=lock_retry_after,
+            )
+
         if new_attempts >= max_attempts:
             raise RateLimitedError("too many failed attempts")
         raise ApiError("invalid verification code")
@@ -200,6 +233,9 @@ async def verify_otp(session: AsyncSession, phone: str, code: str) -> OtpVerifyR
     )
     if claimed.scalar_one_or_none() is None:
         raise GoneError("otp expired or already used")
+
+    # S1-12: a successful verification clears the account/IP lockout counters.
+    await ratelimit.otp_lockout_clear(canonical, ip)
 
     owner = await session.get(Owner, otp.owner_id) if otp.owner_id else None
     if owner is None:

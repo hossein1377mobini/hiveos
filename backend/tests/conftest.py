@@ -23,6 +23,12 @@ from app.main import create_app
 # Disable the ingestion background worker/watcher auto-start for deterministic tests.
 get_settings().enable_ingestion_background = False
 
+# S1-12: disable Redis-backed rate limiting for the main suite. The dedicated
+# tests/test_rate_limit.py re-enables it with small limits + flushed keys to
+# exercise the 429/lockout paths deterministically without tripping the shared
+# "127.0.0.1" bucket across the hundreds of registration calls here.
+get_settings().rate_limit_enabled = False
+
 _TRUNCATE_SQL = (
     "TRUNCATE TABLE processing_jobs, documents, ingestion_folder_configs, "
     "document_chunks, vector_indexes, knowledge_repositories, "

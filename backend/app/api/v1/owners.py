@@ -14,6 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Cookie, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import enforce_registration_ip_limit
 from app.db import get_db
 from app.schemas import OwnerCreate, OwnerCreated
 from app.services import organization_service, owner_service
@@ -35,6 +36,7 @@ async def create_owner(
     response: Response,
     session: DbSession,
     onboarding: Annotated[str | None, Cookie()] = None,
+    _rate: Annotated[None, Depends(enforce_registration_ip_limit)] = None,
 ) -> OwnerCreated:
     pending_org = await organization_service.resolve_pending_org_by_onboard_token(
         session, onboarding

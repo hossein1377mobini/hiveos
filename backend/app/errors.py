@@ -69,6 +69,12 @@ class RateLimitedError(ApiError):
     status_code = status.HTTP_429_TOO_MANY_REQUESTS
     error_code = "rate_limited"
 
+    def __init__(self, message: str | None = None, *, retry_after: int | None = None):
+        super().__init__(message)
+        # Optional Retry-After (seconds) surfaced as the `Retry-After` header so
+        # well-behaved clients can back off instead of polling (RFC 6585 §4).
+        self.retry_after = retry_after
+
 
 class InternalError(ApiError):
     # 500 for unexpected server-side failures. auditLogged is set per-instance
@@ -99,7 +105,14 @@ def _validation_problem(errors: dict[str, list[str]]) -> dict:
 def install_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _domain_error(_: Request, exc: ApiError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content=_error_payload(exc))
+        # Surface Retry-After on 429s (RFC 6585 §4) so clients can back off.
+        headers: dict[str, str] = {}
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is not None:
+            headers["Retry-After"] = str(retry_after)
+        return JSONResponse(
+            status_code=exc.status_code, content=_error_payload(exc), headers=headers
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _request_validation(_: Request, exc: RequestValidationError) -> JSONResponse:

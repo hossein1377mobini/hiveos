@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import enforce_registration_ip_limit
 from app.db import get_db
 from app.schemas import Organization, OrganizationCreate
 from app.services import organization_service
@@ -25,6 +26,7 @@ async def create_organization(
     data: OrganizationCreate,
     session: DbSession,
     response: Response,
+    _rate: Annotated[None, Depends(enforce_registration_ip_limit)],
 ) -> Organization:
     org, onboard_token = await organization_service.create_organization(session, data)
 

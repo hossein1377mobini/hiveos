@@ -52,6 +52,24 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     session_ttl_seconds: int = 86400  # 24h default for the initial owner session (US-002)
 
+    # ---- S1-12: Redis-backed rate limiting + OTP lockout ------------------
+    # Master switch; also lets tests deterministically disable limiting while
+    # still exercising the happy paths (conftest sets this False for the main
+    # suite; test_rate_limit.py re-enables it with small limits + flushed keys).
+    rate_limit_enabled: bool = True
+    rate_window_seconds: int = 60
+    # Per-IP budgets for the unauthenticated PBKDF2/signup endpoints. PBKDF2-600k
+    # is deliberately CPU-expensive, so an unauthenticated caller must not be
+    # able to sink arbitrary CPU/queue slots by hammering these.
+    ip_rate_limit_registration: int = 20
+    # Per-IP budget for OTP send/resend (SMS cost / flood vector).
+    ip_rate_limit_otp_send: int = 10
+    # OTP verify lockout: failures counted per account (canonical phone) AND per
+    # client IP, independent of the per-code otp_max_attempts cap, so brute-force
+    # across resends still locks. Lockout clears on success or after the window.
+    otp_lockout_max_attempts: int = 10
+    otp_lockout_window_seconds: int = 900  # 15 minutes
+
     # ADR-019 decision 4: mock SMS first. When True, the mock provider raises 503
     # (FR-007: no internet / gateway down) instead of delivering the code.
     mock_otp_offline: bool = False
