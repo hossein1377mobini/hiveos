@@ -95,6 +95,10 @@ class Settings(BaseSettings):
     ingestion_chunk_overlap: int = 64
     ingestion_worker_poll_seconds: float = 2.0
     ingestion_job_stale_seconds: int = 300  # a job stuck in 'running' this long is reclaimed
+    # S1-10: failed ingest jobs are re-queued (with exponential backoff) until
+    # ``ingestion_job_max_attempts`` is reached, then they settle terminal `failed`.
+    ingestion_job_max_attempts: int = 3
+    ingestion_job_backoff_seconds: float = 5.0  # base backoff; delay = base * 2**(attempts-1)
     enable_ingestion_background: bool = True  # start folder watchers + job worker at boot
 
 

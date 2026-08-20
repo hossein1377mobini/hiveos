@@ -128,4 +128,29 @@ describe("OtpVerify", () => {
       await screen.findByText("کد منقضی شده است. کد تازه دریافت کنید."),
     ).toBeInTheDocument();
   });
+
+  it("keeps the resend button disabled for the cooldown carried by a 429 body", async () => {
+    vi.useFakeTimers();
+    // S1-19: the backend now surfaces ``resendAfterSeconds`` in the 429 body; the
+    // component must read it and hold the resend button through that window.
+    sendOtp().mockRejectedValue(
+      new ApiError(429, "RATE_LIMITED", "raw server detail", {
+        resendAfterSeconds: 12,
+      }),
+    );
+    renderForm();
+
+    await act(async () => {}); // flush the initial async send (-> 429)
+    expect(sendOtp()).toHaveBeenCalledTimes(1);
+
+    // The 429 carries a 12s cooldown -> resend stays disabled with a countdown.
+    expect(screen.getByText(/ارسال مجدد تا/)).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(12000);
+    });
+
+    // Cooldown elapsed -> resend re-enables.
+    expect(screen.getByRole("button", { name: "ارسال مجدد کد" })).toBeEnabled();
+  });
 });

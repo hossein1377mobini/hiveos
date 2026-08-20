@@ -11,7 +11,7 @@ honoring ``attempts`` for retry).
 """
 
 import asyncio
-import contextlib
+import logging
 import os
 import threading
 from datetime import UTC, datetime, timedelta
@@ -33,6 +33,8 @@ from app.services import ingestion_pipeline
 
 _WORKER: "JobWorker" | None = None
 _WORKER_LOCK = threading.Lock()
+
+logger = logging.getLogger(__name__)
 
 
 async def _process_one(job_id: UUID, settings, engine) -> None:
@@ -202,6 +204,40 @@ def _claim_pending_ids(engine) -> list[UUID]:
                 )
                 .values(status="pending", last_error="reclaimed after worker stall")
             )
+
+            # S1-10: re-queue failed jobs that still have attempts left, once their
+            # exponential backoff has elapsed (delay = base * 2**(attempts-1)). A
+            # failed job with ``attempts >= max`` is terminal and never re-queued.
+            failed_rows = (
+                await session.execute(
+                    select(
+                        ProcessingJob.id,
+                        ProcessingJob.attempts,
+                        ProcessingJob.updated_at,
+                    ).where(ProcessingJob.status == "failed")
+                )
+            ).all()
+            requeue_ids: list[UUID] = []
+            max_attempts = settings.ingestion_job_max_attempts
+            base = settings.ingestion_job_backoff_seconds
+            for jid, attempts, updated_at in failed_rows:
+                attempts = attempts or 0
+                if attempts >= max_attempts:
+                    continue  # exhausted — leave terminal `failed`
+                delay = base * (2 ** max(attempts - 1, 0))
+                if updated_at is not None and (now - updated_at).total_seconds() < delay:
+                    continue  # still within the backoff window
+                requeue_ids.append(jid)
+            if requeue_ids:
+                await session.execute(
+                    ProcessingJob.__table__.update()
+                    .where(
+                        ProcessingJob.status == "failed",
+                        ProcessingJob.id.in_(requeue_ids),
+                    )
+                    .values(status="pending", updated_at=now)
+                )
+
             ids = (
                 await session.execute(
                     ProcessingJob.__table__.update()
@@ -235,8 +271,12 @@ class JobWorker(threading.Thread):
 
     def run(self) -> None:
         while not self._stop.wait(self.interval):
-            with contextlib.suppress(Exception):  # keep the worker alive on transient errors
+            try:
                 process_pending_jobs()
+            except Exception:  # noqa: BLE001 — keep the worker alive on transient errors
+                # S1-10: never swallow silently — log the full traceback so a
+                # broken poll doesn't vanish into a black hole.
+                logger.exception("ingestion job worker poll failed")
 
     def stop(self) -> None:
         self._stop.set()
