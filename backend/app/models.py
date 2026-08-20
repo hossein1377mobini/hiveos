@@ -201,7 +201,7 @@ class OtpCode(Base):
     code_hash: Mapped[str] = mapped_column(String(64))  # SHA-256 hex digest
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(
-        Integer, CheckConstraint("attempts >= 0", name="ck_processing_jobs_attempts"), default=0
+        Integer, CheckConstraint("attempts >= 0", name="ck_otp_codes_attempts"), default=0
     )
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
