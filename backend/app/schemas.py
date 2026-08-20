@@ -286,6 +286,35 @@ class DocumentStatusResponse(BaseModel):
     error: str | None = None
 
 
+class PageMeta(BaseModel):
+    """Pagination metadata for list endpoints (S1-18 response envelope).
+
+    ``total`` is the full result-set size before ``page``/``pageSize`` are
+    applied, so clients can render page controls without fetching every page.
+    ``totalPages`` is ``ceil(total / pageSize)`` (0 for an empty result set).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total: int
+    page: int
+    pageSize: int
+    totalPages: int
+
+
+class DocumentPage(BaseModel):
+    """Paginated ``/documents`` envelope (S1-18).
+
+    Replaces the previous bare array so the list carries its own pagination
+    metadata. See docs/decisions/2026-08-20-paginated-list-envelope.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[Document]
+    meta: PageMeta
+
+
 # ---------------------------------------------------------------- US-008
 OnboardingStep = Literal[
     "register-organization",

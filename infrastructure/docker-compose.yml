@@ -37,5 +37,30 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # S1-16: backup/recovery sidecar (ADR-006). Reuses the pg16 image so the
+  # pg_dump/pg_restore version always matches the server. Runs backup.sh on a
+  # loop (BACKUP_INTERVAL_SECONDS, default nightly) into the hiveos-backups
+  # volume (host-mounted ./backups). See infrastructure/backup/README.md.
+  pgbackup:
+    image: pgvector/pgvector:pg16
+    container_name: hiveos-pgbackup
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: hiveos
+      PGDATABASE: hiveos
+      PGPASSWORD: hiveos
+      BACKUP_DIR: /var/backups/hiveos
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
+    volumes:
+      - hiveos-backups:/var/backups/hiveos
+      - ./backup:/backup:ro
+    entrypoint: ["/bin/bash", "/backup/backup-loop.sh"]
+    restart: unless-stopped
+
 volumes:
   hiveos-db-data:
+  hiveos-backups:

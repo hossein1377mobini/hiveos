@@ -181,17 +181,90 @@ async def get_ingestion_status(
     )
 
 
+# ---------------------------------------------------------------- list/filter/sort
+#
+# S1-18: pagination contract for GET /documents. Only an explicit allowlist of
+# columns is sortable (client input is never interpolated into SQL), and both
+# `status` and `filter` are scalar, parameterised predicates (no free-text SQL).
+
+SORTABLE_COLUMNS: dict[str, object] = {
+    "createdAt": Document.created_at,
+    "filename": Document.filename,
+    "sizeBytes": Document.size_bytes,
+    "status": Document.status,
+    "format": Document.format,
+}
+
+DEFAULT_SORT = "-createdAt"
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+
+def _parse_sort(raw: str) -> tuple[object, bool]:
+    """Parse ``sort`` into ``(column, descending)``, defaulting to recency.
+
+    Format: ``field`` (ascending) or ``-field`` (descending). Unknown fields fall
+    back to the default so a malformed client can never error the request.
+    """
+    descending = raw.startswith("-")
+    key = raw[1:] if descending else raw
+    column = SORTABLE_COLUMNS.get(key)
+    if column is None:
+        return SORTABLE_COLUMNS["createdAt"], True
+    return column, descending
+
+
+async def _count_documents(
+    session: AsyncSession, org_id: UUID, status: str | None, query: str | None
+) -> int:
+    stmt = select(func.count()).where(Document.organization_id == org_id)
+    if status:
+        stmt = stmt.where(Document.status == status)
+    if query:
+        stmt = stmt.where(Document.filename.ilike(f"%{query}%"))
+    return (await session.execute(stmt)).scalar_one()
+
+
 async def list_documents(
-    session: AsyncSession, org: Organization
-) -> list[schemas.Document]:
-    rows = (
-        await session.execute(
-            select(Document)
-            .where(Document.organization_id == org.id)
-            .order_by(Document.created_at.desc())
-        )
-    ).scalars().all()
-    return [_document_schema(d) for d in rows]
+    session: AsyncSession,
+    org: Organization,
+    *,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    sort: str = DEFAULT_SORT,
+    status_filter: str | None = None,
+    query: str | None = None,
+) -> schemas.DocumentPage:
+    """List an org's documents with pagination, sorting and filtering (S1-18).
+
+    Returns an envelope ``{items, meta}`` where ``meta.total`` is the count of
+    matching documents BEFORE paging. ``status_filter`` narrows to one ingestion
+    status; ``query`` is a case-insensitive substring match on ``filename``.
+    """
+    column, descending = _parse_sort(sort)
+    order = column.desc() if descending else column.asc()
+
+    total = await _count_documents(session, org.id, status_filter, query)
+
+    stmt = select(Document).where(Document.organization_id == org.id)
+    if status_filter:
+        stmt = stmt.where(Document.status == status_filter)
+    if query:
+        stmt = stmt.where(Document.filename.ilike(f"%{query}%"))
+    stmt = stmt.order_by(order, Document.id).offset((page - 1) * page_size).limit(page_size)
+
+    rows = (await session.execute(stmt)).scalars().all()
+
+    total_pages = -(-total // page_size) if total else 0
+    return schemas.DocumentPage(
+        items=[_document_schema(d) for d in rows],
+        meta=schemas.PageMeta(
+            total=total,
+            page=page,
+            pageSize=page_size,
+            totalPages=total_pages,
+        ),
+    )
 
 
 async def get_document_status(
