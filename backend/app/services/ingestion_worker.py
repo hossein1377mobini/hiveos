@@ -19,6 +19,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
 from app.models import (
@@ -81,20 +82,20 @@ async def _process_one(job_id: UUID, settings, engine) -> None:
             )
             vectors = ingestion_pipeline.embed_texts(chunks)
 
-            for chunk, vec in zip(chunks, vectors, strict=True):
-                session.add(
-                    DocumentChunk(
-                        tenant_id=doc.tenant_id,
-                        organization_id=doc.organization_id,
-                        brain_id=doc.brain_id,
-                        source_document_id=str(doc.id),  # column is String(64)
-                        content=chunk,
-                        embedding=vec,
-                        chunk_metadata={
-                            "format": doc.format, "chunk_size": chunk_cfg["chunk_size"]
-                        },
-                    )
+            session.add_all(
+                DocumentChunk(
+                    tenant_id=doc.tenant_id,
+                    organization_id=doc.organization_id,
+                    brain_id=doc.brain_id,
+                    source_document_id=str(doc.id),  # column is String(64)
+                    content=chunk,
+                    embedding=vec,
+                    chunk_metadata={
+                        "format": doc.format, "chunk_size": chunk_cfg["chunk_size"]
+                    },
                 )
+                for chunk, vec in zip(chunks, vectors, strict=True)
+            )
 
             doc.status = "ready"
             doc.error = None
@@ -145,16 +146,34 @@ async def _process_one(job_id: UUID, settings, engine) -> None:
                 await session.rollback()
 
 
+_INGEST_ENGINE = None
+_INGEST_ENGINE_LOCK = threading.Lock()
+
+
+def _worker_engine():
+    """Reuse ONE null-pool async engine across jobs (no per-call create/dispose).
+
+    ``NullPool`` means every ``connect()`` — on whichever event loop drives the
+    job — opens a fresh asyncpg connection that is closed on release, so the
+    shared engine is loop-safe even though ``process_job`` spins a fresh
+    ``asyncio.run`` loop per unit of work. This removes the S1-07 pool churn of
+    ``create_async_engine(...).dispose()`` per job.
+    """
+    global _INGEST_ENGINE
+    with _INGEST_ENGINE_LOCK:
+        if _INGEST_ENGINE is None:
+            _INGEST_ENGINE = create_async_engine(
+                get_settings().database_url, poolclass=NullPool
+            )
+        return _INGEST_ENGINE
+
+
 def process_job(job_id: UUID) -> None:
     """Synchronous entry point for one job (loop-safe, callable from any thread)."""
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url)
+    engine = _worker_engine()
 
     async def _run():
-        try:
-            await _process_one(job_id, settings, engine)
-        finally:
-            await engine.dispose()
+        await _process_one(job_id, get_settings(), engine)
 
     asyncio.run(_run())
 
@@ -200,11 +219,7 @@ def _claim_pending_ids(engine) -> list[UUID]:
 
 def process_pending_jobs() -> int:
     """Process all currently-pending jobs. Returns how many were attempted."""
-    engine = create_async_engine(get_settings().database_url)
-    try:
-        ids = _claim_pending_ids(engine)
-    finally:
-        asyncio.run(engine.dispose())
+    ids = _claim_pending_ids(_worker_engine())
     for jid in ids:
         process_job(jid)
     return len(ids)
