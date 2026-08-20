@@ -19,7 +19,7 @@ export default function App() {
   const [state, setState] = useState<WizardState>({});
 
   const onOrgCreated = (org: Organization) => {
-    setState((s) => ({ ...s, orgName: org.displayName }));
+    setState((s) => ({ ...s, orgName: org.name }));
     setStep(1);
   };
 

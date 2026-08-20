@@ -54,25 +54,25 @@ describe("api request()", () => {
     await expect(api.completeOnboarding()).resolves.toBeUndefined();
   });
 
-  it("throws ApiError{status, code, message} on a non-2xx", async () => {
+  it("throws ApiError{status, error, message} on a non-2xx", async () => {
     fetchMock.mockResolvedValue(
-      jsonResponse({ code: "PHONE_TAKEN", message: "this phone already exists" }, 409),
+      jsonResponse({ error: "PHONE_TAKEN", message: "this phone already exists" }, 409),
     );
     const err = await api
       .createOwner({ phone: "+989123456789", password: "x", confirmPassword: "x" })
       .catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(409);
-    expect(err.code).toBe("PHONE_TAKEN");
+    expect(err.error).toBe("PHONE_TAKEN");
     expect(err.message).toBe("this phone already exists");
   });
 
-  it("falls back to code 'unknown' on a malformed error body", async () => {
+  it("falls back to error 'unknown' on a malformed error body", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500, text: async () => "<html>boom</html>" });
     const err = await api.getOnboardingStatus().catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(500);
-    expect(err.code).toBe("unknown");
+    expect(err.error).toBe("unknown");
   });
 });
 

@@ -85,7 +85,7 @@ describe("RegisterOrganization", () => {
     const onDone = renderForm();
     const org = {
       id: "org-1",
-      displayName: ORG_NAME,
+      name: ORG_NAME,
       status: "pending",
       tenantId: "t1",
       workspaceId: "w1",
