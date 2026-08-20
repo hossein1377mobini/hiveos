@@ -136,7 +136,7 @@ def test_configure_then_watcher_detects_file(
 
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     assert len(docs) == 1
     assert docs[0]["filename"] == "sample.txt"
     assert docs[0]["format"] == "txt"
@@ -169,7 +169,7 @@ def test_subfolder_files_keep_relpath_and_no_collision(
 
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     filenames = sorted(d["filename"] for d in docs)
     assert filenames == ["alpha/report.txt", "beta/report.txt"]
     assert {d["status"] for d in docs} == {"detected"}
@@ -281,7 +281,7 @@ def test_file_level_isolation_fr008(
 
     _scan(org["id"])
 
-    docs = client.get("/api/v1/documents").json()
+    docs = client.get("/api/v1/documents").json()["items"]
     by_name = {d["filename"]: d for d in docs}
     assert by_name["oversized.txt"]["status"] == "failed"
     assert by_name["oversized.txt"]["error"]
@@ -296,3 +296,77 @@ def test_file_level_isolation_fr008(
     )
     assert [j["filename"] for j in jobs] == ["fine.txt"]
     assert jobs[0]["status"] == "pending"
+
+
+# ---------------------------------------------------------------- S1-18 pagination
+
+
+def _seed_docs(ingest_folder: Path, names: list[str]) -> None:
+    """Write one valid .txt file per name so a single scan detects them all."""
+    for name in names:
+        (ingest_folder / name).write_text(f"content of {name}", encoding="utf-8")
+
+
+def test_documents_pagination_meta_total(
+    client, db, make_org, make_owner, sms_provider, ingest_folder
+):
+    """S1-18: GET /documents returns the {items, meta} envelope with meta.total
+    equal to the full (pre-paging) result-set size, and slices page/pageSize."""
+    org = _activate_org(client, make_org, make_owner, sms_provider)
+    assert _configure(client, ingest_folder).status_code == 201
+    _seed_docs(ingest_folder, ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"])
+    _scan(org["id"])
+
+    body = client.get("/api/v1/documents", params={"page": 1, "pageSize": 2}).json()
+    assert set(body) == {"items", "meta"}
+    assert [d["filename"] for d in body["items"]] == ["e.txt", "d.txt"]  # default -createdAt
+    assert body["meta"] == {"total": 5, "page": 1, "pageSize": 2, "totalPages": 3}
+
+    page3 = client.get("/api/v1/documents", params={"page": 3, "pageSize": 2}).json()
+    assert [d["filename"] for d in page3["items"]] == ["a.txt"]
+    assert page3["meta"]["total"] == 5
+    assert page3["meta"]["totalPages"] == 3
+
+
+def test_documents_pagination_sort_and_filter(
+    client, db, make_org, make_owner, sms_provider, ingest_folder
+):
+    """S1-18: sort allowlist (field/-field) and filter (filename substring +
+    status) drive the order and the result set."""
+    org = _activate_org(client, make_org, make_owner, sms_provider)
+    assert _configure(client, ingest_folder).status_code == 201
+    _seed_docs(ingest_folder, ["bill.txt", "report-a.txt", "report-b.txt", "x.txt"])
+    _scan(org["id"])
+
+    asc = client.get("/api/v1/documents", params={"sort": "filename"}).json()
+    assert [d["filename"] for d in asc["items"]] == [
+        "bill.txt", "report-a.txt", "report-b.txt", "x.txt",
+    ]
+
+    by_name = client.get("/api/v1/documents", params={"filter": "report"}).json()
+    assert {d["filename"] for d in by_name["items"]} == {"report-a.txt", "report-b.txt"}
+    assert by_name["meta"]["total"] == 2
+
+    # status filter: all are `detected`, so `ready` matches nothing.
+    ready = client.get("/api/v1/documents", params={"status": "ready"}).json()
+    assert ready["items"] == []
+    assert ready["meta"]["total"] == 0
+
+    detected = client.get("/api/v1/documents", params={"status": "detected"}).json()
+    assert detected["meta"]["total"] == 4
+
+
+def test_documents_pagination_validation(client, make_org, make_owner, sms_provider):
+    """S1-18: malformed inputs are rejected (422) or safely degraded (sort)."""
+    _activate_org(client, make_org, make_owner, sms_provider)
+
+    # page < 1 and pageSize > 100 are contract violations -> 422.
+    assert client.get("/api/v1/documents", params={"page": 0}).status_code == 422
+    assert client.get("/api/v1/documents", params={"pageSize": 101}).status_code == 422
+    # status is an enum -> bad value -> 422.
+    assert client.get("/api/v1/documents", params={"status": "bogus"}).status_code == 422
+
+    # Unknown sort key falls back to the default (recency) instead of erroring.
+    resp = client.get("/api/v1/documents", params={"sort": "noSuchField"})
+    assert resp.status_code == 200
+    assert resp.json()["meta"]["page"] == 1

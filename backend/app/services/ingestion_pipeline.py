@@ -12,6 +12,7 @@ Seam used by ``process_job``:
     -> caller writes DocumentChunk rows (embedding Vector(EMBED_DIM)).
 """
 
+import math
 import os
 import re
 import threading
@@ -20,6 +21,14 @@ from app.config import get_settings
 
 EMBED_MODEL = "intfloat/multilingual-e5-large"
 EMBED_DIM = 1024
+
+# S1-11: intfloat/multilingual-e5-large is a prefix-carrying E5 model — text must
+# be prefixed with "passage: " (documents to index) or "query: " (search query) for
+# the model to inhabit the correct side of its trained embedding space. fastembed
+# does NOT add these prefixes automatically (PooledEmbedding.embed is pass-through),
+# so we apply them here at embed time.
+_PASSAGE_PREFIX = "passage: "
+_QUERY_PREFIX = "query: "
 
 _lock = threading.Lock()
 _model = None
@@ -62,7 +71,16 @@ def _read_pdf(path: str) -> str:
     from pypdf import PdfReader
 
     reader = PdfReader(path)
-    return "\n".join((page.extract_text() or "") for page in reader.pages)
+    text = "\n".join((page.extract_text() or "") for page in reader.pages)
+    # S1-08: image/scan-only PDFs yield no text layer (pypdf returns "" on every
+    # page). A "ready" document with zero chunks is wrong — reject with an explicit
+    # reason so the worker marks the Document ``failed`` (not ``ready``).
+    if not text.strip():
+        raise ValueError(
+            "no extractable text (image/scanned PDF without a text layer); "
+            "OCR is not supported"
+        )
+    return text
 
 
 def _read_docx(path: str) -> str:
@@ -97,21 +115,44 @@ def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]
     return chunks
 
 
-def embed_texts(chunks: list[str]) -> list[list[float]]:
-    """Embed a batch of text chunks -> list of ``EMBED_DIM`` float vectors."""
+def _l2_normalize(vec: list[float]) -> list[float]:
+    """L2-normalize a vector to unit length (E5 expects cosine = dot on unit vectors)."""
+    norm = math.sqrt(sum(x * x for x in vec))
+    if norm == 0.0:  # degenerate zero vector — leave as-is rather than NaN
+        return vec
+    return [x / norm for x in vec]
+
+
+def _embed(chunks: list[str], prefix: str) -> list[list[float]]:
+    """Embed ``chunks`` (each prefixed) -> list of L2-normalized ``EMBED_DIM`` vectors."""
     if not chunks:
         return []
     model = _get_model()
+    # S1-11: apply the E5 side prefix (passage for documents, query for search) at
+    # embed time — the model was trained with these and fastembed won't add them.
+    prefixed = [f"{prefix}{c}" for c in chunks]
     vectors = []
-    for vec in model.embed(chunks):
+    for vec in model.embed(prefixed):
         dims = list(vec)
         if len(dims) != EMBED_DIM:
             raise RuntimeError(
                 f"embedding dim {len(dims)} != expected {EMBED_DIM}; "
                 f"model/config drift (DocumentChunk.embedding is Vector({EMBED_DIM}))"
             )
-        vectors.append(dims)
+        # S1-11: L2-normalize so cosine similarity (the HNSW operator_class) is
+        # exact. fastembed's PooledEmbedding does NOT normalize E5 outputs.
+        vectors.append(_l2_normalize(dims))
     return vectors
+
+
+def embed_texts(chunks: list[str]) -> list[list[float]]:
+    """Embed document/passage chunks -> list of ``EMBED_DIM`` L2-normalized vectors."""
+    return _embed(chunks, _PASSAGE_PREFIX)
+
+
+def embed_queries(queries: list[str]) -> list[list[float]]:
+    """Embed search queries -> list of ``EMBED_DIM`` L2-normalized vectors."""
+    return _embed(queries, _QUERY_PREFIX)
 
 
 def embedding_dim() -> int:
