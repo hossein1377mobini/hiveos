@@ -35,8 +35,18 @@ class Settings(BaseSettings):
     # migrations go live). Controlled + explicit, not implied.
     create_tables_on_startup: bool = Field(default=True)
 
-    # Encryption key used to protect stored AI provider apiKey (writeOnly).
+    # Master secret; domain-separated subkeys are derived from it (S1-13).
     secret_key: str = Field(default="dev-insecure-change-me")
+
+    # Key separation (S1-13): independent secrets per purpose.
+    #   otp_pepper -> HMAC pepper for OTP codes. Required outside dev/test so OTP
+    #                 never shares key material with the apiKey encryption key.
+    otp_pepper: str | None = Field(default=None)
+
+    #   encryption_keys -> rotated Fernet keys, oldest-first (last = active).
+    #                 Each is base64(url-safe) of a 32-byte key. Empty (dev/test)
+    #                 derives a single domain-separated subkey from secret_key.
+    encryption_keys: list[str] = Field(default_factory=list)
 
     otp_ttl_seconds: int = 120
     otp_max_attempts: int = 5
@@ -76,10 +86,21 @@ def get_settings() -> Settings:
 
 
 def validate_runtime_security(settings: Settings | None = None) -> None:
-    """F-1: fail hard outside dev/test when the insecure placeholder secret is used."""
+    """Fail hard outside dev/test when insecure key configuration is used.
+
+    F-1 (placeholder secret) plus S1-13 key separation: production must supply an
+    independent OTP pepper so OTP never shares key material with the apiKey
+    encryption key derived from ``secret_key``.
+    """
     s = settings or get_settings()
-    if s.env not in ("dev", "test") and s.secret_key == "dev-insecure-change-me":
-        raise RuntimeError(
-            "SECRET_KEY must be set from the environment outside dev/test; "
-            "the dev placeholder is not a safe production key."
-        )
+    if s.env not in ("dev", "test"):
+        if s.secret_key == "dev-insecure-change-me":
+            raise RuntimeError(
+                "SECRET_KEY must be set from the environment outside dev/test; "
+                "the dev placeholder is not a safe production key."
+            )
+        if not s.otp_pepper:
+            raise RuntimeError(
+                "OTP_PEPPER must be set outside dev/test; the OTP HMAC pepper must "
+                "be an independent secret from SECRET_KEY / ENCRYPTION_KEYS."
+            )
