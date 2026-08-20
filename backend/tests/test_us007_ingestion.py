@@ -153,6 +153,37 @@ def test_configure_then_watcher_detects_file(
     assert jobs[0]["status"] == "pending"
 
 
+def test_subfolder_files_keep_relpath_and_no_collision(
+    client, db, make_org, make_owner, sms_provider, ingest_folder
+):
+    """S1-03: subfolder files keep their folder-root-relative path as ``filename``,
+    and two same-named files in different subfolders BOTH enqueue (no UNIQUE
+    collision on the old basename-only ``(org, filename)`` key)."""
+    org = _activate_org(client, make_org, make_owner, sms_provider)
+    assert _configure(client, ingest_folder).status_code == 201
+
+    (ingest_folder / "alpha").mkdir()
+    (ingest_folder / "beta").mkdir()
+    (ingest_folder / "alpha" / "report.txt").write_text("alpha report", encoding="utf-8")
+    (ingest_folder / "beta" / "report.txt").write_text("beta report", encoding="utf-8")
+
+    _scan(org["id"])
+
+    docs = client.get("/api/v1/documents").json()
+    filenames = sorted(d["filename"] for d in docs)
+    assert filenames == ["alpha/report.txt", "beta/report.txt"]
+    assert {d["status"] for d in docs} == {"detected"}
+
+    jobs = db.fetch(
+        "SELECT d.filename, p.status FROM processing_jobs p "
+        "JOIN documents d ON d.id = p.document_id "
+        "WHERE p.organization_id = $1::uuid "
+        "ORDER BY d.filename",
+        org["id"],
+    )
+    assert [j["filename"] for j in jobs] == ["alpha/report.txt", "beta/report.txt"]
+
+
 def test_configure_invalid_paths(client, make_org, make_owner, sms_provider, ingest_folder):
     _activate_org(client, make_org, make_owner, sms_provider)
 
