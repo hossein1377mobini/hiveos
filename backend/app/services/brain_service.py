@@ -14,7 +14,7 @@ structures survive — FR "هیچ ساختار ناقصی باقی نماند"),
 ``InternalError`` so a later call may retry.
 """
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,19 @@ from app.schemas import BrainInitialized, BrainRagConfig
 
 # Basic RAG retrieval config for v0.1 (top-K chunks, chunk sizing, overlap).
 _DEFAULT_RETRIEVAL_CONFIG: dict = {"topK": 5, "chunkSize": 512, "overlap": 64}
+
+# S1-06: the REAL pgvector index (HNSW, cosine) over document_chunks.embedding.
+# Mirrors the DocumentChunk model's ``__table_args__`` Index and migration
+# ed2cf4f94bd2 so ``VectorIndex.status='ready'`` now reflects an actual index.
+_VECTOR_HNSW_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS document_chunks_embedding_hnsw_idx "
+    "ON document_chunks USING hnsw (embedding vector_cosine_ops)"
+)
+
+
+async def _ensure_vector_hnsw_index(session: AsyncSession) -> None:
+    """Create the real HNSW(cosine) pgvector index (idempotent)."""
+    await session.execute(text(_VECTOR_HNSW_INDEX_SQL))
 
 
 def _brain_response(
@@ -149,6 +162,11 @@ async def initialize_brain(session: AsyncSession, org: Organization) -> BrainIni
         )
         session.add(index)
         await session.flush()
+
+        # S1-06: wire VectorIndex to REAL index creation — ensure the underlying
+        # HNSW(cosine) pgvector index exists so 'ready' reflects an actual index
+        # (not just a metadata row). Idempotent + atomic with the brain triple.
+        await _ensure_vector_hnsw_index(session)
 
         session.add_all(
             [

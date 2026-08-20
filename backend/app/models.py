@@ -306,6 +306,18 @@ class DocumentChunk(Base):
     """
 
     __tablename__ = "document_chunks"
+    __table_args__ = (
+        # S1-06: real pgvector HNSW index (cosine distance) over the embedding
+        # column. Declared here so models == migrations (``alembic check`` clean)
+        # and ``init_models().create_all`` produces the same index on the
+        # dev/create-all path. The matching migration is ed2cf4f94bd2.
+        Index(
+            "document_chunks_embedding_hnsw_idx",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
