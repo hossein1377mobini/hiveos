@@ -99,9 +99,7 @@ async def _enforce_cooldown(session: AsyncSession, canonical: str) -> None:
         )
 
 
-async def _issue(
-    session: AsyncSession, owner: Owner, *, void_existing: bool
-) -> OtpSendResponse:
+async def _issue(session: AsyncSession, owner: Owner, *, void_existing: bool) -> OtpSendResponse:
     canonical = owner.phone
     await _enforce_cooldown(session, canonical)
 
@@ -173,9 +171,7 @@ async def verify_otp(
     # independent of the per-code ``otp_max_attempts`` cap so that brute-force
     # across resends (which mint a fresh code and thus a fresh per-code budget)
     # still locks the account out.
-    locked, retry_after = await ratelimit.otp_lockout_status(
-        canonical, ip, lockout_threshold
-    )
+    locked, retry_after = await ratelimit.otp_lockout_status(canonical, ip, lockout_threshold)
     if locked:
         raise RateLimitedError(
             "too many verification attempts; account locked",

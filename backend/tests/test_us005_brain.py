@@ -122,24 +122,33 @@ def test_initialize_brain_idempotent(client, db, make_org, make_owner, sms_provi
     assert second.json()["vectorIndexId"] == first.json()["vectorIndexId"]
 
     # Idempotency must not duplicate the child structures.
-    assert len(
-        db.fetch(
-            "SELECT id FROM organization_brains WHERE organization_id = $1::uuid",
-            org["id"],
+    assert (
+        len(
+            db.fetch(
+                "SELECT id FROM organization_brains WHERE organization_id = $1::uuid",
+                org["id"],
+            )
         )
-    ) == 1
-    assert len(
-        db.fetch(
-            "SELECT id FROM knowledge_repositories WHERE organization_id = $1::uuid",
-            org["id"],
+        == 1
+    )
+    assert (
+        len(
+            db.fetch(
+                "SELECT id FROM knowledge_repositories WHERE organization_id = $1::uuid",
+                org["id"],
+            )
         )
-    ) == 1
-    assert len(
-        db.fetch(
-            "SELECT id FROM vector_indexes WHERE organization_id = $1::uuid",
-            org["id"],
+        == 1
+    )
+    assert (
+        len(
+            db.fetch(
+                "SELECT id FROM vector_indexes WHERE organization_id = $1::uuid",
+                org["id"],
+            )
         )
-    ) == 1
+        == 1
+    )
 
 
 def test_initialize_brain_workspace_not_ready_conflict(client, make_org, make_owner, sms_provider):

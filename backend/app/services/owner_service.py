@@ -36,9 +36,7 @@ async def create_owner(
     if pending_org.status != "pending_owner_registration":
         raise ConflictError("organization is not pending owner registration")
 
-    existing = await session.execute(
-        select(Owner).where(Owner.organization_id == pending_org.id)
-    )
+    existing = await session.execute(select(Owner).where(Owner.organization_id == pending_org.id))
     if existing.scalar_one_or_none() is not None:
         raise ConflictError("owner already registered")
 

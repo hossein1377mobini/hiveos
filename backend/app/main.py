@@ -39,13 +39,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception:  # noqa: BLE001 — never block app boot on background failures
             # S1-20: surface the startup failure with a traceback — never swallow
             # watcher/worker boot errors silently.
-            logging.getLogger("uvicorn.error").exception(
-                "ingestion background startup failed"
-            )
+            logging.getLogger("uvicorn.error").exception("ingestion background startup failed")
     yield
     ingestion_worker.stop_worker()
     folder_watcher.stop_all_watchers()
-
 
 
 def create_app() -> FastAPI:

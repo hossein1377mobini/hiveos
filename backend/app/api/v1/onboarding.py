@@ -56,20 +56,12 @@ async def get_onboarding_status(
     responses={
         200: {
             "description": "Onboarding تکمیل شد — handoff به Hive Mind chat",
-            "content": {
-                "application/json": {
-                    "schema": OnboardingCompleted.model_json_schema()
-                }
-            },
+            "content": {"application/json": {"schema": OnboardingCompleted.model_json_schema()}},
         },
         401: {"description": "سشن معتبر نیست"},
         409: {
             "description": "راه‌اندازی ناقص است — مراحل ناتمام",
-            "content": {
-                "application/json": {
-                    "schema": OnboardingIncomplete.model_json_schema()
-                }
-            },
+            "content": {"application/json": {"schema": OnboardingIncomplete.model_json_schema()}},
         },
     },
 )
@@ -85,4 +77,3 @@ async def complete_onboarding(
             media_type="application/json",
         )
     return OnboardingCompleted()
-

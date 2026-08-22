@@ -86,9 +86,7 @@ def _decode_fernet_key(b64: str) -> bytes:
     except Exception as exc:  # noqa: BLE001 — normalize to a clear config error
         raise ValueError(f"encryption key is not valid url-safe base64: {exc!r}") from exc
     if len(raw) != _FERNET_KEY_BYTES:
-        raise ValueError(
-            f"encryption key must decode to {_FERNET_KEY_BYTES} bytes, got {len(raw)}"
-        )
+        raise ValueError(f"encryption key must decode to {_FERNET_KEY_BYTES} bytes, got {len(raw)}")
     return raw
 
 

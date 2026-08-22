@@ -99,25 +99,20 @@ def _bootstrap(client, make_org, make_owner, sms_provider, folder: Path) -> dict
 
     assert client.post("/api/v1/workspaces/initialize").status_code == 201
     assert client.post("/api/v1/brain/initialize").status_code == 201
-    cfg = client.post(
-        "/api/v1/ingestion-folder/configure", json={"folderPath": str(folder)}
-    )
+    cfg = client.post("/api/v1/ingestion-folder/configure", json={"folderPath": str(folder)})
     assert cfg.status_code == 201, cfg.text
     return org
 
 
 def _completed_rows(db, org_id: str) -> list:
     return db.fetch(
-        "SELECT id, completed_at FROM organization_onboarding "
-        "WHERE organization_id = $1::uuid",
+        "SELECT id, completed_at FROM organization_onboarding WHERE organization_id = $1::uuid",
         org_id,
     )
 
 
 def _completion_audits(db) -> list:
-    return db.fetch(
-        "SELECT id, action FROM audit_logs WHERE action = 'onboarding.completed'"
-    )
+    return db.fetch("SELECT id, action FROM audit_logs WHERE action = 'onboarding.completed'")
 
 
 # ---------------------------------------------------------------- tests
@@ -210,9 +205,7 @@ def test_complete_idempotent_no_duplicate_audit(
     assert len(_completion_audits(db)) == 1
 
 
-def test_complete_incomplete_org_conflict_409(
-    client, db, make_org, make_owner, sms_provider
-):
+def test_complete_incomplete_org_conflict_409(client, db, make_org, make_owner, sms_provider):
     """SCENARIO 5 — POST complete on an org not fully bootstrapped (owner created,
     OTP NOT verified, no workspace/brain/folder) returns 409 OnboardingIncomplete
     with onboardingStatus=in_progress and the exact missing steps (verify-owner +

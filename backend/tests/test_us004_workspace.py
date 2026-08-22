@@ -88,9 +88,7 @@ def test_initialize_workspace_idempotent(client, db, make_org, make_owner, sms_p
     # Same workspace id on the repeat call; still exactly one row.
     assert second.json()["workspaceId"] == first.json()["workspaceId"]
     assert second.json()["status"] == "ready"
-    rows = db.fetch(
-        "SELECT id FROM workspaces WHERE organization_id = $1::uuid", org["id"]
-    )
+    rows = db.fetch("SELECT id FROM workspaces WHERE organization_id = $1::uuid", org["id"])
     assert len(rows) == 1
 
 

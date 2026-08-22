@@ -50,9 +50,7 @@ def test_verify_otp_success_activates_owner_and_org(client, db, make_org, make_o
 
     owner = db.fetchone("SELECT status FROM owners WHERE phone = $1", PHONE)
     assert owner["status"] == "active"
-    org_row = db.fetchone(
-        "SELECT status FROM organizations WHERE id = $1::uuid", org["id"]
-    )
+    org_row = db.fetchone("SELECT status FROM organizations WHERE id = $1::uuid", org["id"])
     assert org_row["status"] == "active"
 
 
@@ -62,9 +60,7 @@ def test_verify_otp_wrong_code_rejected(client, make_org, make_owner, sms_provid
     client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
     code = sms_provider.sent[-1][1]
 
-    resp = client.post(
-        "/api/v1/auth/verify-otp", json={"phone": PHONE, "code": _wrong_code(code)}
-    )
+    resp = client.post("/api/v1/auth/verify-otp", json={"phone": PHONE, "code": _wrong_code(code)})
     assert resp.status_code == 400
 
 
@@ -90,9 +86,7 @@ def test_verify_otp_max_attempts_rate_limited(client, make_org, make_owner, sms_
 
     max_attempts = get_settings().otp_max_attempts
     for _ in range(max_attempts - 1):
-        resp = client.post(
-            "/api/v1/auth/verify-otp", json={"phone": PHONE, "code": wrong}
-        )
+        resp = client.post("/api/v1/auth/verify-otp", json={"phone": PHONE, "code": wrong})
         assert resp.status_code == 400
 
     resp = client.post("/api/v1/auth/verify-otp", json={"phone": PHONE, "code": wrong})

@@ -10,6 +10,8 @@ one ``ProcessingJob`` and drives the ``Document`` + ``Job`` status lifecycle
 honoring ``attempts`` for retry).
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -31,7 +33,7 @@ from app.models import (
 )
 from app.services import ingestion_pipeline
 
-_WORKER: "JobWorker" | None = None
+_WORKER: JobWorker | None = None
 _WORKER_LOCK = threading.Lock()
 
 logger = logging.getLogger(__name__)
@@ -87,9 +89,7 @@ async def _process_one(job_id: UUID, settings, engine) -> None:
             # with zero rows. `read_document_text` already raises the PDF-specific
             # reason; this is the general guard for every other format.
             if not chunks:
-                raise ValueError(
-                    "document produced no text chunks — empty or unparseable content"
-                )
+                raise ValueError("document produced no text chunks — empty or unparseable content")
             vectors = ingestion_pipeline.embed_texts(chunks)
 
             # S1-09: version — drop the previous version's chunks before inserting
@@ -110,9 +110,7 @@ async def _process_one(job_id: UUID, settings, engine) -> None:
                     source_document_id=str(doc.id),  # column is String(64)
                     content=chunk,
                     embedding=vec,
-                    chunk_metadata={
-                        "format": doc.format, "chunk_size": chunk_cfg["chunk_size"]
-                    },
+                    chunk_metadata={"format": doc.format, "chunk_size": chunk_cfg["chunk_size"]},
                 )
                 for chunk, vec in zip(chunks, vectors, strict=True)
             )
@@ -182,9 +180,7 @@ def _worker_engine():
     global _INGEST_ENGINE
     with _INGEST_ENGINE_LOCK:
         if _INGEST_ENGINE is None:
-            _INGEST_ENGINE = create_async_engine(
-                get_settings().database_url, poolclass=NullPool
-            )
+            _INGEST_ENGINE = create_async_engine(get_settings().database_url, poolclass=NullPool)
         return _INGEST_ENGINE
 
 
@@ -257,13 +253,17 @@ def _claim_pending_ids(engine) -> list[UUID]:
                 )
 
             ids = (
-                await session.execute(
-                    ProcessingJob.__table__.update()
-                    .where(ProcessingJob.status == "pending")
-                    .values(status="running", updated_at=now)
-                    .returning(ProcessingJob.id)
+                (
+                    await session.execute(
+                        ProcessingJob.__table__.update()
+                        .where(ProcessingJob.status == "pending")
+                        .values(status="running", updated_at=now)
+                        .returning(ProcessingJob.id)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             container.extend(ids)
             await session.commit()
 

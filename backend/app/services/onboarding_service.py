@@ -94,9 +94,7 @@ async def compute_onboarding_status(
 
     # owner-account + verify-owner (US-002 / US-003)
     owner = (
-        await session.execute(
-            select(Owner).where(Owner.organization_id == org.id)
-        )
+        await session.execute(select(Owner).where(Owner.organization_id == org.id))
     ).scalar_one_or_none()
     if owner is None:
         missing.append("owner-account")
@@ -106,9 +104,7 @@ async def compute_onboarding_status(
 
     # workspace (US-004)
     workspace = (
-        await session.execute(
-            select(Workspace).where(Workspace.organization_id == org.id)
-        )
+        await session.execute(select(Workspace).where(Workspace.organization_id == org.id))
     ).scalar_one_or_none()
     if workspace is None or workspace.status != "ready":
         missing.append("workspace")
@@ -140,9 +136,7 @@ async def compute_onboarding_status(
     # completion marker (US-008)
     completed = (
         await session.execute(
-            select(OrganizationOnboarding).where(
-                OrganizationOnboarding.organization_id == org.id
-            )
+            select(OrganizationOnboarding).where(OrganizationOnboarding.organization_id == org.id)
         )
     ).scalar_one_or_none()
 
@@ -160,9 +154,7 @@ async def compute_onboarding_status(
     return status, ordered
 
 
-async def get_onboarding_status(
-    session: AsyncSession, org: Organization
-) -> OnboardingStatus:
+async def get_onboarding_status(session: AsyncSession, org: Organization) -> OnboardingStatus:
     """Read-only onboarding status (GET /onboarding/status)."""
     status, missing = await compute_onboarding_status(session, org)
     return _to_schema(status, missing)
@@ -183,9 +175,7 @@ async def complete_onboarding(
     """
     existing = (
         await session.execute(
-            select(OrganizationOnboarding).where(
-                OrganizationOnboarding.organization_id == org.id
-            )
+            select(OrganizationOnboarding).where(OrganizationOnboarding.organization_id == org.id)
         )
     ).scalar_one_or_none()
     if existing is not None:

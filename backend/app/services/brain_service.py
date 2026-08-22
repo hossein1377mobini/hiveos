@@ -88,9 +88,7 @@ async def _load_existing_ready_brain(
         )
     ).scalar_one_or_none()
     index = (
-        await session.execute(
-            select(VectorIndex).where(VectorIndex.brain_id == brain.id)
-        )
+        await session.execute(select(VectorIndex).where(VectorIndex.brain_id == brain.id))
     ).scalar_one_or_none()
 
     # A ready brain is always created atomically with its repo + index; if any
@@ -224,17 +222,12 @@ async def initialize_brain(session: AsyncSession, org: Organization) -> BrainIni
                     AuditLog(
                         tenant_id=org.tenant_id,
                         action="brain.initialization.failed",
-                        payload=_audit_payload(
-                            extras={"organization_id": str(org.id)}
-                        ),
+                        payload=_audit_payload(extras={"organization_id": str(org.id)}),
                     )
                 )
         except Exception:  # noqa: BLE001 — audit best-effort; never mask the original failure.
             audit_ok = False
             pass
-        raise InternalError(
-            "brain initialization failed", audit_logged=audit_ok
-        ) from exc
-
+        raise InternalError("brain initialization failed", audit_logged=audit_ok) from exc
 
     return _brain_response(brain, repo, index)

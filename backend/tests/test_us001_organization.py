@@ -39,9 +39,9 @@ def test_create_organization_persists_tenant_workspace_audit(client, db, make_or
     assert db.fetchone("SELECT count(*) AS n FROM tenants")["n"] == 1
     assert db.fetchone("SELECT count(*) AS n FROM workspaces")["n"] == 1
     assert (
-        db.fetchone(
-            "SELECT count(*) AS n FROM audit_logs WHERE action = 'organization.created'"
-        )["n"]
+        db.fetchone("SELECT count(*) AS n FROM audit_logs WHERE action = 'organization.created'")[
+            "n"
+        ]
         == 1
     )
 
