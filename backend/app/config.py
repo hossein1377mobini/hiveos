@@ -26,9 +26,7 @@ class Settings(BaseSettings):
     env: str = "dev"
 
     # Dev defaults keep the HiveOS DB distinct from Kaneo (host port 5434).
-    database_url: str = Field(
-        default="postgresql+asyncpg://hiveos:hiveos@localhost:5434/hiveos"
-    )
+    database_url: str = Field(default="postgresql+asyncpg://hiveos:hiveos@localhost:5434/hiveos")
     redis_url: str = Field(default="redis://localhost:6380/0")
 
     # Lean startup: run schema creation on boot (replaced by Alembic when

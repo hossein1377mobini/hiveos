@@ -74,9 +74,7 @@ def test_password_with_persian_symbol_rejected(client, make_org):
 
     # Uppercase + lowercase + digit present, but the only "symbol" is the
     # Persian letter ی — which the PO rules treat as NOT a Latin symbol.
-    resp = client.post(
-        "/api/v1/users/owner", json=_owner_body(PHONE_A, password="Abcdef1ی")
-    )
+    resp = client.post("/api/v1/users/owner", json=_owner_body(PHONE_A, password="Abcdef1ی"))
     assert resp.status_code == 422
     assert "errors" in resp.json()
 

@@ -51,9 +51,7 @@ async def _enqueue_pending_job(session, org, document_id: uuid.UUID) -> None:
     from app.models import ProcessingJob
 
     job = (
-        await session.execute(
-            select(ProcessingJob).where(ProcessingJob.document_id == document_id)
-        )
+        await session.execute(select(ProcessingJob).where(ProcessingJob.document_id == document_id))
     ).scalar_one_or_none()
     if job is None:
         session.add(
@@ -116,9 +114,7 @@ async def _enqueue_detected(org_id: uuid.UUID, rel_path: str, full_path: str) ->
 
             brain = (
                 await session.execute(
-                    select(OrganizationBrain).where(
-                        OrganizationBrain.organization_id == org_id
-                    )
+                    select(OrganizationBrain).where(OrganizationBrain.organization_id == org_id)
                 )
             ).scalar_one_or_none()
 
@@ -298,10 +294,14 @@ async def start_all_persisted_watchers() -> int:
     started = 0
     async with get_session_factory()() as session:
         rows = (
-            await session.execute(
-                select(IngestionFolderConfig).where(IngestionFolderConfig.active.is_(True))
+            (
+                await session.execute(
+                    select(IngestionFolderConfig).where(IngestionFolderConfig.active.is_(True))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     for cfg in rows:
         if start_watcher(cfg.organization_id, cfg.folder_path):
             started += 1

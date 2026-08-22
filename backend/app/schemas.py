@@ -143,21 +143,20 @@ class OwnerCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def _password_strength(cls, v: str) -> str:
-            # Single source of truth = the contract regex (ASCII symbols only; a
-            # Persian letter never counts as a symbol — PO decision).
-            if not _PASSWORD_PATTERN.fullmatch(v):
-                raise ValueError(
-                    "password must be 8+ chars with an uppercase, a lowercase, a digit "
-                    "and a Latin symbol such as !@#$%^&*"
-                )
-            return v
+        # Single source of truth = the contract regex (ASCII symbols only; a
+        # Persian letter never counts as a symbol — PO decision).
+        if not _PASSWORD_PATTERN.fullmatch(v):
+            raise ValueError(
+                "password must be 8+ chars with an uppercase, a lowercase, a digit "
+                "and a Latin symbol such as !@#$%^&*"
+            )
+        return v
 
     @model_validator(mode="after")
     def _passwords_match(self) -> "OwnerCreate":
         if self.password != self.confirmPassword:
             raise ValueError("confirmPassword must match password")
         return self
-
 
 
 # ---------------------------------------------------------------- US-004 / US-005
@@ -194,6 +193,7 @@ class BrainInitialized(BaseModel):
     vectorIndexId: UUID
     status: Literal["ready", "failed"]
     rag: BrainRagConfig
+
 
 class OwnerCreated(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -341,6 +341,7 @@ class OnboardingStatus(BaseModel):
 
 
 # ----- wave-4 (US-008) Onboarding -----
+
 
 class OnboardingCompleted(BaseModel):
     """POST /onboarding/complete, 200 (handoff to Hive Mind chat)."""

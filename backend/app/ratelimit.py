@@ -104,9 +104,7 @@ async def enforce_ip_limit(
     try:
         count = await _increment_with_ttl(key, window_seconds)
     except Exception as exc:  # noqa: BLE001 — fail open
-        logger.warning(
-            "rate-limit store unavailable for %s (failing open): %s", bucket, exc
-        )
+        logger.warning("rate-limit store unavailable for %s (failing open): %s", bucket, exc)
         return
 
     if count > limit:

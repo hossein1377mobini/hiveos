@@ -43,9 +43,7 @@ def _build_settings(org: Organization) -> dict[str, str]:
     }
 
 
-async def _mark_failed(
-    session: AsyncSession, *, org_id, tenant_id, ws_id
-) -> None:
+async def _mark_failed(session: AsyncSession, *, org_id, tenant_id, ws_id) -> None:
     """Persist the failed marker + failure audit entry (commits)."""
     ws = await session.get(Workspace, ws_id)
     if ws is not None:
@@ -65,15 +63,11 @@ async def _mark_failed(
     await session.commit()
 
 
-async def initialize_workspace(
-    session: AsyncSession, org: Organization
-) -> WorkspaceInitialized:
+async def initialize_workspace(session: AsyncSession, org: Organization) -> WorkspaceInitialized:
     if org.status != "active":
         raise ConflictError("organization is not active")
 
-    result = await session.execute(
-        select(Workspace).where(Workspace.organization_id == org.id)
-    )
+    result = await session.execute(select(Workspace).where(Workspace.organization_id == org.id))
     ws = result.scalar_one_or_none()
     if ws is None:
         raise ConflictError("workspace not found (inconsistent state)")
@@ -120,9 +114,7 @@ async def initialize_workspace(
         except Exception:
             audit_ok = False
             await session.rollback()
-        raise InternalError(
-            "workspace initialization failed", audit_logged=audit_ok
-        ) from exc
+        raise InternalError("workspace initialization failed", audit_logged=audit_ok) from exc
 
     return WorkspaceInitialized(
         workspaceId=ws_id,

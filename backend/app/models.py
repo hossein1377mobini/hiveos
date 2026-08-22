@@ -125,6 +125,7 @@ class Owner(Base):
     app.security.hash_password). role is 'owner' in v0.1
     (ADR-019 decision 5 — simple Owner role, no multi-role RBAC yet).
     """
+
     __tablename__ = "owners"
     __table_args__ = (
         # Exactly ONE owner per organization (US-002).
@@ -231,9 +232,7 @@ class OrganizationBrain(Base):
     """
 
     __tablename__ = "organization_brains"
-    __table_args__ = (
-        UniqueConstraint("organization_id", name="uq_brains_one_per_org"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_brains_one_per_org"),)
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -346,9 +345,7 @@ class IngestionFolderConfig(Base):
     """
 
     __tablename__ = "ingestion_folder_configs"
-    __table_args__ = (
-        UniqueConstraint("organization_id", name="uq_ingestion_folder_one_per_org"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_ingestion_folder_one_per_org"),)
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -386,7 +383,8 @@ class Document(Base):
         PgUUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
     )
     brain_id: Mapped[uuid.UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("organization_brains.id", ondelete="CASCADE"),
+        PgUUID(as_uuid=True),
+        ForeignKey("organization_brains.id", ondelete="CASCADE"),
         nullable=True,
     )
     filename: Mapped[str] = mapped_column(String(255))
@@ -405,7 +403,8 @@ class Document(Base):
             "status IN ('detected','processing','ready','failed')",
             name="ck_documents_status",
         ),
-        default="detected", index=True,
+        default="detected",
+        index=True,
     )
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -445,7 +444,8 @@ class ProcessingJob(Base):
             "status IN ('pending','running','succeeded','failed')",
             name="ck_processing_jobs_status",
         ),
-        default="pending", index=True,
+        default="pending",
+        index=True,
     )
     attempts: Mapped[int] = mapped_column(
         Integer, CheckConstraint("attempts >= 0", name="ck_processing_jobs_attempts"), default=0
@@ -470,9 +470,7 @@ class OrganizationOnboarding(Base):
 
     __tablename__ = "organization_onboarding"
     __table_args__ = (
-        UniqueConstraint(
-            "organization_id", name="uq_organization_onboarding_one_per_org"
-        ),
+        UniqueConstraint("organization_id", name="uq_organization_onboarding_one_per_org"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=_uuid)

@@ -125,9 +125,7 @@ def test_full_pipeline_detect_to_ready(
     # --- the real synchronous pipeline seam ---
     ingestion_worker.process_job(uuid.UUID(job_id))
 
-    doc_row = db.fetchone(
-        "SELECT status, error FROM documents WHERE id = $1::uuid", docs[0]["id"]
-    )
+    doc_row = db.fetchone("SELECT status, error FROM documents WHERE id = $1::uuid", docs[0]["id"])
     assert doc_row["status"] == "ready"
     assert doc_row["error"] is None
 
@@ -169,27 +167,21 @@ def test_process_job_fails_without_brain(
     assert len(docs) == 1
     assert docs[0]["status"] == "detected"
 
-    doc_row = db.fetchone(
-        "SELECT brain_id FROM documents WHERE id = $1::uuid", docs[0]["id"]
-    )
+    doc_row = db.fetchone("SELECT brain_id FROM documents WHERE id = $1::uuid", docs[0]["id"])
     assert doc_row["brain_id"] is None  # detection captured the missing brain
 
     job = _pending_job(db, org["id"], docs[0]["id"])
     job_id = str(job["id"])  # asyncpg returns pgproto.UUID; normalize to str
     ingestion_worker.process_job(uuid.UUID(job_id))
 
-    doc_row = db.fetchone(
-        "SELECT status, error FROM documents WHERE id = $1::uuid", docs[0]["id"]
-    )
+    doc_row = db.fetchone("SELECT status, error FROM documents WHERE id = $1::uuid", docs[0]["id"])
     assert doc_row["status"] == "failed"
     assert "brain not initialized" in (doc_row["error"] or "")
 
     job_row = db.fetchone("SELECT status FROM processing_jobs WHERE id = $1::uuid", job_id)
     assert job_row["status"] == "failed"
 
-    chunks = db.fetch(
-        "SELECT id FROM document_chunks WHERE organization_id = $1::uuid", org["id"]
-    )
+    chunks = db.fetch("SELECT id FROM document_chunks WHERE organization_id = $1::uuid", org["id"])
     assert chunks == []
 
 
@@ -265,9 +257,7 @@ def test_zero_chunk_pdf_fails_not_ready(
     job = _pending_job(db, org["id"], docs[0]["id"])
     ingestion_worker.process_job(uuid.UUID(str(job["id"])))
 
-    doc_row = db.fetchone(
-        "SELECT status, error FROM documents WHERE id = $1::uuid", docs[0]["id"]
-    )
+    doc_row = db.fetchone("SELECT status, error FROM documents WHERE id = $1::uuid", docs[0]["id"])
     assert doc_row["status"] == "failed"
     assert "no extractable text" in (doc_row["error"] or "")
 
@@ -278,9 +268,7 @@ def test_zero_chunk_pdf_fails_not_ready(
     assert job_row["status"] == "failed"
     assert job_row["last_error"]
 
-    chunks = db.fetch(
-        "SELECT id FROM document_chunks WHERE organization_id = $1::uuid", org["id"]
-    )
+    chunks = db.fetch("SELECT id FROM document_chunks WHERE organization_id = $1::uuid", org["id"])
     assert chunks == []
 
 
@@ -303,9 +291,9 @@ def test_changed_file_reingested_versions_chunks(
 
     job = _pending_job(db, org["id"], doc_id)
     ingestion_worker.process_job(uuid.UUID(str(job["id"])))
-    assert db.fetchone(
-        "SELECT status FROM documents WHERE id = $1::uuid", doc_id
-    )["status"] == "ready"
+    assert (
+        db.fetchone("SELECT status FROM documents WHERE id = $1::uuid", doc_id)["status"] == "ready"
+    )
 
     first_chunks = db.fetch(
         "SELECT content FROM document_chunks WHERE organization_id = $1::uuid", org["id"]
@@ -317,9 +305,7 @@ def test_changed_file_reingested_versions_chunks(
     _scan(org["id"])
 
     # The same Document is reset to `detected` and its single job re-queued.
-    doc_row = db.fetchone(
-        "SELECT status, error FROM documents WHERE id = $1::uuid", doc_id
-    )
+    doc_row = db.fetchone("SELECT status, error FROM documents WHERE id = $1::uuid", doc_id)
     assert doc_row["status"] == "detected"
     assert doc_row["error"] is None
     job = _pending_job(db, org["id"], doc_id)
@@ -327,9 +313,7 @@ def test_changed_file_reingested_versions_chunks(
 
     ingestion_worker.process_job(uuid.UUID(str(job["id"])))
 
-    doc_row = db.fetchone(
-        "SELECT status, error FROM documents WHERE id = $1::uuid", doc_id
-    )
+    doc_row = db.fetchone("SELECT status, error FROM documents WHERE id = $1::uuid", doc_id)
     assert doc_row["status"] == "ready"
     assert doc_row["error"] is None
 

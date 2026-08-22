@@ -70,9 +70,7 @@ def _seat_session(client, make_owner, org) -> None:
 
 def _activate_org(client, make_org, make_owner, sms_provider) -> dict:
     """Org -> owner -> OTP verify, ending with an ACTIVE org (configure requires it)."""
-    org = make_org(
-        aiModel={"mode": "online", "provider": _PROVIDER, "apiKey": "sk-test-key"}
-    )
+    org = make_org(aiModel={"mode": "online", "provider": _PROVIDER, "apiKey": "sk-test-key"})
     _seat_session(client, make_owner, org)
     client.post("/api/v1/auth/send-otp", json={"phone": PHONE})
     code = sms_provider.sent[-1][1]
@@ -82,9 +80,7 @@ def _activate_org(client, make_org, make_owner, sms_provider) -> dict:
 
 
 def _configure(client, folder: Path):
-    return client.post(
-        "/api/v1/ingestion-folder/configure", json={"folderPath": str(folder)}
-    )
+    return client.post("/api/v1/ingestion-folder/configure", json={"folderPath": str(folder)})
 
 
 def _scan(org_id: str) -> None:
@@ -188,17 +184,13 @@ def test_configure_invalid_paths(client, make_org, make_owner, sms_provider, ing
     _activate_org(client, make_org, make_owner, sms_provider)
 
     # Relative path -> 400.
-    resp = client.post(
-        "/api/v1/ingestion-folder/configure", json={"folderPath": "relative/path"}
-    )
+    resp = client.post("/api/v1/ingestion-folder/configure", json={"folderPath": "relative/path"})
     assert resp.status_code == 400
     assert resp.json()["error"] == "bad_request"
 
     # Absolute but nonexistent -> 400.
     missing = ingest_folder / "does-not-exist"
-    resp = client.post(
-        "/api/v1/ingestion-folder/configure", json={"folderPath": str(missing)}
-    )
+    resp = client.post("/api/v1/ingestion-folder/configure", json={"folderPath": str(missing)})
     assert resp.status_code == 400
     assert resp.json()["error"] == "bad_request"
 
@@ -238,11 +230,7 @@ def test_endpoints_require_session(client):
         ("GET", f"/api/v1/documents/{uuid.uuid4()}/status", None),
     ]
     for method, path, payload in calls:
-        resp = (
-            client.post(path, json=payload)
-            if method == "POST"
-            else client.get(path)
-        )
+        resp = client.post(path, json=payload) if method == "POST" else client.get(path)
         assert resp.status_code == 401, path
         assert resp.json()["error"] == "unauthorized", path
 
@@ -265,9 +253,7 @@ def test_aiconfig_guard_fr010(client, db, make_org, make_owner, sms_provider, in
     assert "AI model" in (resp.json()["message"] or "")
 
 
-def test_file_level_isolation_fr008(
-    client, db, make_org, make_owner, sms_provider, ingest_folder
-):
+def test_file_level_isolation_fr008(client, db, make_org, make_owner, sms_provider, ingest_folder):
     """FR-008: an oversized valid-extension file -> Document(status=failed) with an
     error and NO ProcessingJob; a healthy file in the same scan still enqueues."""
     org = _activate_org(client, make_org, make_owner, sms_provider)
@@ -340,7 +326,10 @@ def test_documents_pagination_sort_and_filter(
 
     asc = client.get("/api/v1/documents", params={"sort": "filename"}).json()
     assert [d["filename"] for d in asc["items"]] == [
-        "bill.txt", "report-a.txt", "report-b.txt", "x.txt",
+        "bill.txt",
+        "report-a.txt",
+        "report-b.txt",
+        "x.txt",
     ]
 
     by_name = client.get("/api/v1/documents", params={"filter": "report"}).json()

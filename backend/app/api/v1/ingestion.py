@@ -86,9 +86,7 @@ async def list_documents(
         "-createdAt",
         description="مرتب‌سازی: createdAt/filename/sizeBytes/status/format؛ پیشوند - برای نزولی",
     ),
-    filter: str | None = Query(
-        None, description="جستجوی زیررشته‌ای (غیرحساس به بزرگی) در نام فایل"
-    ),
+    filter: str | None = Query(None, description="جستجوی زیررشته‌ای (غیرحساس به بزرگی) در نام فایل"),
     status_filter: str | None = Query(
         None,
         alias="status",

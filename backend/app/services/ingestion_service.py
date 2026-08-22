@@ -113,9 +113,7 @@ async def configure_ingestion_folder(
 
     existing = (
         await session.execute(
-            select(IngestionFolderConfig).where(
-                IngestionFolderConfig.organization_id == org_id
-            )
+            select(IngestionFolderConfig).where(IngestionFolderConfig.organization_id == org_id)
         )
     ).scalar_one_or_none()
 
@@ -164,9 +162,7 @@ async def get_ingestion_status(
 ) -> schemas.IngestionFolderStatus:
     cfg = (
         await session.execute(
-            select(IngestionFolderConfig).where(
-                IngestionFolderConfig.organization_id == org.id
-            )
+            select(IngestionFolderConfig).where(IngestionFolderConfig.organization_id == org.id)
         )
     ).scalar_one_or_none()
     if cfg is None:

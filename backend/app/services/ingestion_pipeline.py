@@ -77,8 +77,7 @@ def _read_pdf(path: str) -> str:
     # reason so the worker marks the Document ``failed`` (not ``ready``).
     if not text.strip():
         raise ValueError(
-            "no extractable text (image/scanned PDF without a text layer); "
-            "OCR is not supported"
+            "no extractable text (image/scanned PDF without a text layer); OCR is not supported"
         )
     return text
 
