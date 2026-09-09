@@ -1,39 +1,53 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (اعمال ریویو نوبت ۱ S0)
+> آخرین به‌روزرسانی: 2026-09-10 (پایان سشن S0 — آماده‌سازی سشن جدید)
 
-## دستورهای ایستاده PO (2026-09-10)
+## شروع سشن جدید از اینجا
 
-1. **مبنای کار = اسناد فنی `hive/`** — هیچ تصمیمی خارج از ADR/version-scope/development-workflow گرفته نشود؛ ابهام = سؤال از PO، نه حدس.
-2. **ادامه از جایی که مرحله قبل مانده** — در زمان این سشن: T-S0-4 تمام، ریویو S0 اعمال شد؛ بعدی T-S0-5.
-3. **ریویو پس از پایان S0** — PO دستور «شروع ریویو» می‌دهد؛ عامل محل گزارش‌ها + شاخه‌ها + کامیت‌ها را به ریویوئر می‌دهد. ریویو نوبت ۱ آمد و اعمال شد (2026-09-10).
-4. **سرورها خاموش بمانند** مگر فقط برای زمان لازم. SSH از همین سیستم: کلید `C:\Users\Hossein Mobini\.ssh\hiveos_key` + میان‌برهای `hiveos-staging` / `hiveos-prod` در config.
-5. **Kaneo حذف شد (2026-09-10)** — کانتینرها + والیوم + ایمیج + network پاک شدند؛ orphan `hiveos-redis` و ایمیج‌های hiveos قدیمی pre-transfer هم. native postgres ویندوزی روی 5432 مال PO است — دست نزن. DB اپ روی 5434 می‌ماند.
-6. **هیچ secret در گیت** (ADR-022). کلید/توکن‌ها نزد PO یا در secrets سرورها.
+1. تسک بعدی: **T-S0-5 پایه فرانت** (Vite/React + layout + پروکسی به API — §۸ development-workflow)؛ شاخه `task/T-S0-5-frontend-base` از main.
+2. خواندنی‌ها قبل از کد: `standards/setup-guide.md`، `ui-mockups/v0.1/_specs/dev-guidelines-v0.1.md`، `standards/standards-coding-standards-v10.md`، DoD.
+3. چرخه: کد+تست+خودریویو → گزارش `hive/reports/tasks/<تاریخ>-T-S0-5.md` → ریویو خارجی PO → merge فقط با تأیید PO.
+4. دستورهای ایستاده PO: پایین همین فایل.
 
-## وضعیت S0 (2026-09-10 — پس از ریویو نوبت ۱)
+## وضعیت S0 — کامل (2026-09-10)
 
-| تسک | وضعیت | محل |
-|-----|-------|-----|
-| T-S0-1 اسکلت+CI | ریویو اعمال شد (4536bf1: uv sync --frozen، حذف .gitkeepها). **R1-1 باز: شواهد CI run واقعی — با اولین PR/push main بسته می‌شود.** | task/T-S0-1 (روی GitHub) |
-| T-S0-2 FastAPI | ریویو اعمال شد (c1274a9: نسخه از metadata + تست، CORS از settings + ۴ تست، 9 passed). | task/T-S0-2 (روی GitHub) |
-| T-S0-3 Compose+Alembic | ریویو اعمال شد (bf843c0: secrets از env + infrastructure/.env gitignored، حذف prod overlay و nginx.conf، helper sync-url + تست، alembic.ini پاک؛ E2E سبز). | task/T-S0-3 (روی GitHub) |
-| T-S0-4 Deploy pipeline | ریویو اعمال شد (eecc805: گارد root، تک-workflow، حذف ci.yml، README مسیر واحد + محدودیت rollback/migration؛ سینک staging + deploy مجدد سبز). | task/T-S0-4 (روی GitHub) |
-| T-S0-5 فرانت پایه | بعدی (S0 کامل و merge شد) | — |
+| تسک | وضعیت | شواهد |
+|-----|-------|-------|
+| T-S0-1 اسکلت+CI | merge شده؛ ریویو نوبت ۱ اعمال؛ R1-1 بسته (CI run سبز) | PR #2، runs 34411938557/34412023587 |
+| T-S0-2 FastAPI | merge شده؛ ریویو نوبت ۱+۲ اعمال (version از metadata، CORS validator، DB_URL fail-fast؛ 15 tests) | کامیت‌های c1274a9/9ba45ea |
+| T-S0-3 Compose+Alembic | merge شده؛ ریویو نوبت ۱ اعمال (secrets از env، حذف prod overlay، sync-url helper)؛ E2E سبز | کامیت bf843c0 |
+| T-S0-4 Deploy pipeline | merge شده؛ ریویو نوبت ۱+۲ اعمال (root guard، تک workflow، .dockerignore با اثبات NO-LEAK، USER 10001 non-root)؛ **deploy خودکار سبز** | run 34416119083 — staging روی `ci-149cf43...` |
+| یکپارچه‌سازی | PR #2 merge شد → main = `cebf0e0`؛ CI backend روی main سبز (run 34415142318) | — |
 
-## وضعیت ریویو و بلاکرهای merge (2026-09-10)
+باز فنی S0: فقط rollback-migration (الزام S2 قبل از اولین migration مخرب — در README ثبت).
 
-- ریویو نوبت ۱ هر ۴ تسک آمد و اعمال شد؛ ثبت در بخش «اعمال نظرات» هر گزارش (hive/reports/tasks/).
-- باز فعال: فقط rollback-migration (الزام S2، در README ثبت). R1-1 بسته شد — CI run 34411938557 سبز روی PR #2 (probe/s0-integration).
-- **S0 merge شد (2026-09-10):** PO تأیید کرد → PR #2 merge → `main` = `cebf0e0` (کل S0). backend CI روی main سبز (run 34415142318). `deploy-staging` فقط در گام «Copy artifacts» fail شد — secrets ریپو (`STAGING_HOST`/`STAGING_SSH_KEY`) هنوز ست نیستند؛ پس از ست شدن secrets توسط PO و رفع باگ tag (کامیت `149cf43`)، **deploy خودکار کامل سبز شد** — run 34416119083؛ staging روی `ci-149cf43...` در حال اجرا و health سبز.
-- دسترسی گیت فعال شد (push + PR + secrets API). Secrets ریپو ست شده‌اند (`STAGING_HOST`/`STAGING_SSH_KEY`). rerun-failed-jobs با PAT فعلی ممکن نیست — trigger با push به main.
-- فردوسی پنل: 80/443 سمت پنل برای origin بسته (ufw باز، ولی پکت نمی‌رسد — کانتر صفر). باید در پنل باز شود. Arvan edge/SSL سالم (Let's Encrypt تا 2026-12-08).
+## زیرساخت و دسترسی (2026-09-10)
 
-## نکات فنی ماندگار S0
+- سرورها: staging 193.93.169.136 / prod 193.93.169.204 — SSH با کلید `C:\Users\Hossein Mobini\.ssh\hiveos_key` + میان‌برهای config `hiveos-staging`/`hiveos-prod`. PO سرورها را خاموش نگه می‌دارد؛ فقط حین push به main لازم‌اند.
+- استک staging: db (project `hiveos`) + api (project `hiveos-app`، external network `hiveos_default`)؛ nginx میزبان :80 → 127.0.0.1:8100؛ `.previous-tag` = `ci-149cf43...`.
+- Deploy path: push main → CI (backend job) → build image `hiveos/api:ci-<sha>` → save/scp/load → `remote-deploy.sh` (env از secret سرور، alembic، healthcheck :8100+:80، rollback خودکار). تنها workflow: `ci-deploy.yml`.
+- Secrets ریپو (ست شده): `STAGING_HOST`، `STAGING_SSH_KEY`.
+- GitHub: push/PR/secrets با credential manager سیستم کار می‌کند. rerun-failed-jobs و workflow-file push با PAT فعلی محدودیت دارد → trigger deploy با push به main.
 
-- Deploy path: GH Actions → build → docker save/scp/load (بدون registry) → remote-deploy.sh (env از secret سرور، alembic، healthcheck :8100+:80، rollback خودکار). `ci-deploy.yml` تنها workflow است.
-- Staging stack: فقط api در compose (project hiveos-app) به شبکه خارجی db (hiveos_default) وصل؛ host nginx :80 proxy → 127.0.0.1:8100. وضعیت: tag manual-2026-09-10 در حال اجرا، migration 0001 اعمال، health سبز. prod: فقط DB stack.
-- CORS: `CORS_ORIGINS` env (کاما-جدا) — خالی = deny؛ \"*\" فقط dev. APP env names بدون prefix (ENVIRONMENT/DATABASE_URL/CORS_ORIGINS).
-- محدودیت ثبت‌شده: rollback فقط image — قبل از اولین migration مخرب در S2 باید گام schema بگیرد (README Known limitation).
-- `to_sync_database_url` helper در config.py برای Alembic (تست‌شده).
+## بازهای غیرفنی (PO)
+
+1. **پنل فردوسی:** باز کردن 80/443 برای هر دو سرور — بسته‌شدن لایه‌ی ارائه‌دهنده است (اثبات: کانتر ufw صفر روی 80/443 در حالی که 22 می‌شمارد؛ nginx listen دارد). تا باز نشود HTTPS عمومی (مسیر Arvan) کار نمی‌کند؛ deploy مستقل از آن است.
+2. **PAT قدیمی:** فایل transfer حذف شد؛ PAT قبلی هنوز معتبر است (در credential manager). PO در GitHub → Settings → Developer settings → PAT آن را revoke کند و در صورت نیاز توکن جدید با دسترسی‌های Contents+Actions+Pull requests+Workflow بسازد.
+3. `agent.md` §0 به‌روز شد (با اجازه PO در همین سشن).
+4. شاخه‌های کار S0 روی GitHub حذف شدند (merge شده‌اند؛ تاریخچه در main حفظ است).
+
+## دستورهای ایستاده PO
+
+1. مبنای کار = اسناد فنی `hive/` — خارج از ADR/scope/decided چیزی از خود نساز؛ ابهام = سؤال.
+2. ریویو نوبتی: گزارش‌ها در `hive/reports/tasks/`؛ PO/ریویوئر نظرات را داخل خود فایل گزارش می‌نویسد؛ عامل اعمال می‌کند و «اعمال نظرات» ثبت می‌کند.
+3. merge فقط با تأیید صریح PO؛ main همیشه deployable.
+4. هیچ secret در گیت (ADR-022)؛ کلیدها نزد PO.
+5. native postgres ویندوزی روی 5432 مال PO است — دست نزن؛ DB اپ dev روی 5434.
+
+## نکات فنی ماندگار
+
+- CORS: `CORS_ORIGINS` env کاما-جدا؛ خالی = deny؛ `*` فقط dev (validator رد می‌کند در staging/prod). `DATABASE_URL` در staging/prod الزامی (fail-fast).
+- تصویر api: non-root uid 10001؛ `.dockerignore` ریشه‌ای — دست نزن مگر با اثبات.
+- rollback فقط image — قبل از اولین migration مخرب در S2 گام schema لازم دارد.
+- local dev: `infrastructure/.env` (gitignored) + `docker compose -f infrastructure/docker-compose.yml up`؛ alembic از `backend/` روی 5434.
