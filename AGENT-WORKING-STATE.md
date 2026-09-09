@@ -1,31 +1,39 @@
-# AGENT WORKING STATE â€” hiveos code repo
+# AGENT WORKING STATE — hiveos code repo
 
-> Ø­Ø§ÙØ¸Ù‡ Ú©Ø§Ø±ÛŒ Ø¹Ø§Ù…Ù„ ØªÙˆØ³Ø¹Ù‡. Ù‡Ø± Ø³Ø´Ù† Ø§Ø¨ØªØ¯Ø§ Ø§ÛŒÙ† ÙØ§ÛŒÙ„ + `hive/agent.md` + `hive/documentation/development-workflow.md` Ø±Ø§ Ø¨Ø®ÙˆØ§Ù†.
-> Ø¢Ø®Ø±ÛŒÙ† Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ: 2026-09-10 (Ø³Ø´Ù† T-S0-4)
+> حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
+> آخرین به‌روزرسانی: 2026-09-10 (اعمال ریویو نوبت ۱ S0)
 
-## Ø¯Ø³ØªÙˆØ±Ù‡Ø§ÛŒ Ø§ÛŒØ³ØªØ§Ø¯Ù‡ PO (2026-09-10)
+## دستورهای ایستاده PO (2026-09-10)
 
-1. **Ù…Ø¨Ù†Ø§ÛŒ Ú©Ø§Ø± = Ø§Ø³Ù†Ø§Ø¯ ÙÙ†ÛŒ `hive/`** â€” Ù‡ÛŒÚ† ØªØµÙ…ÛŒÙ…ÛŒ Ø®Ø§Ø±Ø¬ Ø§Ø² ADR/version-scope/development-workflow Ú¯Ø±ÙØªÙ‡ Ù†Ø´ÙˆØ¯Ø› Ø§Ø¨Ù‡Ø§Ù… = Ø³Ø¤Ø§Ù„ Ø§Ø² POØŒ Ù†Ù‡ Ø­Ø¯Ø³.
-2. **Ø§Ø¯Ø§Ù…Ù‡ Ø§Ø² Ø¬Ø§ÛŒÛŒ Ú©Ù‡ Ù…Ø±Ø­Ù„Ù‡ Ù‚Ø¨Ù„ Ù…Ø§Ù†Ø¯Ù‡** (T-S0-4 Ø¯Ø± Ø²Ù…Ø§Ù† Ø§ÛŒÙ† Ø³Ø´Ù†).
-3. **Ø±ÛŒÙˆÛŒÙˆ Ø¨Ø¹Ø¯ Ø§Ø² Ù¾Ø§ÛŒØ§Ù† S0** Ø´Ø±ÙˆØ¹ Ù…ÛŒâ€ŒØ´ÙˆØ¯ â€” Ù‚Ø¨Ù„ Ø§Ø² Ø¢Ù† Ú¯Ø²Ø§Ø±Ø´â€ŒÙ‡Ø§ ÙÙ‚Ø· Ù†ÙˆØ´ØªÙ‡ Ù…ÛŒâ€ŒØ´ÙˆÙ†Ø¯ØŒ Ø±ÛŒÙˆÛŒÙˆ Ø®Ø§Ø±Ø¬ÛŒ Ù…Ù†ØªØ¸Ø± Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯. PO Ø¯Ø³ØªÙˆØ± Â«Ø´Ø±ÙˆØ¹ Ø±ÛŒÙˆÛŒÙˆÂ» Ù…ÛŒâ€ŒØ¯Ù‡Ø¯Ø› Ø¹Ø§Ù…Ù„ Ø¨Ø§ÛŒØ¯ Ù…Ø­Ù„ Ú¯Ø²Ø§Ø±Ø´â€ŒÙ‡Ø§ + Ø´Ø§Ø®Ù‡â€ŒÙ‡Ø§ + Ú©Ø§Ù…ÛŒØªâ€ŒÙ‡Ø§ Ø±Ø§ Ø¨Ù‡ Ø±ÛŒÙˆÛŒÙˆØ¦Ø± Ø¨Ø¯Ù‡Ø¯.
-4. **Ø³Ø±ÙˆØ±Ù‡Ø§ Ø®Ø§Ù…ÙˆØ´ Ø¨Ù…Ø§Ù†Ù†Ø¯** Ù…Ú¯Ø± ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø²Ù…Ø§Ù† Ù„Ø§Ø²Ù…. Ù‡Ø± Ø¯Ùˆ Ø³Ø±ÙˆØ± ÙØ±Ø¯ÙˆØ³ÛŒ (staging 193.93.169.136 / prod 193.93.169.204) Ø¨Ø§ SSH key Ù‡Ù…ÛŒÙ† Ø³ÛŒØ³ØªÙ… (C:\Users\Hossein Mobini\.ssh\hiveos_key + config Ø¨Ø§ Ù…ÛŒØ§Ù†â€ŒØ¨Ø± hiveos-staging / hiveos-prod) Ø¯Ø± Ø¯Ø³ØªØ±Ø³â€ŒØ§Ù†Ø¯.
-5. **Kaneo Ø­Ø°Ù Ø´Ø¯/Ø´Ø¯Ù†ÛŒ Ø§Ø³Øª** â€” PO Ø§Ø³ØªÙØ§Ø¯Ù‡ Ù†Ù…ÛŒâ€ŒÚ©Ù†Ø¯Ø› Ú©Ø§Ù†ØªÛŒÙ†Ø±/ÙˆØ§Ù„ÛŒÙˆÙ…/Ø§ÛŒÙ…ÛŒØ¬ Ø¢Ù† Ù‚Ø§Ø¨Ù„ Ù¾Ø§Ú©â€ŒØ³Ø§Ø²ÛŒ. native postgres ÙˆÛŒÙ†Ø¯ÙˆØ²ÛŒ Ø±ÙˆÛŒ 5432 Ù…Ø§Ù„ PO Ø§Ø³Øª â€” Ø¯Ø³Øª Ù†Ø²Ù†. DB Ø§Ù¾ Ø±ÙˆÛŒ 5434 Ù…ÛŒâ€ŒÙ…Ø§Ù†Ø¯.
-6. **Ù‡ÛŒÚ† secret Ø¯Ø± Ú¯ÛŒØª** (ADR-022). Ú©Ù„ÛŒØ¯/ØªÙˆÚ©Ù†â€ŒÙ‡Ø§ Ù†Ø²Ø¯ PO (ÙØ§ÛŒÙ„ transfer Ø±ÙˆÛŒ Desktop PO) ÛŒØ§ Ø¯Ø± secrets Ø³Ø±ÙˆØ±Ù‡Ø§.
+1. **مبنای کار = اسناد فنی `hive/`** — هیچ تصمیمی خارج از ADR/version-scope/development-workflow گرفته نشود؛ ابهام = سؤال از PO، نه حدس.
+2. **ادامه از جایی که مرحله قبل مانده** — در زمان این سشن: T-S0-4 تمام، ریویو S0 اعمال شد؛ بعدی T-S0-5.
+3. **ریویو پس از پایان S0** — PO دستور «شروع ریویو» می‌دهد؛ عامل محل گزارش‌ها + شاخه‌ها + کامیت‌ها را به ریویوئر می‌دهد. ریویو نوبت ۱ آمد و اعمال شد (2026-09-10).
+4. **سرورها خاموش بمانند** مگر فقط برای زمان لازم. SSH از همین سیستم: کلید `C:\Users\Hossein Mobini\.ssh\hiveos_key` + میان‌برهای `hiveos-staging` / `hiveos-prod` در config.
+5. **Kaneo حذف شد (2026-09-10)** — کانتینرها + والیوم + ایمیج + network پاک شدند؛ orphan `hiveos-redis` و ایمیج‌های hiveos قدیمی pre-transfer هم. native postgres ویندوزی روی 5432 مال PO است — دست نزن. DB اپ روی 5434 می‌ماند.
+6. **هیچ secret در گیت** (ADR-022). کلید/توکن‌ها نزد PO یا در secrets سرورها.
 
-## ÙˆØ¶Ø¹ÛŒØª S0 (Ø¢Ø®Ø±ÛŒÙ† Ø¨Ù‡â€ŒØ±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ 2026-09-10)
+## وضعیت S0 (2026-09-10 — پس از ریویو نوبت ۱)
 
-| ØªØ³Ú© | ÙˆØ¶Ø¹ÛŒØª | Ù…Ø­Ù„ |
+| تسک | وضعیت | محل |
 |-----|-------|-----|
-| T-S0-1 Ø§Ø³Ú©Ù„Øª+CI | Ø³Ø§Ø®ØªÙ‡â€ŒØ´Ø¯Ù‡ØŒ Ù…Ù†ØªØ¸Ø± Ø±ÛŒÙˆÛŒÙˆ | branch task/T-S0-1 + Ú¯Ø²Ø§Ø±Ø´ reports/tasks/2026-09-09 |
-| T-S0-2 FastAPI | Ø³Ø§Ø®ØªÙ‡â€ŒØ´Ø¯Ù‡ØŒ Ù…Ù†ØªØ¸Ø± Ø±ÛŒÙˆÛŒÙˆ | branch task/T-S0-2 + Ú¯Ø²Ø§Ø±Ø´ |
-| T-S0-3 Compose+Alembic | Ø³Ø§Ø®ØªÙ‡â€ŒØ´Ø¯Ù‡ØŒ Ù…Ù†ØªØ¸Ø± Ø±ÛŒÙˆÛŒÙˆ | branch task/T-S0-3 + Ú¯Ø²Ø§Ø±Ø´ |
-| T-S0-4 Deploy pipeline | **Ù¾ÛŒØ§Ø¯Ù‡ + ØªØ³Øª Ø¯Ø³ØªÛŒ Ø±ÙˆÛŒ staging Ù…ÙˆÙÙ‚ (2026-09-10)** | branch task/T-S0-4 + Ú¯Ø²Ø§Ø±Ø´ reports/tasks/2026-09-10 |
-| T-S0-5 ÙØ±Ø§Ù†Øª Ù¾Ø§ÛŒÙ‡ | Ø´Ø±ÙˆØ¹ Ù†Ø´Ø¯Ù‡ | â€” |
+| T-S0-1 اسکلت+CI | ریویو اعمال شد (4536bf1: uv sync --frozen، حذف .gitkeepها). **R1-1 باز: شواهد CI run واقعی — با اولین PR/push main بسته می‌شود.** | task/T-S0-1 (روی GitHub) |
+| T-S0-2 FastAPI | ریویو اعمال شد (c1274a9: نسخه از metadata + تست، CORS از settings + ۴ تست، 9 passed). | task/T-S0-2 (روی GitHub) |
+| T-S0-3 Compose+Alembic | ریویو اعمال شد (bf843c0: secrets از env + infrastructure/.env gitignored، حذف prod overlay و nginx.conf، helper sync-url + تست، alembic.ini پاک؛ E2E سبز). | task/T-S0-3 (روی GitHub) |
+| T-S0-4 Deploy pipeline | ریویو اعمال شد (eecc805: گارد root، تک-workflow، حذف ci.yml، README مسیر واحد + محدودیت rollback/migration؛ سینک staging + deploy مجدد سبز). | task/T-S0-4 (روی GitHub) |
+| T-S0-5 فرانت پایه | شروع نشده — بعدی | — |
 
-## Ù†Ú©Ø§Øª ÙÙ†ÛŒ Ù…Ø§Ù†Ø¯Ú¯Ø§Ø± S0
+## وضعیت ریویو و بلاکرهای merge (2026-09-10)
 
-- Deploy path: GH Actions â†’ build image â†’ docker save/scp/load (Ø¨Ø¯ÙˆÙ† registry) â†’ remote-deploy.sh (env Ø§Ø² secret Ø³Ø±ÙˆØ±ØŒ alembicØŒ healthcheck :8100+:80ØŒ rollback Ø®ÙˆØ¯Ú©Ø§Ø±).
-- Staging stack: ÙÙ‚Ø· api Ø¯Ø± compose (project hiveos-app) Ø¨Ù‡ Ø´Ø¨Ú©Ù‡ Ø®Ø§Ø±Ø¬ÛŒ db (hiveos_default) ÙˆØµÙ„ Ø§Ø³ØªØ› host nginx :80 proxy â†’ 127.0.0.1:8100Ø› certbot/TLS Ø¨Ø¹Ø¯ Ø§Ø² ØªØµÙ…ÛŒÙ… Arvan Cloud.
-- ÙˆØ¶Ø¹ÛŒØª deploy Ø§ÙˆÙ„ staging: tag manual-2026-09-10ØŒ migration 0001 Ø§Ø¹Ù…Ø§Ù„ Ø´Ø¯ØŒ health Ø³Ø¨Ø². prod: ÙÙ‚Ø· DB stackØ› app Ø¯Ø± T-S5-4 Ù¾Ø±Ø§Ù…ÙˆØª Ù…ÛŒâ€ŒØ´ÙˆØ¯.
-- Ø¨Ù„Ø§Ú©Ø±Ù‡Ø§ÛŒ push Ø¨Ù‡ GitHub: PAT ÙØ¹Ù„ÛŒ scope `workflow` Ù†Ø¯Ø§Ø±Ø¯ (push Ø´Ø§Ø®Ù‡â€ŒÙ‡Ø§ÛŒ Ø¯Ø§Ø±Ø§ÛŒ .github/workflows Ø±Ø¯ Ù…ÛŒâ€ŒØ´ÙˆØ¯) + secrets API 403. Ù†ÛŒØ§Ø²Ù…Ù†Ø¯ PAT Ø¬Ø¯ÛŒØ¯ (Contents+Actions+Secrets+Workflows) ÛŒØ§ Ø§Ù‚Ø¯Ø§Ù… UI ØªÙˆØ³Ø· PO. Ø´Ø§Ø®Ù‡â€ŒÙ‡Ø§ÛŒ T-S0-1..3/4 Ù…Ø­Ù„ÛŒ Ø¢Ù…Ø§Ø¯Ù‡ pushâ€ŒØ§Ù†Ø¯.
-- force-push main (Ø¬Ø§ÛŒÚ¯Ø²ÛŒÙ†ÛŒ Ú©Ø§Ù…ÛŒØª placeholder Ù‚Ø¯ÛŒÙ…ÛŒ 021afc1 Ø¨Ø§ ØªØ§Ø±ÛŒØ®Ú†Ù‡ T-S0-1..) Ù†ÛŒØ§Ø²Ù…Ù†Ø¯ ØªØ£ÛŒÛŒØ¯ PO Ø§Ø³Øª.
+- ریویو نوبت ۱ هر ۴ تسک آمد و اعمال شد؛ ثبت در بخش «اعمال نظرات» هر گزارش (hive/reports/tasks/).
+- باز فعال: R1-1 (شواهد CI run) + rollback-migration (الزام S2، در README ثبت).
+- **گیر merge:** main ریموت = کامیت placeholder قدیمی (021afc1) با تاریخچه‌ی ناسازگار؛ بدون force-push هیچ PR قابل merge نیست — نیازمند تأیید PO.
+- دسترسی گیت فعال شد؛ push شاخه‌ها موفق. Secrets ریپو (`STAGING_SSH_KEY`/`STAGING_HOST`) هنوز ست نشده (API با PAT فعلی 403).
+- فردوسی پنل: 80/443 سمت پنل برای origin بسته (ufw باز، ولی پکت نمی‌رسد — کانتر صفر). باید در پنل باز شود. Arvan edge/SSL سالم (Let's Encrypt تا 2026-12-08).
+
+## نکات فنی ماندگار S0
+
+- Deploy path: GH Actions → build → docker save/scp/load (بدون registry) → remote-deploy.sh (env از secret سرور، alembic، healthcheck :8100+:80، rollback خودکار). `ci-deploy.yml` تنها workflow است.
+- Staging stack: فقط api در compose (project hiveos-app) به شبکه خارجی db (hiveos_default) وصل؛ host nginx :80 proxy → 127.0.0.1:8100. وضعیت: tag manual-2026-09-10 در حال اجرا، migration 0001 اعمال، health سبز. prod: فقط DB stack.
+- CORS: `CORS_ORIGINS` env (کاما-جدا) — خالی = deny؛ \"*\" فقط dev. APP env names بدون prefix (ENVIRONMENT/DATABASE_URL/CORS_ORIGINS).
+- محدودیت ثبت‌شده: rollback فقط image — قبل از اولین migration مخرب در S2 باید گام schema بگیرد (README Known limitation).
+- `to_sync_database_url` helper در config.py برای Alembic (تست‌شده).
