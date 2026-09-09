@@ -17,10 +17,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title=settings.app_name, docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.settings = settings
 
-    # CORS: thin web client (ADR-023). Tighten origins with the first real frontend origin (T-S0-5).
+    # CORS (ADR-023 thin web client): origins come from CORS_ORIGINS (comma-separated).
+    # Empty list = no browser origin allowed (server-to-server only); "*" allowed for dev only.
+    # Tighten in T-S0-5 when the first real frontend origin exists. Review R2-2.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_origins,
         allow_methods=["GET"],
         allow_headers=["*"],
     )
@@ -30,6 +32,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
 
     return app
-
 
 app = create_app()
