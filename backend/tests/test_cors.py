@@ -1,6 +1,8 @@
 """CORS policy tests (review R2-2). Origins come from settings, never hardcoded '*'."""
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from backend.config import Settings
 from backend.main import create_app
@@ -29,6 +31,19 @@ def test_cors_wildcard_dev_only() -> None:
     client = _client(Settings(environment="dev", cors_origins=["*"]))
     resp = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
     assert resp.headers["access-control-allow-origin"] == "*"
+
+def test_cors_wildcard_rejected_in_prod() -> None:
+    """Review round 2: '*' must be refused for staging/prod, not just allowed in dev."""
+    with pytest.raises(ValidationError):
+        Settings(environment="prod", cors_origins=["*"])
+
+def test_cors_wildcard_rejected_in_staging() -> None:
+    with pytest.raises(ValidationError):
+        Settings(environment="staging", cors_origins=["*"])
+
+def test_cors_wildcard_still_allowed_in_dev() -> None:
+    settings = Settings(environment="dev", cors_origins=["*"])
+    assert settings.cors_origins == ["*"]
 
 def test_cors_comma_string_parsed() -> None:
     import os
