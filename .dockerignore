@@ -1,0 +1,23 @@
+# Docker build context - keep image minimal and deterministic; never leak env/venv/git
+# (review round 2, T-S0-4 blocker). Dockerfile builds ONLY backend/.
+.git
+.github
+.dsh-project-memory
+**/.env
+**/.env.*
+!**/.env.example
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+frontend
+ai
+infrastructure
+scripts
+hive
+reports
+docs
+*.md
+!backend/README.md

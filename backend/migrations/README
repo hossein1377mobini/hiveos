@@ -1,0 +1,1 @@
+Alembic migrations. Rule: every schema change is a reversible migration (dev workflow S7).
