@@ -20,13 +20,13 @@
 | T-S0-2 FastAPI | ریویو اعمال شد (c1274a9: نسخه از metadata + تست، CORS از settings + ۴ تست، 9 passed). | task/T-S0-2 (روی GitHub) |
 | T-S0-3 Compose+Alembic | ریویو اعمال شد (bf843c0: secrets از env + infrastructure/.env gitignored، حذف prod overlay و nginx.conf، helper sync-url + تست، alembic.ini پاک؛ E2E سبز). | task/T-S0-3 (روی GitHub) |
 | T-S0-4 Deploy pipeline | ریویو اعمال شد (eecc805: گارد root، تک-workflow، حذف ci.yml، README مسیر واحد + محدودیت rollback/migration؛ سینک staging + deploy مجدد سبز). | task/T-S0-4 (روی GitHub) |
-| T-S0-5 فرانت پایه | شروع نشده — بعدی | — |
+| T-S0-5 فرانت پایه | بعدی (S0 کامل و merge شد) | — |
 
 ## وضعیت ریویو و بلاکرهای merge (2026-09-10)
 
 - ریویو نوبت ۱ هر ۴ تسک آمد و اعمال شد؛ ثبت در بخش «اعمال نظرات» هر گزارش (hive/reports/tasks/).
 - باز فعال: فقط rollback-migration (الزام S2، در README ثبت). R1-1 بسته شد — CI run 34411938557 سبز روی PR #2 (probe/s0-integration).
-- **گیر merge حل‌شدنی شد:** PR #2 (`probe/s0-integration` → main) باز است و CI سبز؛ تاریخچه‌ی main placeholder با merge `effc5c5` پذیرفته شد. merge PR = جایگزینی کامل main (تأیید نهایی PO لازم).
+- **S0 merge شد (2026-09-10):** PO تأیید کرد → PR #2 merge → `main` = `cebf0e0` (کل S0). backend CI روی main سبز (run 34415142318). `deploy-staging` فقط در گام «Copy artifacts» fail شد — secrets ریپو (`STAGING_HOST`/`STAGING_SSH_KEY`) هنوز ست نیستند؛ بعد از ست شدن، re-run سبز می‌شود و staging خودکار آپدیت می‌شود.
 - دسترسی گیت فعال شد؛ push شاخه‌ها موفق. Secrets ریپو (`STAGING_SSH_KEY`/`STAGING_HOST`) هنوز ست نشده (API با PAT فعلی 403).
 - فردوسی پنل: 80/443 سمت پنل برای origin بسته (ufw باز، ولی پکت نمی‌رسد — کانتر صفر). باید در پنل باز شود. Arvan edge/SSL سالم (Let's Encrypt تا 2026-12-08).
 
