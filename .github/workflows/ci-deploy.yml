@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch: # manual run on any ref - CI evidence without PR (token lacks pull_requests scope)
 
 permissions:
   contents: read
