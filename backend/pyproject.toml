@@ -1,0 +1,22 @@
+[project]
+name = "hiveos-backend"
+version = "0.1.0"
+description = "HiveOS backend (FastAPI) - v0.1"
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.9",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

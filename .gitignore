@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# Env / secrets — ADR-022: هیچ secret در گیت
+.env
+.env.*
+!.env.example
+
+# DSH plugin memory
+.dsh-project-memory/
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
