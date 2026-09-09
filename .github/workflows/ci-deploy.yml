@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
-      - run: uv sync
+      - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run pytest
 
@@ -38,7 +38,7 @@ jobs:
           mkdir -p dist
           docker save hiveos/api:$GITHUB_SHA | gzip > dist/hiveos-api.tgz
           tar -czf dist/hiveos-deploy.tgz \
-            -C infrastructure docker-compose.staging.yml nginx \
+            -C infrastructure docker-compose.staging.yml \
             -C ../scripts deploy
 
       - name: Copy artifacts to staging

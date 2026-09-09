@@ -6,6 +6,9 @@
 # On failed healthcheck: automatic rollback to previous tag, then exit 1.
 set -euo pipefail
 
+# Needs root: reads /opt/hiveos/secrets, writes root-owned .env, drives compose (review R4-3).
+if [[ $EUID -ne 0 ]]; then echo "FATAL: run with sudo (needs /opt/hiveos/secrets + root-owned .env)"; exit 1; fi
+
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP_DIR"
 
@@ -20,7 +23,7 @@ ROLLBACK_FILE="$APP_DIR/.rollback-tag"
 if [[ -f "$PREV_FILE" ]]; then cp "$PREV_FILE" "$ROLLBACK_FILE"; fi
 
 # regenerate .env (chmod 600). ADR-022: secrets only in server-side files, never in git.
-PG_PASS="$(sudo cat "$SECRETS_DIR/pg_password")"
+PG_PASS="$(cat "$SECRETS_DIR/pg_password")"
 PG_ENC="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$PG_PASS")"
 umask 077
 cat > "$APP_DIR/.env" <<EOF
