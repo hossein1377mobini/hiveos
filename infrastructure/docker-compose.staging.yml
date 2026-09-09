@@ -1,0 +1,25 @@
+# HiveOS v0.1 - staging/prod server stack (T-S0-4, ADR-023).
+# Standalone: api only. DB is the dedicated hiveos-db stack (project "hiveos") whose network
+# hiveos_default is joined here as external; DATABASE_URL host = "db" (service DNS name).
+# HOST nginx (1.24, preinstalled with certbot) reverse-proxies :80/:443 to 127.0.0.1:8100 -
+# container nginx removed so the host keeps its ports. Transport = docker save/load, no
+# registry auth on servers. Env file: /opt/hiveos/app/.env (chmod 600, never committed).
+name: hiveos-app
+
+services:
+  api:
+    image: hiveos/api:${IMAGE_TAG:?IMAGE_TAG required}
+    container_name: hiveos-api
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-staging}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+    ports:
+      - "127.0.0.1:8100:8100"
+    networks:
+      - dbnet
+    restart: unless-stopped
+
+networks:
+  dbnet:
+    external: true
+    name: hiveos_default

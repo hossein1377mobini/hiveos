@@ -1,0 +1,69 @@
+name: CI and Deploy to Staging
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest
+
+  deploy-staging:
+    needs: backend
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -f infrastructure/api.Dockerfile -t hiveos/api:$GITHUB_SHA .
+
+      - name: Package image + deploy assets
+        run: |
+          mkdir -p dist
+          docker save hiveos/api:$GITHUB_SHA | gzip > dist/hiveos-api.tgz
+          tar -czf dist/hiveos-deploy.tgz \
+            -C infrastructure docker-compose.staging.yml nginx \
+            -C ../scripts deploy
+
+      - name: Copy artifacts to staging
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ubuntu
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          source: "dist/*"
+          target: /home/ubuntu/deploy
+          strip_components: 1
+
+      - name: Deploy on staging (load, compose up, healthcheck)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GIT_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ubuntu
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          envs: GIT_SHA
+          script: |
+            set -e
+            sudo mkdir -p /opt/hiveos/app
+            sudo tar -xzf /home/ubuntu/deploy/hiveos-deploy.tgz -C /opt/hiveos/app
+            sudo docker load -i /home/ubuntu/deploy/hiveos-api.tgz
+            sudo chmod +x /opt/hiveos/app/deploy/*.sh
+            sudo bash /opt/hiveos/app/deploy/remote-deploy.sh "ci-$GIT_SHA"
