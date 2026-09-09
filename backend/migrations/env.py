@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-from backend.config import get_settings
+from backend.config import get_settings, to_sync_database_url
 
 config = context.config
 if config.config_file_name is not None:
@@ -13,7 +13,7 @@ if config.config_file_name is not None:
 
 settings = get_settings()
 # Alembic runs sync engine; app uses asyncpg - derive sync URL (psycopg) for migrations.
-sync_url = settings.database_url.replace('+asyncpg', '+psycopg')
+sync_url = to_sync_database_url(settings.database_url)
 
 
 def run_migrations_offline() -> None:

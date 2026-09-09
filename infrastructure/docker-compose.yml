@@ -1,22 +1,24 @@
-# HiveOS v0.1 - base compose (dev). Prod overlay: docker-compose.prod.yml (T-S0-3/T-S0-4).
+# HiveOS v0.1 - base compose (dev).
 # ADR-019: vector store = pgvector on Postgres 16 (Qdrant deferred to v0.2).
-# App DB published on host port 5434 by default (5432 = native postgres on dev machine,
-# 5433 = kaneo; see T-S0-3 report). Override with POSTGRES_HOST_PORT.
+# App DB published on host port 5434 by default (5432 = native postgres on dev machine;
+# 5433 was kaneo, removed 2026-09-10 per PO). Override with POSTGRES_HOST_PORT.
+# ADR-022 / review R3-1: DB credentials come from environment, never from git.
+# Copy infrastructure/.env.example -> infrastructure/.env (gitignored) for local dev.
 services:
   db:
     image: pgvector/pgvector:pg16
     container_name: hiveos-db
     environment:
-      POSTGRES_USER: hiveos
-      POSTGRES_PASSWORD: hiveos
-      POSTGRES_DB: hiveos
+      POSTGRES_USER: ${POSTGRES_USER:-hiveos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (infrastructure/.env)}
+      POSTGRES_DB: ${POSTGRES_DB:-hiveos}
     ports:
       - "${POSTGRES_HOST_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hiveos -d hiveos"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hiveos} -d ${POSTGRES_DB:-hiveos}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -28,7 +30,7 @@ services:
     container_name: hiveos-api
     environment:
       ENVIRONMENT: dev
-      DATABASE_URL: postgresql+asyncpg://hiveos:hiveos@db:5432/hiveos
+      DATABASE_URL: ${HIVEOS_DEV_DATABASE_URL:?HIVEOS_DEV_DATABASE_URL required (infrastructure/.env)}
     ports:
       - "8100:8100"
     depends_on:

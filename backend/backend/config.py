@@ -22,6 +22,10 @@ class Settings(BaseSettings):
         return self.environment == "prod"
 
 
+def to_sync_database_url(url: str) -> str:
+    """Alembic runs on a sync driver; asyncpg URL -> psycopg. Pass anything else through (R3-3)."""
+    return url.replace("+asyncpg", "+psycopg")
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
