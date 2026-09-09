@@ -25,8 +25,8 @@
 ## وضعیت ریویو و بلاکرهای merge (2026-09-10)
 
 - ریویو نوبت ۱ هر ۴ تسک آمد و اعمال شد؛ ثبت در بخش «اعمال نظرات» هر گزارش (hive/reports/tasks/).
-- باز فعال: R1-1 (شواهد CI run) + rollback-migration (الزام S2، در README ثبت).
-- **گیر merge:** main ریموت = کامیت placeholder قدیمی (021afc1) با تاریخچه‌ی ناسازگار؛ بدون force-push هیچ PR قابل merge نیست — نیازمند تأیید PO.
+- باز فعال: فقط rollback-migration (الزام S2، در README ثبت). R1-1 بسته شد — CI run 34411938557 سبز روی PR #2 (probe/s0-integration).
+- **گیر merge حل‌شدنی شد:** PR #2 (`probe/s0-integration` → main) باز است و CI سبز؛ تاریخچه‌ی main placeholder با merge `effc5c5` پذیرفته شد. merge PR = جایگزینی کامل main (تأیید نهایی PO لازم).
 - دسترسی گیت فعال شد؛ push شاخه‌ها موفق. Secrets ریپو (`STAGING_SSH_KEY`/`STAGING_HOST`) هنوز ست نشده (API با PAT فعلی 403).
 - فردوسی پنل: 80/443 سمت پنل برای origin بسته (ufw باز، ولی پکت نمی‌رسد — کانتر صفر). باید در پنل باز شود. Arvan edge/SSL سالم (Let's Encrypt تا 2026-12-08).
 
