@@ -9,6 +9,7 @@
 - POST /api/v1/auth/login                  (US-009, T-S1-5: username+password + lockout)
 - POST /api/v1/auth/logout                 (US-009: revoke current session)
 - POST /api/v1/auth/password/reset-request|reset-verify|reset  (US-010, T-S1-6)
+- GET  /api/v1/auth/onboarding-status       (US-007 resume C2 / pending expiry C3, T-S1-8)
 
 Responses use the {success, data, message} envelope (API Design Standards).
 Errors raise ApiError -> {success:false, error:{code,message}}.
@@ -21,6 +22,7 @@ from backend.auth import AuthContext, get_auth_context
 from backend.db import get_db
 from backend.organization.login_service import login as login_service
 from backend.organization.login_service import logout as logout_service
+from backend.organization.onboarding import onboarding_status
 from backend.organization.otp_service import PURPOSE_OWNER_VERIFICATION, send_otp
 from backend.organization.otp_verify import verify_otp
 from backend.organization.password_reset import (
@@ -175,4 +177,13 @@ async def password_reset_endpoint(
     result = await reset_password(
         session, payload.mobile, payload.code, payload.new_password, payload.confirm_password
     )
+    return _ok(result)
+
+
+@router.get("/onboarding-status")
+async def onboarding_status_endpoint(
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+) -> dict:
+    """US-007 C2/C3: resume point + pending expiry, applied on read."""
+    result = await onboarding_status(session, auth.organization)
     return _ok(result)

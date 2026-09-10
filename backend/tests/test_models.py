@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "hiveos.organization_brains",
     "hiveos.knowledge_repositories",
     "hiveos.vector_indexes",
+    "hiveos.knowledge_sources",
 }
 
 
