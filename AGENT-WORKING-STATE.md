@@ -1,20 +1,15 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (S3 کامل شد؛ T-S3-1..T-S3-7 طبق دستور PO بدون ریویو merge شدند — main = `62c2ea7`)
+> آخرین به‌روزرسانی: 2026-09-10 (S3+S4 کامل؛ S5 تا حد امکان بدون PO اجرا شد — main = `da1dfc8`)
 
-## شروع سشن جدید از اینجا — تسک بعدی: **T-S4-1** (پنل ادمین — epic-16)
+## شروع سشن جدید از اینجا — تسک‌های باز قبل از ریویو PO
 
-1. **S3 کامل و بسته شد (بدون ریویو خارجی — دستور PO 2026-09-10).** 176 تست backend سبز + ruff تمیز. **S2 (150) و S1 (107) قبلاً بسته شدند.**
-   | تسک | خلاصه | شواهد |
-   |-----|-------|-------|
-   | T-S3-1 | ChatSession/Message (0014) + API پیام + pagination | merge در تاریخ S3؛ `2026-09-10-T-S3-1.md` |
-   | T-S3-2 | SSE streaming hub + endpoints | `2026-09-10-T-S3-2.md` |
-   | T-S3-3 | AgentExecution (0015) + lifecycle + chat mapping | `2026-09-10-T-S3-3.md` |
-   | T-S3-4 | RAG cycle با citation الزامی (RG-07) | `2026-09-10-T-S3-4.md` |
-   | T-S3-5 | Timeout + error_code + audit | `2026-09-10-T-S3-5.md` |
-   | T-S3-6 | Aggregator seam + router + metering (0016) | `2026-09-10-T-S3-6.md` |
-   | T-S3-7 | Wallet (0017) + gate 402 + کسر اتمی | `2026-09-10-T-S3-7.md` |
+1. **S3 کامل (T-S3-1..7؛ `reports/tasks/2026-09-10-T-S3-*.md` + `S3-summary.md`).** 176 تست.
+2. **S4 کامل (T-S4-1..7 پنل ادمین epic-16؛ `2026-09-10-T-S4-*.md`).** 179 تست. مهاجرت 0018 (system_settings).
+3. **S5 (بدون PO):** T-S5-1 چک‌لیست RG-01..22 (`2026-09-10-T-S5-1.md` — 15 PASS/2 PARTIAL/3 FAIL)، T-S5-2 گاردریل RG-18 (182 تست)، T-S5-3 wrapper ویندوزی، T-S5-5 سناریو Locust (اجرا → staging). **T-S5-4 (پراموت به prod) نیازمند تأیید صریح PO — انجام نشد.**
+4. **بازهای عامل بعدی:** US-1207 subscription (RG-21)، T-S3-8 درگاه آنلاین، UI epic-10 (بنر/شارژ/چت — RG-14/15/16/09)، اجرای تست بار روی staging، لندینگ نهایی.
+5. گزارش‌ها در `hive/reports/tasks/` — ریویو خارجی/اعمال نظرات/تأیید نهایی همه برای PO پس از S5 خالی است.
    | تسک | خلاصه | شواهد |
    |-----|-------|-------|
    | T-S2-1 | مدل KnowledgeSource/Asset + آپلود مستقیم (US-201) | merge `95ff49b`؛ `2026-09-10-T-S2-1.md` |
