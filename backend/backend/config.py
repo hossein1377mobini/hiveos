@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     ingestion_allowed_roots: str = ""
     # US-007 FR-004: scheduled scan default (US-202 owns the scheduler in S2).
     ingestion_scan_interval_minutes: int = 30
+    # US-201 FR-009 (Amendment 2): direct upload cap per file (US-1606 edits later).
+    upload_max_file_mb: int = 25
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")

@@ -32,6 +32,7 @@ EXPECTED_TABLES = {
     "hiveos.knowledge_repositories",
     "hiveos.vector_indexes",
     "hiveos.knowledge_sources",
+    "hiveos.knowledge_assets",
 }
 
 

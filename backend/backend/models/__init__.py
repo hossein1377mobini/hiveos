@@ -17,6 +17,7 @@ from backend.models.enums import (
     WorkspaceStatus,
 )
 from backend.models.knowledge import KnowledgeSource
+from backend.models.knowledge_asset import KnowledgeAsset
 from backend.models.login import LoginAttempt
 from backend.models.membership import OrganizationMember, Role, RoleAssignment
 from backend.models.organization import Organization, Workspace
@@ -30,6 +31,7 @@ __all__ = [
     "Base",
     "KnowledgeRepository",
     "KnowledgeSource",
+    "KnowledgeAsset",
     "LoginAttempt",
     "MemberStatus",
     "OtpVerification",
