@@ -46,3 +46,6 @@ class User(Base, TimestampMixin):
     )
     mobile_verified: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     mobile_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # US-009 lockout state machine (5 failed logins -> 15-minute lock).
+    failed_login_count: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

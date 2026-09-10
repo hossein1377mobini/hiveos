@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     otp_resend_cooldown_seconds: int = 60
     otp_lockout_seconds: int = 900
+    # US-009: login lockout (5 failed attempts -> 15-minute lock per account).
+    login_max_attempts: int = 5
+    login_lockout_seconds: int = 900
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")

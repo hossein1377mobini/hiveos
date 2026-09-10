@@ -15,6 +15,7 @@ from backend.models.enums import (
     UserStatus,
     WorkspaceStatus,
 )
+from backend.models.login import LoginAttempt
 from backend.models.membership import OrganizationMember, Role, RoleAssignment
 from backend.models.organization import Organization, Workspace
 from backend.models.otp import OtpVerification
@@ -24,6 +25,7 @@ from backend.models.user import User
 __all__ = [
     "AuditLog",
     "Base",
+    "LoginAttempt",
     "MemberStatus",
     "OtpVerification",
     "Organization",

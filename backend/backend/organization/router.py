@@ -6,6 +6,8 @@
 - POST /api/v1/auth/send-otp               (US-003, Bearer session required)
 - POST /api/v1/auth/resend-otp             (US-003, same state machine)
 - POST /api/v1/auth/verify-otp             (US-003, T-S1-4: activation + slid session)
+- POST /api/v1/auth/login                  (US-009, T-S1-5: username+password + lockout)
+- POST /api/v1/auth/logout                 (US-009: revoke current session)
 
 Responses use the {success, data, message} envelope (API Design Standards).
 Errors raise ApiError -> {success:false, error:{code,message}}.
@@ -16,9 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth import AuthContext, get_auth_context
 from backend.db import get_db
+from backend.organization.login_service import login as login_service
+from backend.organization.login_service import logout as logout_service
 from backend.organization.otp_service import PURPOSE_OWNER_VERIFICATION, send_otp
 from backend.organization.otp_verify import verify_otp
 from backend.organization.schemas import (
+    LoginRequest,
+    LoginResponse,
     OrganizationCreated,
     OtpSent,
     OtpVerified,
@@ -111,3 +117,24 @@ async def verify_otp_endpoint(
         session={"token": auth.token, "expires_at": auth.session.expires_at},
     )
     return _ok(verified.model_dump(mode="json"))
+
+
+@router.post("/login", dependencies=[Depends(_rate_limit)])
+async def login_endpoint(payload: LoginRequest, session: AsyncSession = Depends(get_db)) -> dict:
+    """US-009 scenarios 1/2/3: login with lockout; errors stay generic (no field disclosure)."""
+    result = await login_service(session, payload.username, payload.password)
+    logged_in = LoginResponse(
+        user_id=result["user_id"],
+        organization_id=result["organization_id"],
+        session=result["session"],
+    )
+    return _ok(logged_in.model_dump(mode="json"))
+
+
+@router.post("/logout", dependencies=[Depends(_rate_limit)])
+async def logout_endpoint(
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+) -> dict:
+    """US-009: revoke the caller's session; later use returns 401 SESSION_REVOKED."""
+    await logout_service(session, auth.session)
+    return _ok({"logged_out": True})
