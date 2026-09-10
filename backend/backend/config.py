@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # US-227: semantic search defaults.
     search_default_top_k: int = 5
     search_max_top_k: int = 20
+    # US-1203 AC7 analogue for the ingestion pipeline (T-S2-7): when enabled,
+    # a zero-credit organization's new assets stay queued as needs_review
+    # instead of being processed. The real wallet lands with T-S3-7.
+    zero_credit_review_mode: bool = False
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
