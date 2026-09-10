@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     pending_org_expiry_days: int = 7
     # US-003/T-S1-4: session lifetime (7-day sliding window).
     session_ttl_days: int = 7
+    # US-003 Amendment 2: OTP-SMS parameters (admin-configurable later via US-1605).
+    otp_ttl_seconds: int = 300
+    otp_max_attempts: int = 5
+    otp_resend_cooldown_seconds: int = 60
+    otp_lockout_seconds: int = 900
+    # SMS provider (ADR-022: gateway credentials come from environment, never git;
+    # the PO enters service keys via the admin panel US-1601/1605).
+    sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
+    melipayamak_username: str | None = None
+    melipayamak_password: str | None = None
+    melipayamak_sender: str | None = None
     # T-S0-5 review R5-1: the old non-empty default made the staging/prod fail-fast
     # validator unreachable (default always filled the field). Staging/prod without
     # DATABASE_URL must now fail loudly at startup instead of silently targeting
@@ -38,6 +49,20 @@ class Settings(BaseSettings):
             else:
                 raise ValueError("DATABASE_URL must be set explicitly for staging/prod")
         return self
+
+    @model_validator(mode="after")
+    def _require_sms_credentials_when_real_provider(self) -> "Settings":
+        # Fail fast on a misconfigured gateway instead of failing every OTP send
+        # silently (US-003 FR-007 requires explicit, never silent, failures).
+        if self.sms_provider == "melipayamak" and not (
+            self.melipayamak_username and self.melipayamak_password and self.melipayamak_sender
+        ):
+            raise ValueError(
+                "MELIPAYAMAK_USERNAME / MELIPAYAMAK_PASSWORD / MELIPAYAMAK_SENDER"
+                " must be set when SMS_PROVIDER=melipayamak"
+            )
+        return self
+
     # CORS origins via CORS_ORIGINS, comma-separated (NoDecode disables JSON-only
     # parsing for this field). Empty = deny all browser origins. "*" only for local dev.
     # Review R2-2.
