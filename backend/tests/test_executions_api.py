@@ -99,6 +99,31 @@ def test_run_with_knowledge_hits_returns_citations(client, tmp_path):
     assert "دفترچه نصب سرور" in done["output"]["text"]
 
 
+def test_timeout_marks_execution_failed(client, monkeypatch):
+    """US-314: a cycle exceeding its budget becomes FAILED/EXECUTION_TIMEOUT."""
+    import asyncio
+
+    from backend.config import get_settings
+    from backend.knowledge import search as search_module
+
+    async def slow_search(session, organization_id, query, top_k=None):
+        await asyncio.sleep(0.5)
+        return {"results": []}
+
+    monkeypatch.setattr(search_module, "semantic_search", slow_search)
+    monkeypatch.setattr(get_settings(), "execution_timeout_seconds", 0.01)
+
+    ctx = _bootstrap_full(client)
+    created = client.post(EX, json={"input": {"text": "سلام"}}, headers=ctx["headers"]).json()["data"]
+    done = client.post(f"{EX}/{created['id']}/run", headers=ctx["headers"]).json()["data"]
+    assert done["status"] == "FAILED"
+    assert done["error"]["code"] == "EXECUTION_TIMEOUT"
+
+    # US-312: a failed execution cannot restart
+    restart = client.post(f"{EX}/{created['id']}/start", headers=ctx["headers"])
+    assert restart.status_code == 409
+
+
 def test_cancel_rules(client):
     ctx = _bootstrap_full(client)
     created = client.post(EX, json={"input": {"text": "لغو کن"}}, headers=ctx["headers"]).json()["data"]

@@ -6,6 +6,7 @@ CANCELLED. The runtime cycle (US-306) produces a stub output here; the
 real reasoning/retrieval/output steps land with T-S3-4.
 """
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
 from backend.audit import record_audit
+from backend.config import get_settings
 from backend.models import AgentExecution, ChatMessage, ChatSession
 
 CANCELLABLE = ("PENDING", "STARTING", "RUNNING")
@@ -160,8 +162,26 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
     try:
         from backend.knowledge.search import semantic_search
 
-        results = await semantic_search(session, organization_id, query)
+        results = await asyncio.wait_for(
+            semantic_search(session, organization_id, query),
+            timeout=get_settings().execution_timeout_seconds,
+        )
         hits = results["results"]
+    except TimeoutError:
+        # US-314: the cycle is capped; a timed-out execution is FAILED.
+        execution.error_code = "EXECUTION_TIMEOUT"
+        execution.error_message = "The execution cycle exceeded its time budget."
+        execution.status = "FAILED"
+        execution.completed_at = _utc_now()
+        await record_audit(
+            session,
+            "execution.failed",
+            organization_id=organization_id,
+            entity_type="agent_execution",
+            entity_id=execution.id,
+            detail={"error_code": "EXECUTION_TIMEOUT"},
+        )
+        return _payload(execution)
     except ApiError as error:  # e.g. EMBEDDING_UNAVAILABLE on the local provider
         execution.error_code = error.code
         execution.error_message = error.message
