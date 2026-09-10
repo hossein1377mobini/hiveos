@@ -36,6 +36,8 @@ EXPECTED_TABLES = {
     "hiveos.scan_history",
     "hiveos.processing_jobs",
     "hiveos.knowledge_chunks",
+    "hiveos.chat_sessions",
+    "hiveos.chat_messages",
 }
 
 

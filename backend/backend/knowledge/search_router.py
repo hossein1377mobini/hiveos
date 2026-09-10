@@ -1,7 +1,5 @@
 """Semantic search endpoint (US-227, T-S2-6)."""
 
-import uuid
-from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field

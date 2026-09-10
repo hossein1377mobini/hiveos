@@ -5,6 +5,7 @@ run against the compose dev database (5434). Without a reachable database the
 whole module skips cleanly (CI has no database service).
 """
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -40,6 +41,8 @@ MODEL_TABLES = (
     "scan_history",
     "processing_jobs",
     "knowledge_chunks",
+    "chat_messages",
+    "chat_sessions",
 )
 
 
@@ -83,7 +86,12 @@ def client(synced_database, monkeypatch):
     with sync_engine.begin() as conn:
         conn.execute(text("TRUNCATE TABLE " + ", ".join(f"hiveos.{t}" for t in MODEL_TABLES) + " CASCADE"))
 
-    async_engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    async_engine = create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_size=2,
+        max_overflow=3,
+    )
     factory = async_sessionmaker(async_engine, expire_on_commit=False)
 
     async def _override_get_db():
@@ -101,6 +109,7 @@ def client(synced_database, monkeypatch):
 
     # Reset the per-IP limiter state between tests (limiters are module-level).
     from backend.brain.router import _brain_limiter
+    from backend.chat.router import _chat_limiter
     from backend.knowledge.router import _knowledge_limiter
     from backend.knowledge.search_router import _search_limiter
     from backend.organization.router import _auth_limiter
@@ -111,6 +120,7 @@ def client(synced_database, monkeypatch):
     _brain_limiter.reset()
     _knowledge_limiter.reset()
     _search_limiter.reset()
+    _chat_limiter.reset()
 
     # 'with' keeps one event loop for the whole test - the async engine must not
     # hop between loops (asyncpg connections are loop-bound).
@@ -119,3 +129,10 @@ def client(synced_database, monkeypatch):
 
     app.dependency_overrides.clear()
     sync_engine.dispose()
+    # Close pooled asyncpg connections now (PG caps at 100; a per-test leak
+    # saturates the server once the suite grows).
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(async_engine.dispose())
+    finally:
+        loop.close()
