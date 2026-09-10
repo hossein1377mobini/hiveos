@@ -34,6 +34,7 @@ MODEL_TABLES = (
     "knowledge_assets",
     "scan_history",
     "processing_jobs",
+    "knowledge_chunks",
 )
 
 

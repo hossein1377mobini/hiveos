@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
 from backend.audit import record_audit
+from backend.knowledge.chunking import build_metadata, normalize_text, replace_chunks
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.models import KnowledgeAsset, KnowledgeSource, ProcessingJob
 
@@ -51,6 +52,10 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
         verdict = classify_asset(asset, folder)
         try:
             asset.extracted_text = extract_text(asset, folder)
+            normalized = normalize_text(asset.extracted_text or "")
+            asset.extracted_text = normalized
+            asset.asset_metadata = build_metadata(asset)
+            await replace_chunks(session, asset, normalized)
             asset.status = "ready"
         except ApiError as exc:
             if exc.code in ("REVIEW_QUEUE", "OCR_UNAVAILABLE"):
