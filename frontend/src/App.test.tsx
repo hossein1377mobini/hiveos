@@ -2,11 +2,14 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
+// Minimal structural mock of the fetch Response (R5-2): only the members
+// HealthBadge consumes, typed against the real Response contract.
 function stubFetch(payload: unknown, ok = true) {
-  return vi.stubGlobal(
-    "fetch",
-    vi.fn(() => Promise.resolve({ ok, json: () => Promise.resolve(payload) } as Response)),
-  );
+  const response = {
+    ok,
+    json: () => Promise.resolve(payload),
+  } satisfies Pick<Response, "ok" | "json">;
+  return vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(response)));
 }
 
 afterEach(() => {

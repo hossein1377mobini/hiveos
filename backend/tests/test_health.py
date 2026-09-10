@@ -23,7 +23,10 @@ def test_health_ok() -> None:
     assert body["environment"] == "dev"
 
 def test_health_reports_environment() -> None:
-    body = _client(Settings(environment="staging")).get("/api/health").json()
+    settings = Settings(
+        environment="staging", database_url="postgresql+asyncpg://hiveos:x@db:5432/hiveos"
+    )
+    body = _client(settings).get("/api/health").json()
     assert body["environment"] == "staging"
 
 def test_invalid_environment_rejected() -> None:
