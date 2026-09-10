@@ -144,10 +144,10 @@ async def start_execution(
 
 
 async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dict:
-    """US-305/US-306: minimal runtime cycle -> COMPLETED with a stub output.
+    """US-305..311: knowledge-retrieval cycle with mandatory citations.
 
-    The real reasoning/retrieval/output steps (US-307/308/311) replace the
-    stub in T-S3-4.
+    RG-07/Amendment 2: a knowledge-based answer carries citations; without
+    retrieved evidence the answer says so and citations stay empty.
     """
     execution = await get_execution_row(session, organization_id, execution_id)
     if execution.status not in ("PENDING", "RUNNING"):
@@ -155,11 +155,47 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
     execution.status = "RUNNING"
     if execution.started_at is None:
         execution.started_at = _utc_now()
-    execution.output = {
-        "text": f"[stub] received: {execution.input.get('text', '')[:200]}",
-        "citations": [],
-        "stub": True,
-    }
+
+    query = str(execution.input.get("text", ""))
+    try:
+        from backend.knowledge.search import semantic_search
+
+        results = await semantic_search(session, organization_id, query)
+        hits = results["results"]
+    except ApiError as error:  # e.g. EMBEDDING_UNAVAILABLE on the local provider
+        execution.error_code = error.code
+        execution.error_message = error.message
+        execution.status = "FAILED"
+        execution.completed_at = _utc_now()
+        await record_audit(
+            session,
+            "execution.failed",
+            organization_id=organization_id,
+            entity_type="agent_execution",
+            entity_id=execution.id,
+            detail={"error_code": error.code},
+        )
+        return _payload(execution)
+
+    if hits:
+        citations = [
+            {
+                "doc_id": str(hit["asset_id"]),
+                "title": hit["asset_name"],
+                "snippet": hit["content"][:300],
+            }
+            for hit in hits
+        ]
+        sources = "\n\n".join(
+            f"[{index + 1}] {hit['asset_name']}: {hit['content']}"
+            for index, hit in enumerate(hits)
+        )
+        text = f"بر اساس دانش سازمان:\n\n{sources}"
+    else:
+        citations = []
+        text = "در دانش سازمان سند قابل‌استنادی یافت نشد؛ پاسخ بدون منبع است."
+
+    execution.output = {"text": text, "citations": citations}
     execution.status = "COMPLETED"
     execution.completed_at = _utc_now()
     await record_audit(
@@ -168,7 +204,20 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         organization_id=organization_id,
         entity_type="agent_execution",
         entity_id=execution.id,
+        detail={"citations": len(citations)},
     )
+    # US-0909/RG-07: map the reply back into the originating chat session.
+    if execution.chat_session_id is not None:
+        from backend.chat.service import persist_assistant_reply
+
+        await persist_assistant_reply(
+            session,
+            organization_id,
+            execution.requested_by,
+            execution.chat_session_id,
+            text,
+            citations=citations,
+        )
     return _payload(execution)
 
 
