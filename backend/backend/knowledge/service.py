@@ -22,6 +22,7 @@ from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.db import audit_session_factory
+from backend.knowledge.processing import enqueue_job
 from backend.models import (
     KnowledgeAsset,
     KnowledgeSource,
@@ -274,6 +275,8 @@ async def run_scan(
 
     added = updated = deleted = 0
     now = _utc_now()
+    new_assets: list[KnowledgeAsset] = []
+    changed_assets: list[KnowledgeAsset] = []
     for rel_path, (fingerprint, size) in found.items():
         asset = by_rel_path.pop(rel_path, None)
         if asset is None:
@@ -290,6 +293,7 @@ async def run_scan(
                 discovered_at=now,
             )
             session.add(asset)
+            new_assets.append(asset)
             added += 1
             await record_audit(
                 session,
@@ -303,6 +307,8 @@ async def run_scan(
             asset.file_fingerprint = fingerprint
             asset.size_bytes = size
             asset.status = "queued"  # US-202 FR-006: changed files re-enter the queue
+            asset.version += 1  # US-203 scenario 2: new version -> reprocess job
+            changed_assets.append(asset)
             updated += 1
             await record_audit(
                 session,
@@ -325,6 +331,14 @@ async def run_scan(
             entity_id=gone.id,
             detail={"rel_path": gone.rel_path},
         )
+
+    # US-203: one processing job per new/changed asset (FR-003 dedups);
+    # scheduled background runs queue at low priority (priority rules).
+    priority = "low" if scan_type == "scheduled" else "normal"
+    for created_asset in new_assets:
+        await enqueue_job(session, organization_id, created_asset, "create", priority)
+    for changed in changed_assets:
+        await enqueue_job(session, organization_id, changed, "reprocess", priority)
 
     history.status = "success"
     history.files_added = added

@@ -33,6 +33,7 @@ MODEL_TABLES = (
     "login_attempts",
     "knowledge_assets",
     "scan_history",
+    "processing_jobs",
 )
 
 

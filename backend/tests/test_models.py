@@ -34,6 +34,7 @@ EXPECTED_TABLES = {
     "hiveos.knowledge_sources",
     "hiveos.knowledge_assets",
     "hiveos.scan_history",
+    "hiveos.processing_jobs",
 }
 
 

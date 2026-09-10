@@ -48,6 +48,8 @@ class KnowledgeAsset(Base, TimestampMixin):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     extension: Mapped[str] = mapped_column(String(10), nullable=False)
     status: Mapped[str] = mapped_column(String(15), nullable=False, server_default="queued")
+    # US-203 scenario 2: bumped by the scanner when a file changes.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )

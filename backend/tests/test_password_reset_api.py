@@ -29,7 +29,9 @@ def _last_code(mobile: str) -> str:
 
 
 def _request_reset(client, mobile: str):
-    return client.post(f"{AUTH}/password/reset-request", json={"mobile": mobile})
+    response = client.post(f"{AUTH}/password/reset-request", json={"mobile": mobile})
+    assert response.status_code == 200, response.text  # surface 429 codes on flakes
+    return response
 
 
 def _reset_password(client, mobile: str, code: str, new_password="N3w!Secret"):
