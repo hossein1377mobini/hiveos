@@ -46,6 +46,7 @@ MODEL_TABLES = (
     "agent_executions",
     "wallet_transactions",
     "wallets",
+    "system_settings",
 )
 
 

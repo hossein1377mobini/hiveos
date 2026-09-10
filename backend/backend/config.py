@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     llm_default_model: str = "hive-mind-default"
     # US-1203: welcome credit for new organizations (admin-tunable later, US-1603).
     wallet_welcome_credit: int = 50
+    # epic-16/T-S4-1: system admin (separate identity from org Owners).
+    # ADR-022: staging/prod MUST set these via env, never defaults there.
+    system_admin_username: str = "system-admin"
+    system_admin_password: str = "system-admin-dev"
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
