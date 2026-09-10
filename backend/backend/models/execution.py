@@ -66,6 +66,7 @@ class AgentExecution(Base):
         JSON, nullable=False, server_default=text("'{}'::jsonb")
     )
     output: Mapped[dict | None] = mapped_column(JSON)
+    usage: Mapped[dict] = mapped_column(JSON, nullable=False, server_default=text("'{}'::jsonb"))
     error_code: Mapped[str | None] = mapped_column(String(100))
     error_message: Mapped[str | None] = mapped_column(Text)
     idempotency_key: Mapped[str | None] = mapped_column(String(120))
