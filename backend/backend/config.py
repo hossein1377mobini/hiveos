@@ -20,6 +20,10 @@ class Settings(BaseSettings):
 
     app_name: str = "HiveOS API"
     environment: str = Field(default="dev", pattern="^(dev|staging|prod)$")
+    # US-001 C3: pending organizations expire; configurable later via admin panel (US-1605).
+    pending_org_expiry_days: int = 7
+    # US-003/T-S1-4: session lifetime (7-day sliding window).
+    session_ttl_days: int = 7
     # T-S0-5 review R5-1: the old non-empty default made the staging/prod fail-fast
     # validator unreachable (default always filled the field). Staging/prod without
     # DATABASE_URL must now fail loudly at startup instead of silently targeting

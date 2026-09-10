@@ -12,6 +12,8 @@ description = "HiveOS backend (FastAPI) - v0.1"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "alembic>=1.19.2",
+    "argon2-cffi>=25.1.0",
+    "asyncpg>=0.30.0",
     "fastapi>=0.141.1",
     "psycopg[binary]>=3.3.5",
     "pydantic-settings>=2.15.0",
@@ -32,6 +34,8 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# B008: FastAPI dependency injection uses calls (Depends(...)) in defaults by design.
+ignore = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
