@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     # a zero-credit organization's new assets stay queued as needs_review
     # instead of being processed. The real wallet lands with T-S3-7.
     zero_credit_review_mode: bool = False
+    # US-314: hard cap for one execution cycle (seconds).
+    execution_timeout_seconds: float = 30.0
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
