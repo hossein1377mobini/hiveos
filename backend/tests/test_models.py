@@ -28,6 +28,9 @@ EXPECTED_TABLES = {
     "hiveos.otp_verifications",
     "hiveos.login_attempts",
     "hiveos.workspace_settings",
+    "hiveos.organization_brains",
+    "hiveos.knowledge_repositories",
+    "hiveos.vector_indexes",
 }
 
 
