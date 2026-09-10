@@ -109,6 +109,7 @@ def client(synced_database, monkeypatch):
 
     # Reset the per-IP limiter state between tests (limiters are module-level).
     from backend.brain.router import _brain_limiter
+    from backend.chat import streaming
     from backend.chat.router import _chat_limiter
     from backend.knowledge.router import _knowledge_limiter
     from backend.knowledge.search_router import _search_limiter
@@ -121,6 +122,7 @@ def client(synced_database, monkeypatch):
     _knowledge_limiter.reset()
     _search_limiter.reset()
     _chat_limiter.reset()
+    streaming.hub.reset()
 
     # 'with' keeps one event loop for the whole test - the async engine must not
     # hop between loops (asyncpg connections are loop-bound).

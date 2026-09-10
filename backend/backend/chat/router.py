@@ -1,14 +1,18 @@
 """Chat session + message endpoints (US-0901/US-0909, T-S3-1)."""
 
+import asyncio
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.audit import record_audit
 from backend.auth import AuthContext, get_auth_context
-from backend.chat import service
+from backend.chat import service, streaming
+from backend.chat.streaming import sse_lines
 from backend.db import get_db
 from backend.envelope import ok
 from backend.rate_limit import SlidingWindowLimiter, rate_limit_dependency
@@ -206,3 +210,63 @@ async def list_messages_endpoint(
             after=after,
         )
     )
+
+
+@router.post("/sessions/{session_id}/streams", dependencies=[Depends(_rate_limit)])
+async def create_stream_endpoint(
+    session_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-09.2.1: open an SSE stream session for an active chat session."""
+    await service.authorize_session(session, auth.organization.id, auth.user.id, session_id)
+    stream_id = streaming.hub.create(session_id)
+    await record_audit(
+        session,
+        "chat-stream.started",
+        organization_id=auth.organization.id,
+        actor_user_id=auth.user.id,
+        entity_type="chat_stream",
+        entity_id=stream_id,
+        detail={"chat_session_id": str(session_id), "connection_type": "SSE"},
+    )
+    return ok(
+        {
+            "stream_id": stream_id,
+            "connection_type": "SSE",
+            "connection_url": f"/api/v1/chat/sessions/{session_id}/streams/{stream_id}/events",
+        }
+    )
+
+
+@router.get("/sessions/{session_id}/streams/{stream_id}/events")
+async def stream_events_endpoint(
+    session_id: uuid.UUID,
+    stream_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """US-09.2.3: SSE event stream (started/chunk/completed/error frames)."""
+    await service.authorize_session(session, auth.organization.id, auth.user.id, session_id)
+    streaming.hub.status(stream_id)  # 404 for unknown streams before headers go out
+
+    async def generator():
+        try:
+            async for event in streaming.hub.events(stream_id):
+                yield sse_lines(event)
+                if event["type"] == "stream.completed":
+                    # Persist the assembled ASSISTANT reply (US-0909) inside
+                    # the request transaction; get_db commits on success.
+                    full_text = "".join(streaming.hub.buffered_chunks(stream_id))
+                    await service.persist_assistant_reply(
+                        session,
+                        auth.organization.id,
+                        auth.user.id,
+                        session_id,
+                        full_text,
+                    )
+        except asyncio.CancelledError:
+            streaming.hub.close(stream_id)
+            raise
+
+    return StreamingResponse(generator(), media_type="text/event-stream")
