@@ -17,6 +17,7 @@ from backend.models.enums import (
 )
 from backend.models.membership import OrganizationMember, Role, RoleAssignment
 from backend.models.organization import Organization, Workspace
+from backend.models.otp import OtpVerification
 from backend.models.session import Session
 from backend.models.user import User
 
@@ -24,6 +25,7 @@ __all__ = [
     "AuditLog",
     "Base",
     "MemberStatus",
+    "OtpVerification",
     "Organization",
     "OrganizationMember",
     "OrganizationSize",

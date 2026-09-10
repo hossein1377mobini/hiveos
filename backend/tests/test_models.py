@@ -8,6 +8,7 @@ from backend.models import (
     Base,
     Organization,
     OrganizationMember,
+    OtpVerification,
     Role,
     RoleAssignment,
     Session,
@@ -24,7 +25,17 @@ EXPECTED_TABLES = {
     "hiveos.role_assignments",
     "hiveos.sessions",
     "hiveos.audit_logs",
+    "hiveos.otp_verifications",
 }
+
+
+def test_otp_verification_constraints() -> None:
+    otp = OtpVerification.__table__
+    active_index = _index_by_name(otp, "uq_otp_verifications_active_per_user")
+    assert active_index.unique
+    assert "ck_otp_verifications_purpose_allowed_values" in {
+        c.name for c in otp.constraints if c.__class__.__name__ == "CheckConstraint"
+    }
 
 
 def test_all_expected_tables_in_metadata() -> None:

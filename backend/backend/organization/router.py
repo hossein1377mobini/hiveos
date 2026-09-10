@@ -3,6 +3,8 @@
 - POST /api/v1/auth/register-organization  (US-001 merged path)
 - POST /api/v1/auth/owner                  (US-002)
 - GET  /api/v1/auth/username-available     (owner form live check)
+- POST /api/v1/auth/send-otp               (US-003, Bearer session required)
+- POST /api/v1/auth/resend-otp             (US-003, same state machine)
 
 Responses use the {success, data, message} envelope (API Design Standards).
 Errors raise ApiError -> {success:false, error:{code,message}}.
@@ -11,9 +13,12 @@ Errors raise ApiError -> {success:false, error:{code,message}}.
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.auth import AuthContext, get_auth_context
 from backend.db import get_db
+from backend.organization.otp_service import PURPOSE_OWNER_VERIFICATION, send_otp
 from backend.organization.schemas import (
     OrganizationCreated,
+    OtpSent,
     OwnerCreated,
     RegisterOrganizationRequest,
     RegisterOwnerRequest,
@@ -61,3 +66,27 @@ async def check_username(
     result = await username_available(session, username)
     checked = UsernameAvailability(**result)
     return _ok(checked.model_dump(mode="json"))
+
+
+@router.post("/send-otp", dependencies=[Depends(_rate_limit)])
+async def send_otp_endpoint(
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+) -> dict:
+    """US-003 scenario 1: send the owner-verification OTP to the session user's mobile."""
+    result = await send_otp(
+        session, auth.user, purpose=PURPOSE_OWNER_VERIFICATION, event="otp.sent"
+    )
+    sent = OtpSent(**result)
+    return _ok(sent.model_dump(mode="json"))
+
+
+@router.post("/resend-otp", dependencies=[Depends(_rate_limit)])
+async def resend_otp_endpoint(
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+) -> dict:
+    """US-003 scenario 3: resend after cooldown / expiry; new code invalidates the old one."""
+    result = await send_otp(
+        session, auth.user, purpose=PURPOSE_OWNER_VERIFICATION, event="otp.resent"
+    )
+    sent = OtpSent(**result)
+    return _ok(sent.model_dump(mode="json"))

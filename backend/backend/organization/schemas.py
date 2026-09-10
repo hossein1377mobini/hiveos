@@ -91,3 +91,10 @@ class UsernameAvailability(BaseModel):
     username: str
     available: bool
     reason: str | None = None
+
+
+class OtpSent(BaseModel):
+    """US-003: response of send-otp / resend-otp (timers drive the UI countdown)."""
+
+    expires_at: datetime
+    resend_available_at: datetime
