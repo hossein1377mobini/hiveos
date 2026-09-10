@@ -5,9 +5,14 @@ run against the compose dev database (5434). Without a reachable database the
 whole module skips cleanly (CI has no database service).
 """
 
+import os
 from pathlib import Path
 
 import pytest
+
+# US-212: tests must never depend on model weights - the mock embedding
+# provider is deterministic. Must be set before get_settings() is cached.
+os.environ.setdefault("EMBEDDING_PROVIDER", "mock")
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
@@ -97,6 +102,7 @@ def client(synced_database, monkeypatch):
     # Reset the per-IP limiter state between tests (limiters are module-level).
     from backend.brain.router import _brain_limiter
     from backend.knowledge.router import _knowledge_limiter
+    from backend.knowledge.search_router import _search_limiter
     from backend.organization.router import _auth_limiter
     from backend.workspace.router import _workspace_limiter
 
@@ -104,6 +110,7 @@ def client(synced_database, monkeypatch):
     _workspace_limiter.reset()
     _brain_limiter.reset()
     _knowledge_limiter.reset()
+    _search_limiter.reset()
 
     # 'with' keeps one event loop for the whole test - the async engine must not
     # hop between loops (asyncpg connections are loop-bound).

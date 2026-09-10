@@ -17,6 +17,7 @@ from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.knowledge.chunking import build_metadata, normalize_text, replace_chunks
 from backend.knowledge.classify import classify_asset, extract_text
+from backend.knowledge.embeddings import embed_texts
 from backend.models import KnowledgeAsset, KnowledgeSource, ProcessingJob
 
 
@@ -55,7 +56,11 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
             normalized = normalize_text(asset.extracted_text or "")
             asset.extracted_text = normalized
             asset.asset_metadata = build_metadata(asset)
-            await replace_chunks(session, asset, normalized)
+            chunk_rows = await replace_chunks(session, asset, normalized)
+            if chunk_rows:
+                vectors = embed_texts([row.content for row in chunk_rows])
+                for row, vector in zip(chunk_rows, vectors, strict=True):
+                    row.embedding = vector  # type: ignore[assignment]
             asset.status = "ready"
         except ApiError as exc:
             if exc.code in ("REVIEW_QUEUE", "OCR_UNAVAILABLE"):
