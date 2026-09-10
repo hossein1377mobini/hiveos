@@ -81,7 +81,7 @@ class Workspace(Base, TimestampMixin):
 
     __tablename__ = "workspaces"
     __table_args__ = (
-        CheckConstraint("status IN ('active', 'disabled')", name="status_allowed_values"),
+        CheckConstraint("status IN ('active', 'disabled', 'failed')", name="status_allowed_values"),
         # Only one primary workspace per organization (ORG-WS 'first version' rule).
         Index(
             "uq_workspaces_primary_per_org",
@@ -102,3 +102,6 @@ class Workspace(Base, TimestampMixin):
     status: Mapped[WorkspaceStatus] = mapped_column(
         String(10), nullable=False, default=WorkspaceStatus.ACTIVE, server_default="active"
     )
+    # US-004 FR-004/FR-005: local storage location + initialization marker.
+    storage_root: Mapped[str | None] = mapped_column(String(500))
+    initialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

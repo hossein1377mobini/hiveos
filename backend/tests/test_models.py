@@ -27,6 +27,7 @@ EXPECTED_TABLES = {
     "hiveos.audit_logs",
     "hiveos.otp_verifications",
     "hiveos.login_attempts",
+    "hiveos.workspace_settings",
 }
 
 
