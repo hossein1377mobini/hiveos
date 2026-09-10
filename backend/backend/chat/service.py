@@ -88,6 +88,31 @@ async def _get_owned_session(
     return chat
 
 
+async def authorize_session(
+    session: AsyncSession, organization_id, user_id, session_id
+) -> ChatSession:
+    """Public authorization seam for the streaming endpoints (US-0902)."""
+    chat = await _get_owned_session(session, organization_id, user_id, session_id)
+    if chat.status != "ACTIVE":
+        raise ApiError(409, "SESSION_NOT_ACTIVE", f"A {chat.status} session accepts no streams.")
+    return chat
+
+
+async def persist_assistant_reply(
+    session: AsyncSession, organization_id, user_id, session_id, text: str, *, citations: list | None = None
+) -> dict:
+    """US-0902/US-0909: store the completed streamed reply as an ASSISTANT message."""
+    return await append_message(
+        session,
+        organization_id,
+        user_id,
+        session_id,
+        "ASSISTANT",
+        {"text": text},
+        citations=citations,
+    )
+
+
 async def create_session(
     session: AsyncSession, organization_id, user_id, body: dict
 ) -> dict:
