@@ -20,6 +20,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from pgvector.sqlalchemy import Vector
+
 from backend.models.base import Base, new_uuid
 
 
@@ -46,6 +48,8 @@ class KnowledgeChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # US-212 (T-S2-6): bge-m3 dense vector; NULL until the embedding step runs.
+    embedding: Mapped[object | None] = mapped_column(Vector(1024))
     created_at: Mapped[object | None] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

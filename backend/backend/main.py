@@ -16,6 +16,7 @@ from backend.brain import router as brain_router
 from backend.config import Settings, get_settings
 from backend.knowledge import assets_router as knowledge_assets_router
 from backend.knowledge import router as knowledge_router
+from backend.knowledge import search_router
 from backend.knowledge.scheduler import start_scheduler, stop_scheduler
 from backend.organization import router as organization_router
 from backend.processing import router as processing_router
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(knowledge_router, prefix="/v1")
     api.include_router(knowledge_assets_router, prefix="/v1")
     api.include_router(processing_router, prefix="/v1")
+    api.include_router(search_router.router, prefix="/v1")
     app.include_router(api)
 
     return app

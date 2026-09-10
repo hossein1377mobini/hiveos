@@ -66,24 +66,29 @@ def build_metadata(asset: KnowledgeAsset) -> dict:
 
 async def replace_chunks(
     session: AsyncSession, asset: KnowledgeAsset, normalized: str
-) -> int:
-    """US-210/US-211: normalize, chunk, persist (replacing prior version)."""
+) -> list[KnowledgeChunk]:
+    """US-210/US-211: normalize, chunk, persist (replacing prior version).
+
+    Returns the created rows so the embedding step (T-S2-6) can fill the
+    vectors in place.
+    """
     await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.asset_id == asset.id))
     chunks = chunk_text(normalized)
     now = datetime.now(UTC)
+    rows: list[KnowledgeChunk] = []
     for index, content in enumerate(chunks):
-        session.add(
-            KnowledgeChunk(
-                organization_id=asset.organization_id,
-                asset_id=asset.id,
-                asset_version=asset.version,
-                chunk_index=index,
-                content=content,
-                char_count=len(content),
-                created_at=now,
-            )
+        row = KnowledgeChunk(
+            organization_id=asset.organization_id,
+            asset_id=asset.id,
+            asset_version=asset.version,
+            chunk_index=index,
+            content=content,
+            char_count=len(content),
+            created_at=now,
         )
-    return len(chunks)
+        session.add(row)
+        rows.append(row)
+    return rows
 
 
 async def list_chunks(session: AsyncSession, organization_id, asset: KnowledgeAsset) -> list[dict]:

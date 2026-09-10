@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # US-211 (T-S2-5): chunk window size + overlap, in characters.
     knowledge_chunk_size_chars: int = 800
     knowledge_chunk_overlap_chars: int = 100
+    # US-212 (T-S2-6): embedding provider. 'local' = BAAI/bge-m3 via
+    # sentence-transformers (staging/prod hosts with the model weights);
+    # 'mock' = deterministic hash vectors for dev/CI/offline.
+    embedding_provider: str = Field(default="mock", pattern="^(local|mock)$")
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
+    # US-227: semantic search defaults.
+    search_default_top_k: int = 5
+    search_max_top_k: int = 20
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
