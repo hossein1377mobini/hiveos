@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
+from backend.knowledge.processing import enqueue_job
 from backend.models import KnowledgeAsset, KnowledgeSource, Organization
 
 # US-205 classification table, v0.1 active formats; HTML is explicitly banned.
@@ -128,6 +129,8 @@ async def upload_assets(
             entity_id=asset.id,
             detail={"name": asset.name, "size_bytes": asset.size_bytes},
         )
+        # US-201 FR-009: uploads enter the SAME US-203+ pipeline (no side path).
+        await enqueue_job(session, organization.id, asset, "create")
 
     return {"stored": stored, "rejected": rejected}
 
