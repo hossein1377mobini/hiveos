@@ -11,6 +11,8 @@ from backend.auth import AuthContext, get_auth_context
 from backend.db import get_db
 from backend.envelope import ok
 from backend.knowledge.assets import (
+    classify_single_asset,
+    get_classification,
     list_assets,
     set_source_status,
     soft_delete_asset,
@@ -109,6 +111,26 @@ async def assets_list_endpoint(
 ) -> dict:
     """US-007 FR-005: the asset list with pipeline status."""
     return ok({"assets": await list_assets(session, auth.organization)})
+
+
+@assets_router.post("/{asset_id}/classify", dependencies=[Depends(_rate_limit)])
+async def asset_classify_endpoint(
+    asset_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-205: classify + extract one asset on demand."""
+    return ok(await classify_single_asset(session, auth.organization, asset_id))
+
+
+@assets_router.get("/{asset_id}/classification", dependencies=[Depends(_rate_limit)])
+async def asset_classification_endpoint(
+    asset_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-205: read the classification of one asset."""
+    return ok(await get_classification(session, auth.organization, asset_id))
 
 
 @assets_router.delete("/{asset_id}", dependencies=[Depends(_rate_limit)])

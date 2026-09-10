@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.config import get_settings
 from backend.knowledge.service import find_due_sources, run_scan
+from backend.knowledge.worker import drain_queue
 
 logger = logging.getLogger("hiveos.scheduler")
 
@@ -33,6 +34,9 @@ async def _scan_due_sources() -> None:
                 except Exception:  # noqa: BLE001 - one bad source never stops the loop
                     await session.rollback()
                     logger.warning("scheduled scan failed for source %s", source.id)
+        # US-203: after scans, drain the processing queue (T-S2-4 workers).
+        async with factory() as session:
+            await drain_queue(session)
     finally:
         await engine.dispose()
 
