@@ -8,6 +8,7 @@ Soft delete per US-241 keeps deleted_at.
 import uuid
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -64,4 +65,7 @@ class KnowledgeAsset(Base, TimestampMixin):
     pipeline: Mapped[str | None] = mapped_column(String(20))
     classified_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     extracted_text: Mapped[str | None] = mapped_column(Text())
+    # US-208 (T-S2-5): pipeline-built metadata bag. SQLAlchemy reserves the
+    # 'metadata' attribute name, so the Python attribute differs from the column.
+    asset_metadata: Mapped[dict | None] = mapped_column("metadata", JSON())
     discovered_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
+from backend.knowledge.chunking import build_metadata, list_chunks, normalize_text, replace_chunks
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.processing import enqueue_job
 from backend.models import KnowledgeAsset, KnowledgeSource, Organization
@@ -196,6 +197,10 @@ async def classify_single_asset(
     needs_review: str | None = None
     try:
         asset.extracted_text = extract_text(asset, folder)
+        normalized = normalize_text(asset.extracted_text or "")
+        asset.extracted_text = normalized
+        asset.asset_metadata = build_metadata(asset)
+        await replace_chunks(session, asset, normalized)
         asset.status = "ready"
     except ApiError as exc:
         if exc.code in ("REVIEW_QUEUE", "OCR_UNAVAILABLE"):
@@ -227,7 +232,36 @@ async def classify_single_asset(
     }
 
 
-async def get_classification(session: AsyncSession, organization: Organization, asset_id) -> dict:
+async def list_asset_chunks(
+    session: AsyncSession, organization: Organization, asset_id
+) -> dict:
+    """US-211 API: chunks of the asset's current version."""
+    asset = await session.get(KnowledgeAsset, asset_id)
+    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+        raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
+    chunks = await list_chunks(session, organization.id, asset)
+    return {
+        "id": asset.id,
+        "asset_version": asset.version,
+        "total": len(chunks),
+        "chunks": chunks,
+    }
+
+
+async def get_asset_metadata(
+    session: AsyncSession, organization: Organization, asset_id
+) -> dict:
+    """US-208 API: the pipeline metadata bag."""
+    asset = await session.get(KnowledgeAsset, asset_id)
+    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+        raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
+    metadata = asset.asset_metadata or build_metadata(asset)
+    return {"id": asset.id, "metadata": metadata}
+
+
+async def get_classification(
+    session: AsyncSession, organization: Organization, asset_id
+) -> dict:
     """US-205 API: GET classification of one asset."""
     asset = await session.get(KnowledgeAsset, asset_id)
     if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:

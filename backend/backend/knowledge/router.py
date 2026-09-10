@@ -12,7 +12,9 @@ from backend.db import get_db
 from backend.envelope import ok
 from backend.knowledge.assets import (
     classify_single_asset,
+    get_asset_metadata,
     get_classification,
+    list_asset_chunks,
     list_assets,
     set_source_status,
     soft_delete_asset,
@@ -131,6 +133,26 @@ async def asset_classification_endpoint(
 ) -> dict:
     """US-205: read the classification of one asset."""
     return ok(await get_classification(session, auth.organization, asset_id))
+
+
+@assets_router.get("/{asset_id}/chunks", dependencies=[Depends(_rate_limit)])
+async def asset_chunks_endpoint(
+    asset_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-211: chunks of the asset's current version."""
+    return ok(await list_asset_chunks(session, auth.organization, asset_id))
+
+
+@assets_router.get("/{asset_id}/metadata", dependencies=[Depends(_rate_limit)])
+async def asset_metadata_endpoint(
+    asset_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-208: the pipeline metadata bag."""
+    return ok(await get_asset_metadata(session, auth.organization, asset_id))
 
 
 @assets_router.delete("/{asset_id}", dependencies=[Depends(_rate_limit)])

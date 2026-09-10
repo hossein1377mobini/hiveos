@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     upload_max_file_mb: int = 25
     # US-202 FR-002: scheduler poll cadence (how often due sources are checked).
     ingestion_scheduler_poll_seconds: int = 60
+    # US-211 (T-S2-5): chunk window size + overlap, in characters.
+    knowledge_chunk_size_chars: int = 800
+    knowledge_chunk_overlap_chars: int = 100
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
