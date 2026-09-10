@@ -10,6 +10,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api_errors import install_error_handlers
+from backend.brain import router as brain_router
 from backend.config import Settings, get_settings
 from backend.organization import router as organization_router
 from backend.routes import health
@@ -36,6 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(health.router)
     api.include_router(organization_router, prefix="/v1")
     api.include_router(workspace_router, prefix="/v1")
+    api.include_router(brain_router, prefix="/v1")
     app.include_router(api)
 
     return app
