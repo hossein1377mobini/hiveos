@@ -44,12 +44,59 @@ def test_full_lifecycle_start_run_complete(client):
 
     done = client.post(f"{EX}/{created['id']}/run", headers=ctx["headers"]).json()["data"]
     assert done["status"] == "COMPLETED"
-    assert done["output"]["stub"] is True
+    # no knowledge indexed yet -> answer without citations (RG-07 fallback)
+    assert done["output"]["citations"] == []
+    assert "یافت نشد" in done["output"]["text"]
     assert done["completed_at"] is not None
+
+    # the reply is mapped back into the originating chat session (US-0909)
+    messages = client.get(
+        f"/api/v1/chat/sessions/{chat['id']}/messages", headers=ctx["headers"]
+    ).json()["data"]
+    assistant = [m for m in messages["items"] if m["role"] == "ASSISTANT"]
+    assert len(assistant) == 1
+    assert "یافت نشد" in assistant[0]["content"]["text"]
 
     # start again -> conflict
     restart = client.post(f"{EX}/{created['id']}/start", headers=ctx["headers"])
     assert restart.status_code == 409
+
+
+def test_run_with_knowledge_hits_returns_citations(client, tmp_path):
+    """US-308/311: retrieval feeds the output; citations are mandatory (RG-07)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from backend.config import get_settings
+    from backend.knowledge.worker import drain_queue
+
+    ctx = _bootstrap_full(client)
+    response = client.post(
+        "/api/v1/knowledge-assets/upload",
+        files={"files": ("runbook.md", "# دفترچه نصب سرور", "text/markdown")},
+        headers=ctx["headers"],
+    )
+    assert response.status_code == 200, response.text
+
+    async def _drain():
+        settings = get_settings()
+        engine = create_async_engine(settings.database_url)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            await drain_queue(session)
+        await engine.dispose()
+
+    asyncio.get_event_loop().run_until_complete(_drain())
+
+    query = "# دفترچه نصب سرور"  # exact chunk text -> mock score 1.0
+    created = client.post(EX, json={"input": {"text": query}}, headers=ctx["headers"]).json()["data"]
+    done = client.post(f"{EX}/{created['id']}/run", headers=ctx["headers"]).json()["data"]
+    assert done["status"] == "COMPLETED", done
+    citations = done["output"]["citations"]
+    assert len(citations) >= 1
+    assert citations[0]["doc_id"] and citations[0]["title"] == "runbook.md"
+    assert "دفترچه نصب سرور" in done["output"]["text"]
 
 
 def test_cancel_rules(client):
