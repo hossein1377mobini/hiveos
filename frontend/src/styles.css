@@ -1,5 +1,8 @@
 /* Design tokens — hive/design/design-system.md v0.4.0 §2 + ui-mockups/v0.1/assets/hiveos.css.
    Light mode only in v0.1 (PO decision 2026-08-17). Base spacing unit = 4px (Tailwind default). */
+/* Dev/preview font delivery via CDN so the UI matches the mockups without the
+   self-hosted IranYekanX license step; air-gapped fallback (Tahoma) is intact. */
+@import url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css");
 @import "tailwindcss";
 
 @theme {

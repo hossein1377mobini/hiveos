@@ -48,50 +48,38 @@ export default function App() {
     return <AppShell><p className="p-6 text-sm text-neutral-600">در حال بارگذاری…</p></AppShell>;
   }
 
-  if (screen === "login") {
+  // Auth screens (00-03 mockups) are standalone pages WITHOUT the app shell —
+  // the shell (10-app-shell.html) only appears after onboarding completes.
+  if (screen === "login" || screen === "register" || screen === "owner" || screen === "otp") {
     return (
-      <AppShell>
-        <Login onDone={() => setScreen("onboarding")} />
-        <p className="mx-auto mt-4 max-w-md text-center text-sm">
-          حساب سازمان ندارید؟{" "}
-          <button className="font-bold text-navy-600 underline" onClick={() => setScreen("register")}>
-            ساخت سازمان جدید
-          </button>
-        </p>
-      </AppShell>
-    );
-  }
-
-  if (screen === "register") {
-    return (
-      <AppShell>
-        <RegisterOrganization
-          onCreated={(organizationId) => {
-            setOrganizationId(organizationId);
-            setScreen("owner");
-          }}
-          onBack={() => setScreen("login")}
-        />
-      </AppShell>
-    );
-  }
-
-  if (screen === "owner") {
-    return (
-      <AppShell>
-        <OwnerAccount
-          organizationId={organizationId ?? ""}
-          onDone={() => setScreen("otp")}
-        />
-      </AppShell>
-    );
-  }
-
-  if (screen === "otp") {
-    return (
-      <AppShell>
-        <OtpVerify onVerified={() => setScreen("onboarding")} />
-      </AppShell>
+      <div className="flex min-h-screen items-start justify-center px-4 pb-16 pt-11">
+        <div className="w-full max-w-[700px]">
+          {screen === "login" && (
+            <>
+              <Login onDone={() => setScreen("onboarding")} />
+              <p className="mx-auto mt-3 max-w-md text-center text-[13px] text-neutral-600">
+                حساب سازمان ندارید؟{" "}
+                <button className="font-bold text-navy-600 no-underline hover:underline" onClick={() => setScreen("register")}>
+                  ساخت سازمان جدید
+                </button>
+              </p>
+            </>
+          )}
+          {screen === "register" && (
+            <RegisterOrganization
+              onCreated={(organizationId) => {
+                setOrganizationId(organizationId);
+                setScreen("owner");
+              }}
+              onBack={() => setScreen("login")}
+            />
+          )}
+          {screen === "owner" && (
+            <OwnerAccount organizationId={organizationId ?? ""} onDone={() => setScreen("otp")} />
+          )}
+          {screen === "otp" && <OtpVerify onVerified={() => setScreen("onboarding")} />}
+        </div>
+      </div>
     );
   }
 
