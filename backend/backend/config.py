@@ -7,8 +7,12 @@ validated at startup. Admin panel (US-1601+) overrides live values later.
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# Dev-only convenience default (5434 = app db port on the dev machine, matching the
+# compose dev stack). Never a valid staging/prod target - see _resolve_database_url.
+_DEV_DATABASE_URL = "postgresql+asyncpg://hiveos:hiveos@localhost:5434/hiveos"
 
 
 class Settings(BaseSettings):
@@ -16,18 +20,20 @@ class Settings(BaseSettings):
 
     app_name: str = "HiveOS API"
     environment: str = Field(default="dev", pattern="^(dev|staging|prod)$")
-    # dev gets a local default (5434 = app db port on the dev machine); staging/prod
-    # MUST set DATABASE_URL explicitly - fail fast on missing config (review round 2).
-    database_url: str = Field(default="postgresql+asyncpg://hiveos:hiveos@localhost:5434/hiveos")
+    # T-S0-5 review R5-1: the old non-empty default made the staging/prod fail-fast
+    # validator unreachable (default always filled the field). Staging/prod without
+    # DATABASE_URL must now fail loudly at startup instead of silently targeting
+    # localhost; dev keeps the local default (review round 2 intent, now enforced).
+    database_url: str | None = None
 
-    @field_validator("database_url")
-    @classmethod
-    def _require_db_url_outside_dev(cls, v, info):
-        # Suggestion round 2: empty DATABASE_URL must never silently reach staging/prod.
-        env = info.data.get("environment", "dev")
-        if env != "dev" and not v:
-            raise ValueError("DATABASE_URL must be set explicitly for staging/prod")
-        return v
+    @model_validator(mode="after")
+    def _resolve_database_url(self) -> "Settings":
+        if self.database_url is None:
+            if self.environment == "dev":
+                self.database_url = _DEV_DATABASE_URL
+            else:
+                raise ValueError("DATABASE_URL must be set explicitly for staging/prod")
+        return self
     # CORS origins via CORS_ORIGINS, comma-separated (NoDecode disables JSON-only
     # parsing for this field). Empty = deny all browser origins. "*" only for local dev.
     # Review R2-2.

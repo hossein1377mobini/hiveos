@@ -1,14 +1,12 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (پایان سشن S0 — آماده‌سازی سشن جدید)
+> آخرین به‌روزرسانی: 2026-09-10 (T-S0-5 ریویو نوبت ۱ اعمال شد — PR #3 در انتظار تأیید نهایی/merge PO)
 
 ## شروع سشن جدید از اینجا
 
-1. تسک بعدی: **T-S0-5 پایه فرانت** (Vite/React + layout + پروکسی به API — §۸ development-workflow)؛ شاخه `task/T-S0-5-frontend-base` از main.
-2. خواندنی‌ها قبل از کد: `standards/setup-guide.md`، `ui-mockups/v0.1/_specs/dev-guidelines-v0.1.md`، `standards/standards-coding-standards-v10.md`، DoD.
-3. چرخه: کد+تست+خودریویو → گزارش `hive/reports/tasks/<تاریخ>-T-S0-5.md` → ریویو خارجی PO → merge فقط با تأیید PO.
-4. دستورهای ایستاده PO: پایین همین فایل.
+1. تسک جاری: **T-S0-5 پایه فرانت** — ریویو نوبت ۱ دریافت و اعمال شد (گزارش: `hive/reports/tasks/2026-09-10-T-S0-5.md` بخش «اعمال نظرات»): بلاکر R5-1 (fail-fast DATABASE_URL که بی‌اثر بود) در `backend/config.py` بسته شد + ۴ تست جدید؛ R5-2/R5-3 فرانت اعمال؛ R5-4 با توجیه رد. HEAD = `b15316c`، CI سبز (run 34455274256). گام بعدی: **تأیید نهایی PO → merge**.
+2. پس از merge: تسک بعدی S1 = **T-S1-1 مدل داده سازمان/Owner + migration** (US-001/002).
 
 ## وضعیت S0 — کامل (2026-09-10)
 

@@ -11,16 +11,24 @@ from backend.main import create_app
 def _client(settings: Settings) -> TestClient:
     return TestClient(create_app(settings))
 
+
+# Explicit DB URL keeps prod settings hermetic (R5-1: prod without DATABASE_URL raises).
+_DB_URL = "postgresql+asyncpg://hiveos:x@db:5432/hiveos"
+
 def test_cors_denied_when_no_origins_configured() -> None:
     """Empty CORS_ORIGINS (staging/prod default): no browser origin allowed."""
-    resp = _client(Settings(environment="prod", cors_origins=[])).get(
+    settings = Settings(environment="prod", cors_origins=[], database_url=_DB_URL)
+    resp = _client(settings).get(
         "/api/health", headers={"Origin": "https://evil.example"}
     )
     assert resp.status_code == 200  # server-to-server still works
     assert "access-control-allow-origin" not in resp.headers
 
 def test_cors_allows_configured_origin() -> None:
-    client = _client(Settings(environment="prod", cors_origins=["https://app.example"]))
+    settings = Settings(
+        environment="prod", cors_origins=["https://app.example"], database_url=_DB_URL
+    )
+    client = _client(settings)
     resp = client.get("/api/health", headers={"Origin": "https://app.example"})
     assert resp.headers["access-control-allow-origin"] == "https://app.example"
     resp = client.get("/api/health", headers={"Origin": "https://evil.example"})
