@@ -6,6 +6,8 @@ epic-09/03/12 chat -> S3, epic-16 admin -> S4. /api/health is the T-S0-2
 acceptance contract.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -14,6 +16,7 @@ from backend.brain import router as brain_router
 from backend.config import Settings, get_settings
 from backend.knowledge import assets_router as knowledge_assets_router
 from backend.knowledge import router as knowledge_router
+from backend.knowledge.scheduler import start_scheduler, stop_scheduler
 from backend.organization import router as organization_router
 from backend.routes import health
 from backend.workspace import router as workspace_router
@@ -21,7 +24,20 @@ from backend.workspace import router as workspace_router
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    app = FastAPI(title=settings.app_name, docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+    # US-202 FR-002: the scheduled-scan loop (single process, ADR-023).
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        start_scheduler(application)
+        yield
+        await stop_scheduler(application)
+
+    app = FastAPI(
+        title=settings.app_name,
+        docs_url="/api/docs",
+        openapi_url="/api/openapi.json",
+        lifespan=lifespan,
+    )
     app.state.settings = settings
 
     # CORS (ADR-023 thin web client): origins come from CORS_ORIGINS (comma-separated).

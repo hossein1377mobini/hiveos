@@ -22,6 +22,7 @@ from backend.models.login import LoginAttempt
 from backend.models.membership import OrganizationMember, Role, RoleAssignment
 from backend.models.organization import Organization, Workspace
 from backend.models.otp import OtpVerification
+from backend.models.scan_history import ScanHistory
 from backend.models.session import Session
 from backend.models.user import User
 from backend.models.workspace_settings import WorkspaceSettings
@@ -40,6 +41,7 @@ __all__ = [
     "OrganizationMember",
     "OrganizationSize",
     "OrganizationStatus",
+    "ScanHistory",
     "Role",
     "RoleAssignment",
     "Session",

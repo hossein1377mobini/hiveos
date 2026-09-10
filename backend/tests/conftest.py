@@ -31,6 +31,8 @@ MODEL_TABLES = (
     "audit_logs",
     "otp_verifications",
     "login_attempts",
+    "knowledge_assets",
+    "scan_history",
 )
 
 

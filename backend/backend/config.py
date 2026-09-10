@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     ingestion_scan_interval_minutes: int = 30
     # US-201 FR-009 (Amendment 2): direct upload cap per file (US-1606 edits later).
     upload_max_file_mb: int = 25
+    # US-202 FR-002: scheduler poll cadence (how often due sources are checked).
+    ingestion_scheduler_poll_seconds: int = 60
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
