@@ -82,6 +82,11 @@ async def create_execution(
         if existing is not None:
             return _payload(existing)
 
+    # US-1203 AC7: the wallet gate fires before any online-model run.
+    from backend import wallet
+
+    await wallet.ensure_not_blocked(session, organization_id)
+
     chat_session_id = body.get("chat_session_id")
     chat = await _chat_session_for(session, organization_id, user_id, chat_session_id)
     input_payload = body.get("input") or {}
@@ -224,7 +229,23 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         if chat is not None:
             requested_model = (chat.settings or {}).get("model")
     model = route_model(requested_model)
-    generated = llm_generate(model, prompt=query, context=context)
+    try:
+        generated = llm_generate(model, prompt=query, context=context)
+    except ApiError as error:
+        # US-313: aggregator/provider failures fail the execution cleanly.
+        execution.error_code = error.code
+        execution.error_message = error.message
+        execution.status = "FAILED"
+        execution.completed_at = _utc_now()
+        await record_audit(
+            session,
+            "execution.failed",
+            organization_id=organization_id,
+            entity_type="agent_execution",
+            entity_id=execution.id,
+            detail={"error_code": error.code},
+        )
+        return _payload(execution)
 
     if hits:
         text = f"بر اساس دانش سازمان:\n\n{context}\n\n{generated['text']}"
@@ -238,6 +259,12 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         "tokens_in": generated["tokens_in"],
         "tokens_out": generated["tokens_out"],
     }
+    # US-1203: atomic deduction after a successful online-model cycle.
+    from backend import wallet as wallet_service
+
+    await wallet_service.deduct_for_execution(
+        session, organization_id, execution.id, generated["tokens_out"]
+    )
     execution.output = {"text": text, "citations": citations}
     execution.status = "COMPLETED"
     execution.completed_at = _utc_now()
