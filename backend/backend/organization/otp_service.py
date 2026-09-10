@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
-from backend.db import session_factory
+from backend.db import audit_session_factory
 from backend.models import OtpVerification, User
 from backend.sms import SmsDeliveryError, get_sms_provider
 
@@ -74,7 +74,7 @@ async def _record_delivery_failure(user: User, reason: str) -> None:
     """US-003 scenario 5: the delivery-failure event must survive the failed
     request, so it is written in its own committed transaction."""
 
-    async with session_factory() as audit_session:
+    async with audit_session_factory() as audit_session:
         await record_audit(
             audit_session,
             "otp.delivery_failed",
