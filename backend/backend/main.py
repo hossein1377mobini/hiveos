@@ -23,6 +23,7 @@ from backend.knowledge.scheduler import start_scheduler, stop_scheduler
 from backend.organization import router as organization_router
 from backend.processing import router as processing_router
 from backend.routes import health
+from backend.wallet_router import router as wallet_router
 from backend.workspace import router as workspace_router
 
 
@@ -66,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(search_router.router, prefix="/v1")
     api.include_router(chat_router, prefix="/v1")
     api.include_router(execution_router, prefix="/v1")
+    api.include_router(wallet_router, prefix="/v1")
     app.include_router(api)
 
     return app

@@ -44,6 +44,8 @@ MODEL_TABLES = (
     "chat_messages",
     "chat_sessions",
     "agent_executions",
+    "wallet_transactions",
+    "wallets",
 )
 
 
@@ -116,6 +118,7 @@ def client(synced_database, monkeypatch):
     from backend.knowledge.router import _knowledge_limiter
     from backend.knowledge.search_router import _search_limiter
     from backend.organization.router import _auth_limiter
+    from backend.wallet_router import _wallet_limiter
     from backend.workspace.router import _workspace_limiter
 
     _auth_limiter.reset()
@@ -125,6 +128,7 @@ def client(synced_database, monkeypatch):
     _search_limiter.reset()
     _chat_limiter.reset()
     _execution_limiter.reset()
+    _wallet_limiter.reset()
     streaming.hub.reset()
 
     # 'with' keeps one event loop for the whole test - the async engine must not

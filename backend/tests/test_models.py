@@ -39,6 +39,8 @@ EXPECTED_TABLES = {
     "hiveos.chat_sessions",
     "hiveos.chat_messages",
     "hiveos.agent_executions",
+    "hiveos.wallets",
+    "hiveos.wallet_transactions",
 }
 
 

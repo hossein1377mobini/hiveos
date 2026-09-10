@@ -29,6 +29,7 @@ from backend.models.processing_job import ProcessingJob
 from backend.models.scan_history import ScanHistory
 from backend.models.session import Session
 from backend.models.user import User
+from backend.models.wallet import Wallet, WalletTransaction
 from backend.models.workspace_settings import WorkspaceSettings
 
 __all__ = [
@@ -43,6 +44,8 @@ __all__ = [
     "KnowledgeChunk",
     "LoginAttempt",
     "MemberStatus",
+    "Wallet",
+    "WalletTransaction",
     "OtpVerification",
     "Organization",
     "OrganizationBrain",
