@@ -13,10 +13,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend import llm
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
-from backend.llm import generate as llm_generate
 from backend.llm import route_model
 from backend.models import AgentExecution, ChatMessage, ChatSession
 
@@ -166,7 +166,8 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
     if execution.started_at is None:
         execution.started_at = _utc_now()
 
-    query = str(execution.input.get("text", ""))
+    # RG-18: basic prompt-injection sanitization on user input.
+    query = llm.sanitize_prompt(str(execution.input.get("text", "")))
     try:
         from backend.knowledge.search import semantic_search
 
@@ -230,7 +231,7 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
             requested_model = (chat.settings or {}).get("model")
     model = route_model(requested_model)
     try:
-        generated = llm_generate(model, prompt=query, context=context)
+        generated = llm.generate(model, prompt=query, context=context)
     except ApiError as error:
         # US-313: aggregator/provider failures fail the execution cleanly.
         execution.error_code = error.code
@@ -248,9 +249,9 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         return _payload(execution)
 
     if hits:
-        text = f"بر اساس دانش سازمان:\n\n{context}\n\n{generated['text']}"
+        text = llm.mask_pii(f"بر اساس دانش سازمان:\n\n{context}\n\n{generated['text']}")
     else:
-        text = "در دانش سازمان سند قابل‌استنادی یافت نشد؛ پاسخ بدون منبع است.\n\n" + generated["text"]
+        text = llm.mask_pii("در دانش سازمان سند قابل‌استنادی یافت نشد؛ پاسخ بدون منبع است.\n\n" + generated["text"])
 
     # US-1201/1202 metering: usage rides on the execution row.
     execution.usage = {
