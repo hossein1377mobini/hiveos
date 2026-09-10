@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.admin import router as admin_router
 from backend.api_errors import install_error_handlers
 from backend.brain import router as brain_router
 from backend.chat import router as chat_router
@@ -68,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(chat_router, prefix="/v1")
     api.include_router(execution_router, prefix="/v1")
     api.include_router(wallet_router, prefix="/v1")
+    api.include_router(admin_router, prefix="/v1")
     app.include_router(api)
 
     return app

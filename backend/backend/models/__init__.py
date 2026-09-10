@@ -28,6 +28,7 @@ from backend.models.otp import OtpVerification
 from backend.models.processing_job import ProcessingJob
 from backend.models.scan_history import ScanHistory
 from backend.models.session import Session
+from backend.models.system_setting import SystemSetting
 from backend.models.user import User
 from backend.models.wallet import Wallet, WalletTransaction
 from backend.models.workspace_settings import WorkspaceSettings
@@ -64,4 +65,5 @@ __all__ = [
     "Workspace",
     "WorkspaceSettings",
     "WorkspaceStatus",
+    "SystemSetting",
 ]

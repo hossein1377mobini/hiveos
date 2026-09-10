@@ -41,6 +41,7 @@ EXPECTED_TABLES = {
     "hiveos.agent_executions",
     "hiveos.wallets",
     "hiveos.wallet_transactions",
+    "hiveos.system_settings",
 }
 
 
