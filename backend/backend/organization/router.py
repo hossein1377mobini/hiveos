@@ -8,6 +8,7 @@
 - POST /api/v1/auth/verify-otp             (US-003, T-S1-4: activation + slid session)
 - POST /api/v1/auth/login                  (US-009, T-S1-5: username+password + lockout)
 - POST /api/v1/auth/logout                 (US-009: revoke current session)
+- POST /api/v1/auth/password/reset-request|reset-verify|reset  (US-010, T-S1-6)
 
 Responses use the {success, data, message} envelope (API Design Standards).
 Errors raise ApiError -> {success:false, error:{code,message}}.
@@ -22,6 +23,11 @@ from backend.organization.login_service import login as login_service
 from backend.organization.login_service import logout as logout_service
 from backend.organization.otp_service import PURPOSE_OWNER_VERIFICATION, send_otp
 from backend.organization.otp_verify import verify_otp
+from backend.organization.password_reset import (
+    reset_password,
+    send_reset_request,
+    verify_reset_code,
+)
 from backend.organization.schemas import (
     LoginRequest,
     LoginResponse,
@@ -29,6 +35,9 @@ from backend.organization.schemas import (
     OtpSent,
     OtpVerified,
     OwnerCreated,
+    PasswordReset,
+    PasswordResetRequest,
+    PasswordResetVerify,
     RegisterOrganizationRequest,
     RegisterOwnerRequest,
     UsernameAvailability,
@@ -138,3 +147,32 @@ async def logout_endpoint(
     """US-009: revoke the caller's session; later use returns 401 SESSION_REVOKED."""
     await logout_service(session, auth.session)
     return _ok({"logged_out": True})
+
+
+@router.post("/password/reset-request", dependencies=[Depends(_rate_limit)])
+async def password_reset_request(
+    payload: PasswordResetRequest, session: AsyncSession = Depends(get_db)
+) -> dict:
+    """US-010: generic response whether or not the mobile is registered."""
+    result = await send_reset_request(session, payload.mobile)
+    return _ok(result)
+
+
+@router.post("/password/reset-verify", dependencies=[Depends(_rate_limit)])
+async def password_reset_verify(
+    payload: PasswordResetVerify, session: AsyncSession = Depends(get_db)
+) -> dict:
+    """US-010: OTP check step; the code is consumed only at reset time."""
+    result = await verify_reset_code(session, payload.mobile, payload.code)
+    return _ok(result)
+
+
+@router.post("/password/reset", dependencies=[Depends(_rate_limit)])
+async def password_reset_endpoint(
+    payload: PasswordReset, session: AsyncSession = Depends(get_db)
+) -> dict:
+    """US-010 FR-003/FR-004: new password + revoke all active sessions."""
+    result = await reset_password(
+        session, payload.mobile, payload.code, payload.new_password, payload.confirm_password
+    )
+    return _ok(result)

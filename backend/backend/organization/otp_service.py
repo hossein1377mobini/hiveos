@@ -87,13 +87,18 @@ async def _record_delivery_failure(user: User, reason: str) -> None:
 
 
 async def send_otp(
-    session: AsyncSession, user: User, *, purpose: str, event: str
+    session: AsyncSession, user: User, *, purpose: str, event: str,
+    require_unverified: bool = True,
 ) -> dict:
-    """Common send/resend path. event: 'otp.sent' or 'otp.resent'."""
+    """Common send/resend path. event: 'otp.sent' or 'otp.resent'.
+
+    require_unverified=False serves the password-reset flow (US-010): the
+    account's mobile is verified by definition there.
+    """
     settings = get_settings()
     now = _utc_now()
 
-    if user.mobile_verified:
+    if require_unverified and user.mobile_verified:
         raise ApiError(409, "MOBILE_ALREADY_VERIFIED", "This mobile number is already verified.")
 
     active = await _active_otp(session, user.id, purpose)

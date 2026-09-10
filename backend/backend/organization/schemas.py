@@ -13,6 +13,22 @@ USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{3,50}$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+def normalize_mobile(value: str) -> str:
+    """Accept +98XXXXXXXXXX / 9XXXXXXXXX / 09XXXXXXXXX -> canonical +98XXXXXXXXXX.
+
+    Shared by the owner registration (US-002) and password reset (US-010).
+    """
+    digits = value.strip().replace(" ", "").replace("-", "")
+    for prefix in ("+98", "0098"):
+        if digits.startswith(prefix):
+            digits = digits[len(prefix):]
+    if digits.startswith("0"):
+        digits = digits[1:]
+    if not digits.isdigit() or len(digits) != 10:
+        raise ValueError("Mobile must be the +98 prefix followed by exactly 10 digits.")
+    return "+98" + digits
+
+
 class RegisterOrganizationRequest(BaseModel):
     """US-001 merged path (US-006 folded in): org basics + business description.
 
@@ -54,15 +70,7 @@ class RegisterOwnerRequest(BaseModel):
     @classmethod
     def _normalize_mobile(cls, value: str) -> str:
         """Accept +98XXXXXXXXXX / 9XXXXXXXXX / 09XXXXXXXXX -> canonical +98XXXXXXXXXX."""
-        digits = value.strip().replace(" ", "").replace("-", "")
-        for prefix in ("+98", "0098"):
-            if digits.startswith(prefix):
-                digits = digits[len(prefix):]
-        if digits.startswith("0"):
-            digits = digits[1:]
-        if not digits.isdigit() or len(digits) != 10:
-            raise ValueError("Mobile must be the +98 prefix followed by exactly 10 digits.")
-        return "+98" + digits
+        return normalize_mobile(value)
 
     @field_validator("email")
     @classmethod
@@ -132,6 +140,59 @@ class LoginRequest(BaseModel):
 
     username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordResetRequest(BaseModel):
+    """US-010: the reset flow starts with the registered mobile only."""
+
+    mobile: str = Field(min_length=10, max_length=15)
+
+    @field_validator("mobile")
+    @classmethod
+    def _normalize_mobile(cls, value: str) -> str:
+        return normalize_mobile(value)
+
+
+class PasswordResetVerify(BaseModel):
+    """US-010: OTP check step (the code is consumed only at reset time)."""
+
+    mobile: str = Field(min_length=10, max_length=15)
+    code: str
+
+    @field_validator("mobile")
+    @classmethod
+    def _normalize_mobile(cls, value: str) -> str:
+        return normalize_mobile(value)
+
+    @field_validator("code")
+    @classmethod
+    def _normalize_code(cls, value: str) -> str:
+        cleaned = value.translate(_OTP_DIGIT_MAP).replace(" ", "").replace("-", "")
+        if not cleaned.isdigit() or len(cleaned) != 6:
+            raise ValueError("code must be exactly 6 digits")
+        return cleaned
+
+
+class PasswordReset(BaseModel):
+    """US-010 FR-003: new password per the US-002 policy + confirmation."""
+
+    mobile: str = Field(min_length=10, max_length=15)
+    code: str
+    new_password: str = Field(min_length=1, max_length=128)
+    confirm_password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("mobile")
+    @classmethod
+    def _normalize_mobile(cls, value: str) -> str:
+        return normalize_mobile(value)
+
+    @field_validator("code")
+    @classmethod
+    def _normalize_code(cls, value: str) -> str:
+        cleaned = value.translate(_OTP_DIGIT_MAP).replace(" ", "").replace("-", "")
+        if not cleaned.isdigit() or len(cleaned) != 6:
+            raise ValueError("code must be exactly 6 digits")
+        return cleaned
 
 
 class LoginResponse(BaseModel):

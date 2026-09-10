@@ -71,32 +71,46 @@ def _status_value(status) -> str:
     return status.value if isinstance(status, OrganizationStatus) else str(status)
 
 
+async def check_active_otp(
+    session: AsyncSession, user_id, purpose: str, code: str, *, not_found_code: str = "OTP_NOT_FOUND",
+) -> OtpVerification:
+    """Shared US-003 state machine: locked / expired / wrong-code handling.
+
+    Raises ApiError on every failure path (attempt counting persists via the
+    audit engine); returns the active row on success WITHOUT consuming it.
+    """
+    settings = get_settings()
+    now = _utc_now()
+
+    active: OtpVerification | None = await _active_otp(session, user_id, purpose)
+    if active is None:
+        raise ApiError(404, not_found_code, "No active code. Request a new one.")
+    if active.locked_until is not None and active.locked_until > now:
+        raise ApiError(429, "OTP_LOCKED", "Too many wrong attempts. Try again later.")
+    if active.expires_at <= now:
+        # FR-005: expired -> reject, state untouched, resend remains possible.
+        await _record_expired(user_id, active.id)
+        raise ApiError(410, "OTP_EXPIRED", "This code has expired. Request a new one.")
+
+    if code_digest(user_id, code) != active.code_hash:
+        attempts, locked = await _record_failed_attempt(user_id, active.id)
+        if locked:
+            raise ApiError(429, "OTP_LOCKED", "Too many wrong attempts. Try again later.")
+        remaining = settings.otp_max_attempts - attempts
+        raise ApiError(400, "OTP_INVALID", f"Wrong code. Remaining attempts: {remaining}.")
+    return active
+
+
 async def verify_otp(
     session: AsyncSession, user: User, organization: Organization, code: str
 ) -> dict:
     """Validate 'code' for the active owner-verification OTP of 'user'."""
-    settings = get_settings()
     now = _utc_now()
 
     if user.mobile_verified:
         raise ApiError(409, "MOBILE_ALREADY_VERIFIED", "This mobile number is already verified.")
 
-    active: OtpVerification | None = await _active_otp(session, user.id, PURPOSE_OWNER_VERIFICATION)
-    if active is None:
-        raise ApiError(404, "OTP_NOT_FOUND", "No active code. Request a new one.")
-    if active.locked_until is not None and active.locked_until > now:
-        raise ApiError(429, "OTP_LOCKED", "Too many wrong attempts. Try again later.")
-    if active.expires_at <= now:
-        # FR-005: expired -> reject, state untouched, resend remains possible.
-        await _record_expired(user.id, active.id)
-        raise ApiError(410, "OTP_EXPIRED", "This code has expired. Request a new one.")
-
-    if code_digest(user.id, code) != active.code_hash:
-        attempts, locked = await _record_failed_attempt(user.id, active.id)
-        if locked:
-            raise ApiError(429, "OTP_LOCKED", "Too many wrong attempts. Try again later.")
-        remaining = settings.otp_max_attempts - attempts
-        raise ApiError(400, "OTP_INVALID", f"Wrong code. Remaining attempts: {remaining}.")
+    active = await check_active_otp(session, user.id, PURPOSE_OWNER_VERIFICATION, code)
 
     # FR-006: consume immediately - no replay. This part belongs to the
     # request transaction: it only happens on the success path.
