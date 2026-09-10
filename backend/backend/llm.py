@@ -9,11 +9,40 @@ staging/prod without touching the runtime.
 
 import hashlib
 import math
+import re
 
 from backend.api_errors import ApiError
 from backend.config import get_settings
 
 PROVIDERS = ("mock",)
+
+# RG-18 minimal guardrails (epic-11 base, PO 2026-09-02 decision):
+_MOBILE_RE = re.compile(r"09\d{9}")
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_NID_RE = re.compile(r"\b\d{10}\b")
+_INJECTION_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        "ignore (all |any )?(previous|prior) instructions",
+        "system prompt:",
+        "you are now",
+    )
+]
+
+
+def mask_pii(text: str) -> str:
+    """US-1102: basic PII masking on model output."""
+    masked = _MOBILE_RE.sub("۰۹•••••••••", text)
+    masked = _EMAIL_RE.sub("[email-masked]", masked)
+    return _NID_RE.sub("[digits-masked]", masked)
+
+
+def sanitize_prompt(text: str) -> str:
+    """US-1103: basic prompt-injection mitigation on user input."""
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(text):
+            return "[input-neutralized]"
+    return text
 
 
 def route_model(requested_model: str | None) -> str:
@@ -30,9 +59,14 @@ def _estimate_tokens(text: str) -> int:
 
 
 def generate(model: str, prompt: str, context: str) -> dict:
-    """Deterministic mock generation with token metering (US-1201 AC)."""
+    """Deterministic generation with token metering (US-1201 AC).
+
+    Providers: "mock" (keyless dev/CI) and "online-mock" (same output but
+    billed through the wallet gate — tests/staging dry-run). Any other
+    configured provider needs a real client call.
+    """
     settings = get_settings()
-    if settings.llm_provider != "mock":
+    if settings.llm_provider not in ("mock", "online-mock"):
         raise ApiError(503, "LLM_PROVIDER_UNAVAILABLE", f"Provider {settings.llm_provider} is not configured.")
     digest = hashlib.sha256(f"{model}:{prompt}:{context}".encode()).hexdigest()[:12]
     answer = f"[mock:{model}#{digest}] پاسخ تولیدشده بر اساس زمینه ارائه‌شده."
