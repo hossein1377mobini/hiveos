@@ -17,6 +17,7 @@ from backend.models.enums import (
     UserStatus,
     WorkspaceStatus,
 )
+from backend.models.execution import AgentExecution
 from backend.models.knowledge import KnowledgeSource
 from backend.models.knowledge_asset import KnowledgeAsset
 from backend.models.knowledge_chunk import KnowledgeChunk
@@ -31,6 +32,7 @@ from backend.models.user import User
 from backend.models.workspace_settings import WorkspaceSettings
 
 __all__ = [
+    "AgentExecution",
     "AuditLog",
     "Base",
     "ChatMessage",

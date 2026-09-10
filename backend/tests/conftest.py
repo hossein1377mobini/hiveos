@@ -43,6 +43,7 @@ MODEL_TABLES = (
     "knowledge_chunks",
     "chat_messages",
     "chat_sessions",
+    "agent_executions",
 )
 
 
@@ -111,6 +112,7 @@ def client(synced_database, monkeypatch):
     from backend.brain.router import _brain_limiter
     from backend.chat import streaming
     from backend.chat.router import _chat_limiter
+    from backend.execution.router import _execution_limiter
     from backend.knowledge.router import _knowledge_limiter
     from backend.knowledge.search_router import _search_limiter
     from backend.organization.router import _auth_limiter
@@ -122,6 +124,7 @@ def client(synced_database, monkeypatch):
     _knowledge_limiter.reset()
     _search_limiter.reset()
     _chat_limiter.reset()
+    _execution_limiter.reset()
     streaming.hub.reset()
 
     # 'with' keeps one event loop for the whole test - the async engine must not

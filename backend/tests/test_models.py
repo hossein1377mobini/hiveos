@@ -38,6 +38,7 @@ EXPECTED_TABLES = {
     "hiveos.knowledge_chunks",
     "hiveos.chat_sessions",
     "hiveos.chat_messages",
+    "hiveos.agent_executions",
 }
 
 
