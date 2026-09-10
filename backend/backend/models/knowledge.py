@@ -16,7 +16,8 @@ class KnowledgeSource(Base, TimestampMixin):
     __tablename__ = "knowledge_sources"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('active', 'failed')", name="ck_knowledge_sources_status_allowed_values"
+            "status IN ('active', 'disabled', 'failed')",
+            name="ck_knowledge_sources_status_allowed_values",
         ),
         CheckConstraint(
             "source_type IN ('local_folder')", name="ck_knowledge_sources_type_allowed_values"

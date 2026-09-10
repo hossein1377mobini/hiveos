@@ -1,5 +1,5 @@
-"""Knowledge domain (US-201/US-007 registration part, ADR-014)."""
+"""Knowledge domain (US-201: sources, direct upload, assets; ADR-014)."""
 
-from backend.knowledge.router import router
+from backend.knowledge.router import assets_router, router
 
-__all__ = ["router"]
+__all__ = ["assets_router", "router"]
