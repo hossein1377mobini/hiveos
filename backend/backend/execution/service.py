@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
+from backend.llm import generate as llm_generate
+from backend.llm import route_model
 from backend.models import AgentExecution, ChatMessage, ChatSession
 
 CANCELLABLE = ("PENDING", "STARTING", "RUNNING")
@@ -35,6 +37,7 @@ def _payload(execution: AgentExecution) -> dict:
         "chat_session_id": execution.chat_session_id,
         "input": execution.input,
         "output": execution.output,
+        "usage": execution.usage or {},
         "error": (
             {"code": execution.error_code, "message": execution.error_message}
             if execution.error_code
@@ -197,6 +200,7 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         )
         return _payload(execution)
 
+    context = ""
     if hits:
         citations = [
             {
@@ -206,15 +210,34 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
             }
             for hit in hits
         ]
-        sources = "\n\n".join(
+        context = "\n\n".join(
             f"[{index + 1}] {hit['asset_name']}: {hit['content']}"
             for index, hit in enumerate(hits)
         )
-        text = f"بر اساس دانش سازمان:\n\n{sources}"
     else:
         citations = []
-        text = "در دانش سازمان سند قابل‌استنادی یافت نشد؛ پاسخ بدون منبع است."
 
+    # US-1202 (direct mode): the chat session's settings.model wins.
+    requested_model = None
+    if execution.chat_session_id is not None:
+        chat = await session.get(ChatSession, execution.chat_session_id)
+        if chat is not None:
+            requested_model = (chat.settings or {}).get("model")
+    model = route_model(requested_model)
+    generated = llm_generate(model, prompt=query, context=context)
+
+    if hits:
+        text = f"بر اساس دانش سازمان:\n\n{context}\n\n{generated['text']}"
+    else:
+        text = "در دانش سازمان سند قابل‌استنادی یافت نشد؛ پاسخ بدون منبع است.\n\n" + generated["text"]
+
+    # US-1201/1202 metering: usage rides on the execution row.
+    execution.usage = {
+        "provider": get_settings().llm_provider,
+        "model": generated["model"],
+        "tokens_in": generated["tokens_in"],
+        "tokens_out": generated["tokens_out"],
+    }
     execution.output = {"text": text, "citations": citations}
     execution.status = "COMPLETED"
     execution.completed_at = _utc_now()

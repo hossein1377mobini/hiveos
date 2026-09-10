@@ -97,6 +97,30 @@ def test_run_with_knowledge_hits_returns_citations(client, tmp_path):
     assert len(citations) >= 1
     assert citations[0]["doc_id"] and citations[0]["title"] == "runbook.md"
     assert "دفترچه نصب سرور" in done["output"]["text"]
+    # US-1201/1202: metering rides on the execution (mock provider)
+    assert done["usage"]["provider"] == "mock"
+    assert done["usage"]["tokens_in"] > 0 and done["usage"]["tokens_out"] > 0
+
+
+def test_model_router_uses_chat_session_settings(client):
+    """US-1202 direct mode: the chat session's settings.model wins."""
+    ctx = _bootstrap_full(client)
+    chat = _create_session(client, ctx["headers"])
+    settings_model = "gpt-4o-mini"
+    client.patch(
+        f"/api/v1/chat/sessions/{chat['id']}/settings",
+        json={"model": settings_model},
+        headers=ctx["headers"],
+    )
+    created = client.post(
+        EX,
+        json={"input": {"text": "سلام"}, "chat_session_id": chat["id"]},
+        headers=ctx["headers"],
+    ).json()["data"]
+    done = client.post(f"{EX}/{created['id']}/run", headers=ctx["headers"]).json()["data"]
+    assert done["status"] == "COMPLETED"
+    assert done["usage"]["model"] == settings_model
+    assert f"[mock:{settings_model}" in done["output"]["text"]
 
 
 def test_timeout_marks_execution_failed(client, monkeypatch):

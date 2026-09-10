@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     zero_credit_review_mode: bool = False
     # US-314: hard cap for one execution cycle (seconds).
     execution_timeout_seconds: float = 30.0
+    # US-1201/1202 (ADR-020/023): direct-mode aggregator seam. "mock" is the
+    # v0.1 default (deterministic, keyless — ADR-022); the online provider
+    # lands for staging/prod without runtime changes.
+    llm_provider: str = Field(default="mock", pattern="^(mock)$")
+    llm_default_model: str = "hive-mind-default"
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
