@@ -1,11 +1,20 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (S2 کامل شد؛ T-S2-1..T-S2-7 طبق دستور PO بدون ریویو merge شدند — main = `0766a9a`)
+> آخرین به‌روزرسانی: 2026-09-10 (S3 کامل شد؛ T-S3-1..T-S3-7 طبق دستور PO بدون ریویو merge شدند — main = `62c2ea7`)
 
-## شروع سشن جدید از اینجا — تسک بعدی: **T-S3-1** (مدل ChatSession/Message + API پیام + تاریخچه صفحه‌بندی، US-0901/0909)
+## شروع سشن جدید از اینجا — تسک بعدی: **T-S4-1** (پنل ادمین — epic-16)
 
-1. **S2 کامل و بسته شد (بدون ریویو خارجی — دستور PO 2026-09-10؛ ریویوها موکول به پایان S5).** 150 تست backend سبز + ruff تمیز. **S1 نیز کامل بود (107 تست).**
+1. **S3 کامل و بسته شد (بدون ریویو خارجی — دستور PO 2026-09-10).** 176 تست backend سبز + ruff تمیز. **S2 (150) و S1 (107) قبلاً بسته شدند.**
+   | تسک | خلاصه | شواهد |
+   |-----|-------|-------|
+   | T-S3-1 | ChatSession/Message (0014) + API پیام + pagination | merge در تاریخ S3؛ `2026-09-10-T-S3-1.md` |
+   | T-S3-2 | SSE streaming hub + endpoints | `2026-09-10-T-S3-2.md` |
+   | T-S3-3 | AgentExecution (0015) + lifecycle + chat mapping | `2026-09-10-T-S3-3.md` |
+   | T-S3-4 | RAG cycle با citation الزامی (RG-07) | `2026-09-10-T-S3-4.md` |
+   | T-S3-5 | Timeout + error_code + audit | `2026-09-10-T-S3-5.md` |
+   | T-S3-6 | Aggregator seam + router + metering (0016) | `2026-09-10-T-S3-6.md` |
+   | T-S3-7 | Wallet (0017) + gate 402 + کسر اتمی | `2026-09-10-T-S3-7.md` |
    | تسک | خلاصه | شواهد |
    |-----|-------|-------|
    | T-S2-1 | مدل KnowledgeSource/Asset + آپلود مستقیم (US-201) | merge `95ff49b`؛ `2026-09-10-T-S2-1.md` |
