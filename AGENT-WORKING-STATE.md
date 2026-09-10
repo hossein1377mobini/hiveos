@@ -1,12 +1,14 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (T-S0-5 ریویو نوبت ۱ اعمال شد — PR #3 در انتظار تأیید نهایی/merge PO)
+> آخرین به‌روزرسانی: 2026-09-10 (T-S0-5 تأیید و merge شد — main = `f1cfe19`؛ deploy staging منتظر روشن‌شدن سرور)
 
 ## شروع سشن جدید از اینجا
 
-1. تسک جاری: **T-S0-5 پایه فرانت** — ریویو نوبت ۱ دریافت و اعمال شد (گزارش: `hive/reports/tasks/2026-09-10-T-S0-5.md` بخش «اعمال نظرات»): بلاکر R5-1 (fail-fast DATABASE_URL که بی‌اثر بود) در `backend/config.py` بسته شد + ۴ تست جدید؛ R5-2/R5-3 فرانت اعمال؛ R5-4 با توجیه رد. HEAD = `b15316c`، CI سبز (run 34455274256). گام بعدی: **تأیید نهایی PO → merge**.
-2. پس از merge: تسک بعدی S1 = **T-S1-1 مدل داده سازمان/Owner + migration** (US-001/002).
+1. **T-S0-5 بسته شد:** PR #3 merge → main = `f1cfe19` (frontend base + بلاکر R5-1 fail-fast DATABASE_URL + ریویو نوبت ۱ اعمال). CI روی PR و main سبز. شاخه حذف شد.
+2. **اقدام معلق PO:** سرور staging خاموش است (22/80 بسته) → deploy خودکار در scp timeout شد (run 34456622920). بعد از روشن‌کردن سرور: `gh run rerun 34456622920 --failed` یا push بعدی به main.
+3. تسک بعدی S1 = **T-S1-1 مدل داده سازمان/Owner + migration** (US-001/002) — شاخه `task/T-S1-1-org-model` از main.
+4. سؤال باز از گزارش T-S0-5: سرو فرانت روی staging (پیشنهاد تسک ریز T-S0-6)، nav span ساده، node 20 در CI.
 
 ## وضعیت S0 — کامل (2026-09-10)
 
