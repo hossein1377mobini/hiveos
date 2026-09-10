@@ -29,6 +29,8 @@ MODEL_TABLES = (
     "role_assignments",
     "sessions",
     "audit_logs",
+    "otp_verifications",
+    "login_attempts",
 )
 
 

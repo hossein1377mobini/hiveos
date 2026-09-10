@@ -125,3 +125,18 @@ class OtpVerified(BaseModel):
     organization_id: uuid.UUID
     organization_status: str | None = None
     session: SessionInfo
+
+
+class LoginRequest(BaseModel):
+    """US-009: username+password; case-insensitive username, generic errors."""
+
+    username: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class LoginResponse(BaseModel):
+    """US-009 FR-004: fresh 7-day sliding session."""
+
+    user_id: uuid.UUID
+    organization_id: uuid.UUID
+    session: SessionInfo
