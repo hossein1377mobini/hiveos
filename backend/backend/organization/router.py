@@ -5,6 +5,7 @@
 - GET  /api/v1/auth/username-available     (owner form live check)
 - POST /api/v1/auth/send-otp               (US-003, Bearer session required)
 - POST /api/v1/auth/resend-otp             (US-003, same state machine)
+- POST /api/v1/auth/verify-otp             (US-003, T-S1-4: activation + slid session)
 
 Responses use the {success, data, message} envelope (API Design Standards).
 Errors raise ApiError -> {success:false, error:{code,message}}.
@@ -16,13 +17,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.auth import AuthContext, get_auth_context
 from backend.db import get_db
 from backend.organization.otp_service import PURPOSE_OWNER_VERIFICATION, send_otp
+from backend.organization.otp_verify import verify_otp
 from backend.organization.schemas import (
     OrganizationCreated,
     OtpSent,
+    OtpVerified,
     OwnerCreated,
     RegisterOrganizationRequest,
     RegisterOwnerRequest,
     UsernameAvailability,
+    VerifyOtpRequest,
 )
 from backend.organization.service import register_organization, register_owner, username_available
 from backend.rate_limit import SlidingWindowLimiter, rate_limit_dependency
@@ -90,3 +94,20 @@ async def resend_otp_endpoint(
     )
     sent = OtpSent(**result)
     return _ok(sent.model_dump(mode="json"))
+
+
+@router.post("/verify-otp", dependencies=[Depends(_rate_limit)])
+async def verify_otp_endpoint(
+    payload: VerifyOtpRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-003 FR-003: activate owner + organization; session slides to a fresh TTL."""
+    result = await verify_otp(session, auth.user, auth.organization, payload.code)
+    verified = OtpVerified(
+        user_id=auth.user.id,
+        organization_id=auth.organization.id,
+        organization_status=result["organization_status"],
+        session={"token": auth.token, "expires_at": auth.session.expires_at},
+    )
+    return _ok(verified.model_dump(mode="json"))

@@ -98,3 +98,30 @@ class OtpSent(BaseModel):
 
     expires_at: datetime
     resend_available_at: datetime
+
+
+# Persian (۰-۹) and Arabic-Indic (٠-٩) digits -> Latin digits.
+_OTP_DIGIT_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+class VerifyOtpRequest(BaseModel):
+    """US-003: the 6-digit code; Persian/Arabic digits and separators are normalized."""
+
+    code: str
+
+    @field_validator("code")
+    @classmethod
+    def _normalize_code(cls, value: str) -> str:
+        cleaned = value.translate(_OTP_DIGIT_MAP).replace(" ", "").replace("-", "")
+        if not cleaned.isdigit() or len(cleaned) != 6:
+            raise ValueError("code must be exactly 6 digits")
+        return cleaned
+
+
+class OtpVerified(BaseModel):
+    """US-003 FR-003: activation result + slid session (same token, new expiry)."""
+
+    user_id: uuid.UUID
+    organization_id: uuid.UUID
+    organization_status: str | None = None
+    session: SessionInfo
