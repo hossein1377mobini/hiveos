@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
+from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.processing import enqueue_job
 from backend.models import KnowledgeAsset, KnowledgeSource, Organization
 
@@ -178,6 +179,67 @@ async def list_assets(session: AsyncSession, organization: Organization) -> list
         }
         for row in rows
     ]
+
+
+async def classify_single_asset(
+    session: AsyncSession, organization: Organization, asset_id
+) -> dict:
+    """US-205 API: classify + extract one asset on demand (GET classification)."""
+    asset = await session.get(KnowledgeAsset, asset_id)
+    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+        raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
+    folder = None
+    if asset.source_id is not None:
+        source = await session.get(KnowledgeSource, asset.source_id)
+        folder = source.path if source else None
+    verdict = classify_asset(asset, folder)
+    needs_review: str | None = None
+    try:
+        asset.extracted_text = extract_text(asset, folder)
+        asset.status = "ready"
+    except ApiError as exc:
+        if exc.code in ("REVIEW_QUEUE", "OCR_UNAVAILABLE"):
+            # US-205: archive/unknown stays queued, explicitly flagged for review;
+            # OCR_UNAVAILABLE keeps the asset queued for a later OCR-capable run.
+            needs_review = exc.code
+        else:
+            raise
+    await record_audit(
+        session,
+        "knowledge-asset.classified",
+        organization_id=organization.id,
+        entity_type="knowledge_asset",
+        entity_id=asset.id,
+        detail={
+            "asset_type": verdict["asset_type"],
+            "pipeline": verdict["pipeline"],
+            "needs_review": needs_review,
+        },
+    )
+    return {
+        "id": asset.id,
+        "asset_type": asset.asset_type,
+        "pipeline": asset.pipeline,
+        "status": asset.status,
+        "classified_at": asset.classified_at,
+        "text_length": len(asset.extracted_text or ""),
+        "needs_review": needs_review is not None,
+    }
+
+
+async def get_classification(session: AsyncSession, organization: Organization, asset_id) -> dict:
+    """US-205 API: GET classification of one asset."""
+    asset = await session.get(KnowledgeAsset, asset_id)
+    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+        raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
+    return {
+        "id": asset.id,
+        "asset_type": asset.asset_type,
+        "pipeline": asset.pipeline,
+        "status": asset.status,
+        "classified_at": asset.classified_at,
+        "text_length": len(asset.extracted_text or ""),
+    }
 
 
 async def soft_delete_asset(
