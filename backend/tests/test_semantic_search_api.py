@@ -4,7 +4,6 @@ Runs with EMBEDDING_PROVIDER=mock (conftest) - deterministic vectors make
 the ranking assertions stable without model weights on the dev host.
 """
 
-import uuid as uuid_mod
 
 from backend.config import get_settings
 from backend.knowledge.embeddings import embed_one, embed_texts
@@ -95,7 +94,7 @@ def test_semantic_search_returns_relevant_chunk_first(client, tmp_path):
 
 
 def test_search_is_org_isolated(client, tmp_path):
-    ctx = _register_asset(client, tmp_path, "note.md", "دستورالعمل نصب سرور")
+    _register_asset(client, tmp_path, "note.md", "دستورالعمل نصب سرور")
     _drain()
     # a second org (light bootstrap keeps the auth-limiter budget)
     from tests.test_organization_api import _bootstrap_org, _register_owner

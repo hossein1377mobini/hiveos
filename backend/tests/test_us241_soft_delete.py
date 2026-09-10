@@ -54,14 +54,14 @@ def test_delete_upload_soft_deletes_and_hides_from_search(client, tmp_path):
     asyncio.get_event_loop().run_until_complete(_drain())
     # the upload exists in search results before deletion
     query = "hello upload"
-    hits = client.post(f"/api/v1/search", json={"query": query}, headers=ctx["headers"])
+    hits = client.post("/api/v1/search", json={"query": query}, headers=ctx["headers"])
     assert hits.status_code == 200 and len(hits.json()["data"]["results"]) >= 1
 
     deleted = client.delete(f"{KA}/{ctx['asset_id']}", headers=ctx["headers"])
     assert deleted.status_code == 200 and deleted.json()["data"]["deleted"] is True
 
     # FR-002: gone from search immediately
-    hits2 = client.post(f"/api/v1/search", json={"query": query}, headers=ctx["headers"])
+    hits2 = client.post("/api/v1/search", json={"query": query}, headers=ctx["headers"])
     assert all(
         str(hit["asset_id"]) != str(ctx["asset_id"]) for hit in hits2.json()["data"]["results"]
     )
@@ -115,7 +115,7 @@ def test_zero_credit_mode_routes_to_review(client, tmp_path, monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "zero_credit_review_mode", True)
 
-    ctx = _register_upload(client, tmp_path)
+    _register_upload(client, tmp_path)
     async def _drain():
         engine = create_async_engine(settings.database_url)
         factory = async_sessionmaker(engine, expire_on_commit=False)

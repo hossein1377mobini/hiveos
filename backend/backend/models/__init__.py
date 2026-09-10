@@ -9,6 +9,7 @@ organization-scoped table carries organization_id.
 from backend.models.audit import AuditLog
 from backend.models.base import Base, TimestampMixin
 from backend.models.brain import KnowledgeRepository, OrganizationBrain, VectorIndex
+from backend.models.chat import ChatMessage, ChatSession
 from backend.models.enums import (
     MemberStatus,
     OrganizationSize,
@@ -32,6 +33,8 @@ from backend.models.workspace_settings import WorkspaceSettings
 __all__ = [
     "AuditLog",
     "Base",
+    "ChatMessage",
+    "ChatSession",
     "KnowledgeRepository",
     "KnowledgeSource",
     "KnowledgeAsset",

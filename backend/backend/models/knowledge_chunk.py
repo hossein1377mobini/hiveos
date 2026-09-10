@@ -7,6 +7,7 @@ these rows with T-S2-6.
 
 import uuid
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -19,8 +20,6 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-
-from pgvector.sqlalchemy import Vector
 
 from backend.models.base import Base, new_uuid
 

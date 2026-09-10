@@ -27,3 +27,5 @@ Thumbs.db
 
 # Runtime data (ADR-022/US-216): uploaded files never enter git
 backend/storage/
+# Scratch outputs from test runs
+backend/_*.txt
