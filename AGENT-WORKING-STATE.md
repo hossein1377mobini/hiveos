@@ -1,20 +1,23 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (T-S0-5 تأیید و merge شد — main = `f1cfe19`؛ deploy staging منتظر روشن‌شدن سرور)
+> آخرین به‌روزرسانی: 2026-09-10 (S1 کامل شد؛ T-S1-5..T-S1-9 طبق دستور PO بدون ریویو merge شدند — main = `5dc45c2`)
 
-## شروع سشن جدید از اینجا — تسک بعدی: **T-S1-1** (مدل داده سازمان/Owner + migration، US-001/002)
+## شروع سشن جدید از اینجا — تسک بعدی: **T-S2-1** (مدل داده KnowledgeSource/Asset + ثبت منبع + آپلود مستقیم، US-201)
 
-1. **S0 کامل و بسته شد** — آخرین merge: T-S0-5 پایه فرانت → main = `f1cfe19` (PR #3، ریویو نوبت ۱ اعمال، گزارش: `hive/reports/tasks/2026-09-10-T-S0-5.md`). شاخه حذف شد.
-2. **اقدام معلق PO (بلاکر deploy، نه کد):** سرور staging خاموش است (22/80 بسته — پروب 2026-09-10) → deploy خودکار در scp timeout (runs 34456622920 / 34459406014). بعد از روشن‌کردن سرور: `gh run rerun 34456622920 --failed` (با PAT فعلی gh ممکن است) یا push بعدی به main.
-3. **آماده‌سازی T-S1-1 (به ترتیب):**
-   - شاخه: `task/T-S1-1-org-model` از `main`.
-   - بخوان: `hive/epics/epic-01/us-001-register-a-new-organization.md` + `us-002-create-organization-owner-account.md` (AC مبنای تست) + `hive/epics/epic-01/epic-01-overview.md` + DoD + coding standards؛ برای واژگان UI/Copy: `hive/product/terminology.md` §۷.
-   - خروجی هدف (§۸ development-workflow): مدل ORM سازمان/Workspace/Owner + migration Alembic (`0002_...`، قابل بازگشت/downgrade) + تست‌ها (واحد + AC) — **API ثبت‌نام تسک جدا است (T-S1-2)**، اینجا فقط مدل داده + migration.
-   - الگوی migration از `backend/migrations/versions/0001_baseline.py`؛ downgrade را جدی پیاده کن (الزام rollback-migration از S0).
-   - تست: از `backend/` → `..\backend\.venv\Scripts\python.exe -m pytest -q` و ruff؛ DB dev روی 5434 (compose).
-   - گزارش: `hive/reports/tasks/2026-09-10-T-S1-1.md` طبق قالب §۴ → ریویو PO → merge فقط با تأیید.
-4. نکات فرانت از T-S0-5 (برای T-S1-9 مفید): shadcn semantic aliases در `frontend/src/styles.css` آماده‌اند؛ سؤال باز «سرو فرانت روی staging» (پیشنهاد T-S0-6) هنوز بی‌تصمیم است.
+1. **S1 کامل و بسته شد (بدون ریویو خارجی — دستور PO 2026-09-10؛ ریویوها موکول به پایان S5).** 107 تست backend سبز + vitest 5 سبز + build سبز.
+   | تسک | خلاصه | شواهد |
+   |-----|-------|-------|
+   | T-S1-1..T-S1-4 | مدل/API سازمان+Owner، OTP، verify+نشست ۷روزه | گزارش‌های `hive/reports/tasks/2026-09-10-T-S1-{1,2,3,4}.md` (ریویوشده قبلی) |
+   | T-S1-5 | ورود username+password + قفل ۱۵دقیقه‌ای + logout (US-009) | merge `e591924`؛ `2026-09-10-T-S1-5.md` |
+   | T-S1-7 | Workspace init (US-004) + Brain init + قالب پرامپت (US-005/US-1609) | merge‌های `064f697`/`b8f1a0d`؛ `2026-09-10-T-S1-7.md` — **توجه: بخش workspace اول با نام شاخه T-S1-6 اشتباه merge شد؛ گزارش در T-S1-7 ادغام و شفاف شد** |
+   | T-S1-6 | بازیابی رمز با OTP (US-010) — سه endpoint + ابطال نشست‌ها | merge `585ec3d`؛ `2026-09-10-T-S1-6-password-reset.md` |
+   | T-S1-8 | فولدر Ingestion + Resume onboarding (C2) + انقضای Pending (C3) | merge `398bb15`؛ `2026-09-10-T-S1-8.md` |
+   | T-S1-9 | اتصال ماک‌آپ‌های bootstrap به API (React، مسیریابی از `next_step`) | merge `5dc45c2`؛ `2026-09-10-T-S1-9.md` |
+2. **مهاجرت‌ها تا 0007** (0002 سازمان/Owner، 0003 OTP، 0004 login state، 0005 workspace settings، 0006 brain، 0007 knowledge sources) — همه بازگشت‌پذیر.
+3. **ریویو PO پس از S5:** بخش‌های «گزارش ریویو خارجی / اعمال نظرات / تأیید نهایی» گزارش‌های T-S1-5..T-S1-9 خالی برای PO؛ سؤالات باز هر گزارش در همان فایل.
+4. **T-S5-4 (پراموت prod) همچنان نیازمند تأیید صریح PO.**
+5. نکات فنی مهم: توکن در localStorage (ریویو معماری نشست معلق)؛ `ingestion_allowed_roots` در staging/prod باید ست شود؛ ماک‌آپ 03 باید به ۶ خانه اصلاح شود (تضاد با US-003)؛ conftest هر ۴ limiter را ریست می‌کند؛ نوشتن وضعیت‌های «شکست» و رویدادهای شکست از طریق `audit_session_factory` (NullPool).
 
 ## وضعیت S0 — کامل و بسته (2026-09-10)
 
