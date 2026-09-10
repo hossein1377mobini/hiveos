@@ -24,3 +24,6 @@ frontend/.npm-cache/
 .vscode/
 Thumbs.db
 .DS_Store
+
+# Runtime data (ADR-022/US-216): uploaded files never enter git
+backend/storage/

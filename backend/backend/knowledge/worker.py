@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
 from backend.audit import record_audit
+from backend.config import get_settings
 from backend.knowledge.chunking import build_metadata, normalize_text, replace_chunks
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.embeddings import embed_texts
@@ -48,6 +49,20 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
         entity_type="processing_job",
         entity_id=job.id,
     )
+    # US-1203 AC7 analogue (T-S2-7): zero-credit orgs queue new assets as
+    # needs_review until the wallet lands (T-S3-7). Off by default in v0.1.
+    if get_settings().zero_credit_review_mode:
+        job.status = "completed"
+        asset.status = "queued"
+        await record_audit(
+            session,
+            "processing-job.completed",
+            organization_id=job.organization_id,
+            entity_type="processing_job",
+            entity_id=job.id,
+            detail={"needs_review": True, "reason": "ZERO_CREDIT"},
+        )
+        return "completed"
     try:
         folder = await _source_path(session, asset)
         verdict = classify_asset(asset, folder)

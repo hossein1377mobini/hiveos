@@ -109,10 +109,12 @@ async def upload_endpoint(
 
 @assets_router.get("", dependencies=[Depends(_rate_limit)])
 async def assets_list_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    status: str = "active",
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """US-007 FR-005: the asset list with pipeline status."""
-    return ok({"assets": await list_assets(session, auth.organization)})
+    """US-007 FR-005 + US-241 FR-003: asset list (status=active|deleted)."""
+    return ok({"assets": await list_assets(session, auth.organization, status)})
 
 
 @assets_router.post("/{asset_id}/classify", dependencies=[Depends(_rate_limit)])

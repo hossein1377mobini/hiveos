@@ -158,14 +158,19 @@ async def set_source_status(
     return {"id": source.id, "path": source.path, "status": source.status}
 
 
-async def list_assets(session: AsyncSession, organization: Organization) -> list[dict]:
-    """US-007 FR-005: the visible asset list with its pipeline status."""
+async def list_assets(
+    session: AsyncSession, organization: Organization, status: str = "active"
+) -> list[dict]:
+    """US-007 FR-005 + US-241 FR-003: asset list; status=deleted lists tombstones."""
+    visible = KnowledgeAsset.deleted_at.is_(None) if status != "deleted" else (
+        KnowledgeAsset.deleted_at.is_not(None)
+    )
     rows = (
         await session.execute(
             select(KnowledgeAsset)
             .where(
                 KnowledgeAsset.organization_id == organization.id,
-                KnowledgeAsset.deleted_at.is_(None),
+                visible,
             )
             .order_by(KnowledgeAsset.created_at.desc())
         )
@@ -177,6 +182,8 @@ async def list_assets(session: AsyncSession, organization: Organization) -> list
             "status": row.status,
             "size_bytes": row.size_bytes,
             "extension": row.extension,
+            "origin": "upload" if row.source_id is None else "folder_scan",
+            "deleted_at": row.deleted_at,
         }
         for row in rows
     ]
@@ -279,10 +286,22 @@ async def get_classification(
 async def soft_delete_asset(
     session: AsyncSession, organization: Organization, user_id, asset_id
 ) -> dict:
-    """US-241 (v0.1 scope): soft delete an uploaded document by the Owner."""
+    """US-241 (v0.1 scope): soft delete an uploaded document by the Owner.
+
+    Validation rules: uploads only (folder documents are owned by the scan,
+    US-202/US-216) and idempotent for already-deleted assets. The physical
+    file is never touched (retention -> US-216, v0.3).
+    """
     asset = await session.get(KnowledgeAsset, asset_id)
     if asset is None or asset.organization_id != organization.id:
         raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
+    if asset.rel_path is not None:
+        # US-241 scenario 2: folder documents (rel_path set by the scanner,
+        # US-202) are not deletable in v0.1 — even when an upload was later
+        # linked to a source, only scanner-owned rows carry rel_path.
+        raise ApiError(
+            409, "FOLDER_ASSET_NOT_DELETABLE", "Folder documents cannot be deleted here."
+        )
     if asset.deleted_at is not None:
         return {"id": asset.id, "deleted": True}
     asset.deleted_at = _utc_now()
