@@ -53,3 +53,7 @@ class KnowledgeAsset(Base, TimestampMixin):
     )
     # US-241: soft delete for uploaded documents (v0.1 scope).
     deleted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
+    # US-202 scanner bookkeeping (uploads leave these NULL).
+    rel_path: Mapped[str | None] = mapped_column(String(500))
+    file_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    discovered_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))

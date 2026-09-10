@@ -33,6 +33,7 @@ EXPECTED_TABLES = {
     "hiveos.vector_indexes",
     "hiveos.knowledge_sources",
     "hiveos.knowledge_assets",
+    "hiveos.scan_history",
 }
 
 

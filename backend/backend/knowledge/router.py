@@ -16,7 +16,12 @@ from backend.knowledge.assets import (
     soft_delete_asset,
     upload_assets,
 )
-from backend.knowledge.service import get_source, register_folder_source, scan_source
+from backend.knowledge.service import (
+    get_source,
+    register_folder_source,
+    scan_history,
+    scan_source,
+)
 from backend.rate_limit import SlidingWindowLimiter, rate_limit_dependency
 
 router = APIRouter(prefix="/knowledge-sources")
@@ -72,9 +77,19 @@ async def scan_endpoint(
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    """US-007 FR-006: Scan Now (initial scan summary until US-202 lands)."""
+    """US-202 FR-003 / scenario 4: Scan Now (manual scan run)."""
     result = await scan_source(session, auth.organization, source_id)
     return ok(result)
+
+
+@router.get("/{source_id}/scan-history", dependencies=[Depends(_rate_limit)])
+async def scan_history_endpoint(
+    source_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-202 FR-009 (Amendment 2, C11): last N scans of one source."""
+    return ok({"history": await scan_history(session, auth.organization, source_id)})
 
 
 @assets_router.post("/upload", dependencies=[Depends(_rate_limit)])

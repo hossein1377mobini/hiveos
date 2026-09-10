@@ -1,4 +1,4 @@
-﻿"""US-007/US-201 (T-S1-8) acceptance tests: ingestion folder + onboarding resume."""
+"""US-007/US-201 (T-S1-8) acceptance tests: ingestion folder + onboarding resume."""
 
 import uuid as uuid_mod
 
@@ -64,7 +64,8 @@ def test_register_success_with_initial_scan_summary(client, tmp_path):
     response = client.post(f"{KS}", json={"path": str(folder)}, headers=ctx["headers"])
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["status"] == "active" and data["file_state"] == "pending_files"
+    # US-202 FR-001: the initial scan runs at registration and creates assets.
+    assert data["status"] == "active" and data["file_state"] == 2
 
     engine = _sync_engine()
     with engine.connect() as conn:
@@ -169,10 +170,18 @@ def test_scan_now_updates_summary(client, tmp_path):
                 " ORDER BY event"
             )
         ).scalars().all()
+        assets = conn.execute(text("SELECT count(*) FROM hiveos.knowledge_assets")).scalar_one()
+        added = conn.execute(
+            text("SELECT files_added FROM hiveos.scan_history WHERE scan_type = 'manual'")
+        ).scalar_one()
     engine.dispose()
     assert scanned.last_scanned_at is not None and scanned.discovered_files == 2
+    assert assets == 2 and added == 2  # US-202 scenario 1: assets enter the queue
+    # registration ran the initial scan, then the manual one
     assert events == [
         "knowledge-source.scan.completed",
+        "knowledge-source.scan.completed",
+        "knowledge-source.scan.started",
         "knowledge-source.scan.started",
     ]
 
