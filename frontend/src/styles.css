@@ -1,0 +1,68 @@
+/* Design tokens — hive/design/design-system.md v0.4.0 §2 + ui-mockups/v0.1/assets/hiveos.css.
+   Light mode only in v0.1 (PO decision 2026-08-17). Base spacing unit = 4px (Tailwind default). */
+@import "tailwindcss";
+
+@theme {
+  /* Neutral palette (design-system §2.1) */
+  --color-neutral-0: #ffffff;
+  --color-neutral-50: #f7f7f5;
+  --color-neutral-200: #e4e4e1;
+  --color-neutral-400: #a8a79e;
+  --color-neutral-600: #57564f;
+  --color-neutral-900: #1c1c19;
+  /* Accent — HiveOS Navy */
+  --color-navy-50: #eef1fb;
+  --color-navy-200: #c4cdf0;
+  --color-navy-600: #2b3a73;
+  --color-navy-800: #1b264d;
+  /* Semantic status colors (reserved roles; destructive = delete/error only) */
+  --color-success: #1b7f4b;
+  --color-success-bg: #e8f5ee;
+  --color-warning: #b7791f;
+  --color-warning-bg: #fbf1e3;
+  --color-error: #b42318;
+  --color-error-bg: #fdecec;
+  /* Geometry — single radius source, components derive (design-system §2.4) */
+  --radius-card: 18px;
+  --radius-control: 10px;
+  /* Elevation — level 1 (cards); max 3 levels, subtle */
+  --shadow-card: 0 1px 2px rgba(28, 28, 25, 0.05), 0 12px 28px rgba(43, 58, 115, 0.07);
+}
+
+/* shadcn/ui semantic aliases (design-system §2.1) — kept in sync so components
+   can adopt shadcn/ui later without renaming tokens. */
+:root {
+  --background: var(--color-neutral-0);
+  --foreground: var(--color-neutral-900);
+  --card: var(--color-neutral-0);
+  --card-foreground: var(--color-neutral-900);
+  --primary: var(--color-navy-600);
+  --primary-foreground: #ffffff;
+  --secondary: var(--color-neutral-50);
+  --secondary-foreground: var(--color-neutral-900);
+  --muted: var(--color-neutral-400);
+  --muted-foreground: var(--color-neutral-600);
+  --border: var(--color-neutral-200);
+  --input: var(--color-neutral-200);
+  --ring: var(--color-navy-600);
+  --radius: 18px;
+}
+
+body {
+  /* Font decision: IranYekanXFaNum (PO, design-system §2.2). Files are self-hosted
+     once the On-Prem distribution license check (design-system §8 Q1) closes;
+     fallback stack keeps Air-gapped safe meanwhile. */
+  font-family: "IranYekanXFaNum", "Vazirmatn", Tahoma, sans-serif;
+  background: var(--color-neutral-50);
+  color: var(--color-neutral-900);
+  line-height: 1.7;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible focus ring on every interactive element (design-system §2.7). */
+:focus-visible {
+  outline: 2px solid var(--color-navy-600);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}

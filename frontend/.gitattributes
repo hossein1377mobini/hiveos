@@ -1,0 +1,4 @@
+# Keep npm dependency hashes reproducible across machines and CI.
+* text=auto eol=lf
+*.png binary
+*.woff2 binary

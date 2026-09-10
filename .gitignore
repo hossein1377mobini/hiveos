@@ -9,6 +9,7 @@ __pycache__/
 # Node
 node_modules/
 dist/
+frontend/.npm-cache/
 
 # Env / secrets — ADR-022: هیچ secret در گیت
 .env
