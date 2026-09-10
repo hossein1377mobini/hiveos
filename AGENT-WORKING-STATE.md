@@ -1,23 +1,36 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (S1 کامل شد؛ T-S1-5..T-S1-9 طبق دستور PO بدون ریویو merge شدند — main = `5dc45c2`)
+> آخرین به‌روزرسانی: 2026-09-10 (S2 کامل شد؛ T-S2-1..T-S2-7 طبق دستور PO بدون ریویو merge شدند — main = `0766a9a`)
 
-## شروع سشن جدید از اینجا — تسک بعدی: **T-S2-1** (مدل داده KnowledgeSource/Asset + ثبت منبع + آپلود مستقیم، US-201)
+## شروع سشن جدید از اینجا — تسک بعدی: **T-S3-1** (مدل ChatSession/Message + API پیام + تاریخچه صفحه‌بندی، US-0901/0909)
 
-1. **S1 کامل و بسته شد (بدون ریویو خارجی — دستور PO 2026-09-10؛ ریویوها موکول به پایان S5).** 107 تست backend سبز + vitest 5 سبز + build سبز.
+1. **S2 کامل و بسته شد (بدون ریویو خارجی — دستور PO 2026-09-10؛ ریویوها موکول به پایان S5).** 150 تست backend سبز + ruff تمیز. **S1 نیز کامل بود (107 تست).**
    | تسک | خلاصه | شواهد |
    |-----|-------|-------|
-   | T-S1-1..T-S1-4 | مدل/API سازمان+Owner، OTP، verify+نشست ۷روزه | گزارش‌های `hive/reports/tasks/2026-09-10-T-S1-{1,2,3,4}.md` (ریویوشده قبلی) |
-   | T-S1-5 | ورود username+password + قفل ۱۵دقیقه‌ای + logout (US-009) | merge `e591924`؛ `2026-09-10-T-S1-5.md` |
-   | T-S1-7 | Workspace init (US-004) + Brain init + قالب پرامپت (US-005/US-1609) | merge‌های `064f697`/`b8f1a0d`؛ `2026-09-10-T-S1-7.md` — **توجه: بخش workspace اول با نام شاخه T-S1-6 اشتباه merge شد؛ گزارش در T-S1-7 ادغام و شفاف شد** |
-   | T-S1-6 | بازیابی رمز با OTP (US-010) — سه endpoint + ابطال نشست‌ها | merge `585ec3d`؛ `2026-09-10-T-S1-6-password-reset.md` |
-   | T-S1-8 | فولدر Ingestion + Resume onboarding (C2) + انقضای Pending (C3) | merge `398bb15`؛ `2026-09-10-T-S1-8.md` |
-   | T-S1-9 | اتصال ماک‌آپ‌های bootstrap به API (React، مسیریابی از `next_step`) | merge `5dc45c2`؛ `2026-09-10-T-S1-9.md` |
-2. **مهاجرت‌ها تا 0007** (0002 سازمان/Owner، 0003 OTP، 0004 login state، 0005 workspace settings، 0006 brain، 0007 knowledge sources) — همه بازگشت‌پذیر.
-3. **ریویو PO پس از S5:** بخش‌های «گزارش ریویو خارجی / اعمال نظرات / تأیید نهایی» گزارش‌های T-S1-5..T-S1-9 خالی برای PO؛ سؤالات باز هر گزارش در همان فایل.
+   | T-S2-1 | مدل KnowledgeSource/Asset + آپلود مستقیم (US-201) | merge `95ff49b`؛ `2026-09-10-T-S2-1.md` |
+   | T-S2-2 | پویش زمان‌بندی‌شده/دستی + تشخیص تغییر + تاریخچه (US-202) | merge `9d02116`؛ `2026-09-10-T-S2-2.md` |
+   | T-S2-3 | صف پردازش + dedup + Cancel/Retry (US-203/214) | merge `89825fd`؛ `2026-09-10-T-S2-3.md` |
+   | T-S2-4 | Magic-byte classify + استخراج PDF/DOCX/CSV + worker (US-205/206) | merge `6e5b5d7`؛ `2026-09-10-T-S2-4.md` |
+   | T-S2-5 | Normalize + Chunking + Metadata bag (US-208/210/211) | merge `426e852`؛ `2026-09-10-T-S2-5.md` |
+   | T-S2-6 | bge-m3/pgvector HNSW + جستجوی معنایی (US-212/213/227) | merge `26d52df`؛ `2026-09-10-T-S2-6.md` |
+   | T-S2-7 | US-241 سفت‌سازی + درگاه صفر-اعتبار (seam) | merge `0766a9a`؛ `2026-09-10-T-S2-7.md` |
+2. **مهاجرت‌ها تا 0013** (0008 assets، 0009 scan_history، 0010 processing_jobs، 0011 classification، 0012 chunks+metadata، 0013 pgvector+embedding HNSW) — همه بازگشت‌پذیر؛ pgvector 0.8.6 در ایمیج dev موجود است.
+3. **ریویو PO پس از S5:** بخش‌های «گزارش ریویو خارجی / اعمال نظرات / تأیید نهایی» گزارش‌های T-S1-5..T-S2-7 خالی برای PO؛ سؤالات باز هر گزارش در همان فایل + خلاصه در `hive/reports/tasks/2026-09-10-S2-summary.md`.
 4. **T-S5-4 (پراموت prod) همچنان نیازمند تأیید صریح PO.**
-5. نکات فنی مهم: توکن در localStorage (ریویو معماری نشست معلق)؛ `ingestion_allowed_roots` در staging/prod باید ست شود؛ ماک‌آپ 03 باید به ۶ خانه اصلاح شود (تضاد با US-003)؛ conftest هر ۴ limiter را ریست می‌کند؛ نوشتن وضعیت‌های «شکست» و رویدادهای شکست از طریق `audit_session_factory` (NullPool).
+5. نکات فنی مهم S2: توکن localStorage؛ `EMBEDDING_PROVIDER=mock` در tests (conftest) — استیجینگ برای provider=local نیاز به sentence-transformers + وزن bge-m3 دارد (نصب شد؛ اجرای مدل روی هاست dev تأیید نشده)؛ OCR بدون tesseract → needs_review (OCR_UNAVAILABLE) نه failed؛ attribute پایتون `asset_metadata` (SQLAlchemy رزرو metadata)؛ gitignore `backend/storage/`؛ audit_session_factory برای نوشتن‌های فراتر از تراکنش شکست.
+## وضعیت S1 — کامل و بسته (2026-09-10)
+
+| تسک | خلاصه | شواهد |
+|-----|-------|-------|
+| T-S1-1..T-S1-4 | مدل/API سازمان+Owner، OTP، verify+نشست ۷روزه | گزارش‌های `hive/reports/tasks/2026-09-10-T-S1-{1,2,3,4}.md` (ریویوشده قبلی) |
+| T-S1-5 | ورود username+password + قفل ۱۵دقیقه‌ای + logout (US-009) | merge `e591924`؛ `2026-09-10-T-S1-5.md` |
+| T-S1-7 | Workspace init (US-004) + Brain init + قالب پرامپت (US-005/US-1609) | merge‌های `064f697`/`b8f1a0d`؛ `2026-09-10-T-S1-7.md` — **توجه: بخش workspace اول با نام شاخه T-S1-6 اشتباه merge شد؛ گزارش در T-S1-7 ادغام و شفاف شد** |
+| T-S1-6 | بازیابی رمز با OTP (US-010) — سه endpoint + ابطال نشست‌ها | merge `585ec3d`؛ `2026-09-10-T-S1-6-password-reset.md` |
+| T-S1-8 | فولدر Ingestion + Resume onboarding (C2) + انقضای Pending (C3) | merge `398bb15`؛ `2026-09-10-T-S1-8.md` |
+| T-S1-9 | اتصال ماک‌آپ‌های bootstrap به API (React، مسیریابی از `next_step`) | merge `5dc45c2`؛ `2026-09-10-T-S1-9.md` |
+
+نکات فنی S1 (برای ریویو PO): `ingestion_allowed_roots` در staging/prod باید ست شود؛ ماک‌آپ 03 باید به ۶ خانه اصلاح شود (تضاد با US-003)؛ conftest حالا هر ۵ limiter را ریست می‌کند؛ نوشتن وضعیت‌های «شکست» و رویدادهای شکست از طریق `audit_session_factory` (NullPool).
 
 ## وضعیت S0 — کامل و بسته (2026-09-10)
 
