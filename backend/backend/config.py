@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # US-004/US-007: local document storage root (tenant/workspace subfolders are
     # created underneath). Must be an absolute, persistent path in staging/prod.
     storage_root: str = "./storage"
+    # US-007: comma-separated absolute roots the ingestion folder must live in
+    # (path-traversal guard). Empty = allow any non-sensitive absolute path (v0.1
+    # dev default; staging/prod should pin explicit roots - see T-S1-8 report).
+    ingestion_allowed_roots: str = ""
+    # US-007 FR-004: scheduled scan default (US-202 owns the scheduler in S2).
+    ingestion_scan_interval_minutes: int = 30
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
