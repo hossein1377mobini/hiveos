@@ -21,6 +21,7 @@ from backend.models.organization import Organization, Workspace
 from backend.models.otp import OtpVerification
 from backend.models.session import Session
 from backend.models.user import User
+from backend.models.workspace_settings import WorkspaceSettings
 
 __all__ = [
     "AuditLog",
@@ -39,5 +40,6 @@ __all__ = [
     "User",
     "UserStatus",
     "Workspace",
+    "WorkspaceSettings",
     "WorkspaceStatus",
 ]

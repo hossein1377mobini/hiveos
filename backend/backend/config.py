@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # US-009: login lockout (5 failed attempts -> 15-minute lock per account).
     login_max_attempts: int = 5
     login_lockout_seconds: int = 900
+    # US-004/US-007: local document storage root (tenant/workspace subfolders are
+    # created underneath). Must be an absolute, persistent path in staging/prod.
+    storage_root: str = "./storage"
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
