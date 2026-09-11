@@ -16,6 +16,10 @@ frontend/.npm-cache/
 .env.*
 !.env.example
 
+# Backups (US-1610) — never in git
+backups/
+deploy/_build.log
+
 # DSH plugin memory
 .dsh-project-memory/
 
