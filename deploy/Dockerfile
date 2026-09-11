@@ -1,17 +1,24 @@
-# HiveOS v0.1 backend image (staging/prod, zero-open deploy bundle)
+# HiveOS v0.1 backend image (staging/prod, zero-open deploy bundle).
+# Dependencies are vendored as wheels by the deployer before building:
+#   cd backend && py -3.11 -m pip download . -d ../deploy/_wheels
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_INDEX=1 \
+    PIP_FIND_LINKS=/app/_wheels
 
 WORKDIR /app
 
+COPY deploy/_wheels ./_wheels
 COPY backend/pyproject.toml ./backend/
 COPY backend/alembic.ini ./backend/
 COPY backend/migrations ./backend/migrations
 COPY backend/backend ./backend/backend
 
-RUN pip install --no-cache-dir ./backend
+# hatchling (build backend) is vendored too; --no-build-isolation avoids network.
+RUN pip install --no-cache-dir /app/_wheels/hatchling-*.whl && \
+    pip install --no-cache-dir --no-build-isolation ./backend
 
 EXPOSE 8000
 WORKDIR /app/backend

@@ -12,6 +12,10 @@ if [ ! -f deploy/.env ]; then
     echo "!! deploy/.env missing - copy deploy/.env.example to deploy/.env and fill it"
     exit 1
 fi
+if [ ! -d deploy/_wheels ] || [ -z "$(ls deploy/_wheels)" ]; then
+    echo "!! deploy/_wheels missing - vendor the linux wheels first (see deploy/README.md)"
+    exit 1
+fi
 
 docker compose -f deploy/docker-compose.staging.yml --env-file deploy/.env up -d --build
 echo "-- waiting for the API health --"

@@ -1,15 +1,24 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-10 (S3+S4 کامل؛ S5 تا حد امکان بدون PO اجرا شد — main = `da1dfc8`)
+> آخرین به‌روزرسانی: 2026-09-11 (هدف «صفرِ باز» — main = `5ab47fe`؛ 194 تست backend + 13 vitest frontend سبز؛ مهاجرت‌ها تا 0020)
 
-## شروع سشن جدید از اینجا — تسک‌های باز قبل از ریویو PO
+## وضعیت فعلی (دستور PO: «هیچ چیز بازی نماند؛ من فقط در پنل ادمین ست می‌کنم»)
 
-1. **S3 کامل (T-S3-1..7؛ `reports/tasks/2026-09-10-T-S3-*.md` + `S3-summary.md`).** 176 تست.
-2. **S4 کامل (T-S4-1..7 پنل ادمین epic-16؛ `2026-09-10-T-S4-*.md`).** 179 تست. مهاجرت 0018 (system_settings).
-3. **S5 (بدون PO):** T-S5-1 چک‌لیست RG-01..22 (`2026-09-10-T-S5-1.md` — 15 PASS/2 PARTIAL/3 FAIL)، T-S5-2 گاردریل RG-18 (182 تست)، T-S5-3 wrapper ویندوزی، T-S5-5 سناریو Locust (اجرا → staging). **T-S5-4 (پراموت به prod) نیازمند تأیید صریح PO — انجام نشد.**
-4. **بازهای عامل بعدی:** US-1207 subscription (RG-21)، T-S3-8 درگاه آنلاین، UI epic-10 (بنر/شارژ/چت — RG-14/15/16/09)، اجرای تست بار روی staging، لندینگ نهایی.
-5. گزارش‌ها در `hive/reports/tasks/` — ریویو خارجی/اعمال نظرات/تأیید نهایی همه برای PO پس از S5 خالی است.
+1. **runtime از پنل تغذیه می‌شود** (`7f99b49`): کلاینت openai-compatible از `providers_pricing` پنل (base_url/api_key)، allowlist (US-1601)، نرخ اعتبار (US-1203)، قالب پرامپت (system/user_template). `agenerate`/`aroute_model` در `backend/llm.py`.
+2. **پنل ادمین UI کامل** (`6f08aa0`): `/admin` — ورود، تنظیمات (۴ کلید JSON)، سازمان‌ها + اعتبار دستی + **پلن/تمدید**، درخواست‌های شارژ (تأیید/رد)، وضعیت سامانه.
+3. **حلقهٔ شارژ T-S3-8** (`6f08aa0`): `POST /wallet/charge-request` → تأیید ادمین → شارژ اتمی + audit. جدول 0019 `charge_requests`. درگاه خارجی عمداً باز (جای provider خالی برای PO).
+4. **UI epic-10**: چت (`11def57` — ریل جلسات، حباب‌ها، منابع، بنر صفر-اعتبار، کمپوزر قفل تا شارژ) + دانش (`3b2b4b0` — آپلود چندفایلی، پویش اکنون، جدول اسناد با بج وضعیت) + کیف‌پول (`6f08aa0`).
+5. **اشتراک US-1207** (`2f6b379`): مهاجرت 0020 (`organizations.plan/plan_expires_at`)، `POST /admin/organizations/{id}/subscription` (days=0 تعلیق فوری)، دروازه 402 `SUBSCRIPTION_EXPIRED` هنگام ساخت execution، صفحهٔ اشتراک.
+6. **بستهٔ استقرار** (`5ab47fe`): `deploy/` (Dockerfile + compose استیج db/backend/nginx + nginx.conf + .env.example + deploy.sh)، `scripts/ingest_watcher.py` (RG-03 آپلود خودکار پوشه)، wrapper کامل (`-Backup` pg_dump تست‌شده / `-Restart` / `-WatchIngestion`).
+7. گزارش‌ها: `hive/reports/tasks/2026-09-11-T-S5-2-*.md` (provider-settings، admin-ui-charge-loop، chat-ui، knowledge-ui، subscription، deploy-bundle).
+
+## باقی (پیش از تست staging توسط PO)
+
+- پایان build استک docker (در جریان؛ شواهد e2e استک در گزارش بعدی)
+- RG-20: اجرای Locust روی staging (بعد از آپلود سرور PO)
+- RG نهایی (re-run کامل) + لندینگ (متن از PO)
+- T-S5-4 پراموت به prod — نیازمند تأیید صریح PO
    | تسک | خلاصه | شواهد |
    |-----|-------|-------|
    | T-S2-1 | مدل KnowledgeSource/Asset + آپلود مستقیم (US-201) | merge `95ff49b`؛ `2026-09-10-T-S2-1.md` |

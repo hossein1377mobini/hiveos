@@ -23,12 +23,15 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     environment:
-      HIVEOS_DATABASE_URL: postgresql+asyncpg://hiveos:${HIVEOS_PG_PASSWORD}@db:5432/hiveos
-      HIVEOS_SYSTEM_ADMIN_USERNAME: ${HIVEOS_SYSTEM_ADMIN_USERNAME:-system-admin}
-      HIVEOS_SYSTEM_ADMIN_PASSWORD: ${HIVEOS_SYSTEM_ADMIN_PASSWORD:?set HIVEOS_SYSTEM_ADMIN_PASSWORD in .env}
-      HIVEOS_LLM_PROVIDER: ${HIVEOS_LLM_PROVIDER:-mock}
-      HIVEOS_SMS_PROVIDER: ${HIVEOS_SMS_PROVIDER:-mock}
-      HIVEOS_WALLET_WELCOME_CREDIT: ${HIVEOS_WALLET_WELCOME_CREDIT:-50}
+      # Settings reads bare env names (no prefix); ENVIRONMENT=staging makes
+      # an unset DATABASE_URL fail loudly instead of hitting dev localhost.
+      ENVIRONMENT: staging
+      DATABASE_URL: postgresql+asyncpg://hiveos:${HIVEOS_PG_PASSWORD}@db:5432/hiveos
+      SYSTEM_ADMIN_USERNAME: ${HIVEOS_SYSTEM_ADMIN_USERNAME:-system-admin}
+      SYSTEM_ADMIN_PASSWORD: ${HIVEOS_SYSTEM_ADMIN_PASSWORD:?set HIVEOS_SYSTEM_ADMIN_PASSWORD in .env}
+      LLM_PROVIDER: ${HIVEOS_LLM_PROVIDER:-mock}
+      SMS_PROVIDER: ${HIVEOS_SMS_PROVIDER:-mock}
+      WALLET_WELCOME_CREDIT: ${HIVEOS_WALLET_WELCOME_CREDIT:-50}
     depends_on:
       db:
         condition: service_healthy
