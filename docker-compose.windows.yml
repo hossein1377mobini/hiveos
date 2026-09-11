@@ -1,0 +1,23 @@
+# HiveOS Windows local DB (v0.1): matches the dev default
+# postgresql+asyncpg://hiveos:hiveos@localhost:5434/hiveos
+name: hiveos-windows
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: hiveos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hiveos
+      POSTGRES_USER: hiveos
+      POSTGRES_PASSWORD: hiveos
+    ports:
+      - "5434:5432"
+    volumes:
+      - ./.pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hiveos -d hiveos"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    shm_size: 256mb
