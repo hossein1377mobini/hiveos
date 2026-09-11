@@ -1,0 +1,42 @@
+{
+  "name": "hiveos-desktop",
+  "productName": "HiveOS",
+  "version": "0.1.0",
+  "description": "HiveOS Windows client (thin UI shell for the HiveOS server)",
+  "main": "src/main.js",
+  "author": "HiveOS",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ir.hiveos.desktop",
+    "productName": "HiveOS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/main.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HiveOS"
+    }
+  }
+}
