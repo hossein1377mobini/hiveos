@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
+from backend.llm import read_setting
 from backend.models import Wallet, WalletTransaction
+
+
+async def _effective_provider(session: AsyncSession) -> str:
+    """The admin-panel provider decision wins over the config default."""
+    pricing = await read_setting(session, "providers_pricing")
+    return pricing.get("provider") or get_settings().llm_provider
 
 
 def _utc_now() -> datetime:
@@ -92,8 +99,7 @@ async def charge(session: AsyncSession, organization_id, amount: int) -> dict:
 
 async def ensure_not_blocked(session: AsyncSession, organization_id) -> None:
     """US-1203 AC7: block online-model executions at zero balance."""
-    settings = get_settings()
-    if settings.llm_provider == "mock":
+    if await _effective_provider(session) == "mock":
         return  # the local/mock provider is exempt from the credit gate
     wallet = await get_or_create_wallet(session, organization_id)
     if wallet.balance <= 0:
@@ -103,11 +109,14 @@ async def ensure_not_blocked(session: AsyncSession, organization_id) -> None:
 async def deduct_for_execution(
     session: AsyncSession, organization_id, execution_id, tokens_out: int
 ) -> None:
-    """US-1203: atomic deduction (cost = ceil(tokens_out / 1000) credits)."""
-    settings = get_settings()
-    if settings.llm_provider == "mock":
+    """US-1203: atomic deduction. The credit rate comes from the admin panel
+    (providers_pricing.credit_per_1000_tokens_out, default 1): cost =
+    ceil(tokens_out * rate / 1000)."""
+    pricing = await read_setting(session, "providers_pricing")
+    if (pricing.get("provider") or get_settings().llm_provider) == "mock":
         return
-    cost = max(1, (tokens_out + 999) // 1000)
+    rate = max(1, int(pricing.get("credit_per_1000_tokens_out") or 1))
+    cost = max(1, -(-tokens_out * rate // 1000))
     result = await session.execute(
         update(Wallet)
         .where(Wallet.organization_id == organization_id, Wallet.balance >= cost)
