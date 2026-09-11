@@ -259,6 +259,12 @@ async def update_settings(
     chat = await _get_owned_session(session, organization_id, user_id, session_id)
     if chat.status == "DELETED":
         raise ApiError(404, "CHAT_SESSION_NOT_FOUND", "Chat session not found.")
+    # S9 (external review): serialize concurrent PATCHes on the session row;
+    # the version check then compares against the post-lock value.
+    await session.execute(
+        select(ChatSession.id).where(ChatSession.id == chat.id).with_for_update()
+    )
+    await session.refresh(chat)
     if expected_version is not None and expected_version != chat.version:
         raise ApiError(409, "VERSION_CONFLICT", "The session was modified concurrently.")
 
@@ -385,6 +391,11 @@ async def append_message(
         if duplicate is not None:
             return _message_payload(duplicate)
 
+    # S3 (external review): lock the session row so two concurrent messages
+    # cannot read the same MAX(sequence) and collide on the unique index.
+    await session.execute(
+        select(ChatSession.id).where(ChatSession.id == chat.id).with_for_update()
+    )
     last_sequence = (
         await session.execute(
             select(func.coalesce(func.max(ChatMessage.sequence), 0)).where(

@@ -9,6 +9,7 @@ The provider is config-driven (EMBEDDING_PROVIDER=local|mock).
 """
 
 import hashlib
+import logging
 import math
 
 from backend.api_errors import ApiError
@@ -42,6 +43,8 @@ def _mock_vector(text: str, dim: int) -> list[float]:
     return [value / norm for value in values]
 
 
+logger = logging.getLogger(__name__)
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """Embed a batch of normalized texts; returns unit vectors."""
     settings = get_settings()
@@ -55,9 +58,10 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     except ApiError:
         raise
     except Exception as exc:  # noqa: BLE001 - model/runtime failures -> clear API error
-        raise ApiError(
-            503, "EMBEDDING_UNAVAILABLE", f"The embedding model failed to load: {exc}"
-        ) from exc
+        # H1 (external review): never leak host/model internals to clients;
+        # the details stay in the server log only.
+        logger.error("embedding model failure: %s", exc)
+        raise ApiError(503, "EMBEDDING_UNAVAILABLE", "The embedding model is unavailable.") from exc
 
 
 def embed_one(text: str) -> list[float]:

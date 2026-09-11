@@ -7,6 +7,7 @@ is deferred (open question in the T-S3-2 report).
 """
 
 import asyncio
+import time
 import uuid
 
 from backend.api_errors import ApiError
@@ -32,13 +33,20 @@ class StreamHub:
     def reset(self) -> None:
         self._streams.clear()
 
+    _MAX_STREAMS = 200  # S12: cap concurrent tracked streams
+    _MAX_BUFFERED_CHUNKS = 10_000  # S12: cap replay buffer per stream
+
     def create(self, chat_session_id: uuid.UUID) -> str:
+        self._sweep_expired()
+        if len(self._streams) >= self._MAX_STREAMS:
+            raise ApiError(503, "STREAM_LIMIT", "Too many active streams - try again shortly.")
         stream_id = str(uuid.uuid4())
         self._streams[stream_id] = {
             "session_id": chat_session_id,
             "queue": asyncio.Queue(),
             "chunks": [],
             "status": STATUS_ACTIVE,
+            "created_at": time.monotonic(),
         }
         self._streams[stream_id]["queue"].put_nowait(
             _event("stream.started", {"stream_id": stream_id})
@@ -56,9 +64,11 @@ class StreamHub:
         state = self._get(stream_id)
         if state["status"] != STATUS_ACTIVE:
             # US-09.2.2: chunks on a closed stream are buffered (replay later).
-            state["chunks"].append(text)
+            if len(state["chunks"]) < self._MAX_BUFFERED_CHUNKS:  # S12
+                state["chunks"].append(text)
             return len(state["chunks"]) - 1
-        state["chunks"].append(text)
+        if len(state["chunks"]) < self._MAX_BUFFERED_CHUNKS:  # S12
+            state["chunks"].append(text)
         state["queue"].put_nowait(
             _event("stream.chunk", {"index": len(state["chunks"]) - 1, "text": text})
         )
@@ -83,8 +93,24 @@ class StreamHub:
             state["status"] = STATUS_CLOSED
             state["queue"].put_nowait(_event("stream.closed", {"reason": "client_disconnected"}))
 
+    _STREAM_TTL_SECONDS = 600.0  # S12: reap unconsumed/finished streams
+
+    def _sweep_expired(self) -> None:
+        """S12 (external review): drop streams nobody consumed within TTL."""
+        now = time.monotonic()
+        expired = [
+            sid
+            for sid, st in self._streams.items()
+            if now - st.get("created_at", now) > self._STREAM_TTL_SECONDS
+        ]
+        for sid in expired:
+            self._streams.pop(sid, None)
     def status(self, stream_id: str) -> str:
         return self._get(stream_id)["status"]
+
+    def snapshot(self, stream_id: str) -> dict:
+        """B7: full state (session binding included) for the router check."""
+        return dict(self._get(stream_id))
 
     def buffered_chunks(self, stream_id: str) -> list[str]:
         return list(self._get(stream_id)["chunks"])

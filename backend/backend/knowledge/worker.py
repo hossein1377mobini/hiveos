@@ -8,6 +8,7 @@ The scheduler loop drains after its scans; tests call the functions
 directly.
 """
 
+import asyncio
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -73,7 +74,7 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
             asset.asset_metadata = build_metadata(asset)
             chunk_rows = await replace_chunks(session, asset, normalized)
             if chunk_rows:
-                vectors = embed_texts([row.content for row in chunk_rows])
+                vectors = await asyncio.to_thread(embed_texts, [row.content for row in chunk_rows])
                 for row, vector in zip(chunk_rows, vectors, strict=True):
                     row.embedding = vector  # type: ignore[assignment]
             asset.status = "ready"

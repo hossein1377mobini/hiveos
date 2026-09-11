@@ -9,11 +9,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.auth import AuthContext, get_auth_context
 from backend.chat import service, streaming
 from backend.chat.streaming import sse_lines
-from backend.db import get_db
+from backend.db import audit_session_factory, get_db
 from backend.envelope import ok
 from backend.rate_limit import SlidingWindowLimiter, rate_limit_dependency
 
@@ -239,7 +240,7 @@ async def create_stream_endpoint(
     )
 
 
-@router.get("/sessions/{session_id}/streams/{stream_id}/events")
+@router.get("/sessions/{session_id}/streams/{stream_id}/events", dependencies=[Depends(_rate_limit)])  # B7
 async def stream_events_endpoint(
     session_id: uuid.UUID,
     stream_id: str,
@@ -248,23 +249,30 @@ async def stream_events_endpoint(
 ) -> StreamingResponse:
     """US-09.2.3: SSE event stream (started/chunk/completed/error frames)."""
     await service.authorize_session(session, auth.organization.id, auth.user.id, session_id)
-    streaming.hub.status(stream_id)  # 404 for unknown streams before headers go out
+    # B7 (external review): bind stream -> session; a stream owned by another
+    # session/organization is indistinguishable from a missing one (404).
+    stream_state = streaming.hub.snapshot(stream_id)  # 404 for unknown streams
+    if str(stream_state.get("session_id")) != str(session_id):
+        raise ApiError(404, "STREAM_NOT_FOUND", "Stream not found.")
 
     async def generator():
         try:
             async for event in streaming.hub.events(stream_id):
                 yield sse_lines(event)
                 if event["type"] == "stream.completed":
-                    # Persist the assembled ASSISTANT reply (US-0909) inside
-                    # the request transaction; get_db commits on success.
+                    # B1-related (external review): persist via a SHORT-LIVED
+                    # session so a 3600s SSE stream never pins a pooled
+                    # connection; the request session stays open until now.
                     full_text = "".join(streaming.hub.buffered_chunks(stream_id))
-                    await service.persist_assistant_reply(
-                        session,
-                        auth.organization.id,
-                        auth.user.id,
-                        session_id,
-                        full_text,
-                    )
+                    async with audit_session_factory() as persist_session:
+                        await service.persist_assistant_reply(
+                            persist_session,
+                            auth.organization.id,
+                            auth.user.id,
+                            session_id,
+                            full_text,
+                        )
+                        await persist_session.commit()
         except asyncio.CancelledError:
             streaming.hub.close(stream_id)
             raise

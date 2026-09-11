@@ -13,6 +13,7 @@ own committed transactions - same pattern as otp.delivery_failed in
 otp_service.
 """
 
+import hmac
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,7 +93,9 @@ async def check_active_otp(
         await _record_expired(user_id, active.id)
         raise ApiError(410, "OTP_EXPIRED", "This code has expired. Request a new one.")
 
-    if code_digest(user_id, code) != active.code_hash:
+    # B6 (external review): constant-time compare - != short-circuits on the
+    # first differing byte and widens the 6-digit brute-force window.
+    if not hmac.compare_digest(code_digest(user_id, code), active.code_hash):
         attempts, locked = await _record_failed_attempt(user_id, active.id)
         if locked:
             raise ApiError(429, "OTP_LOCKED", "Too many wrong attempts. Try again later.")

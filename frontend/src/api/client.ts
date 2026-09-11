@@ -33,13 +33,14 @@ export function clearToken(): void {
 }
 
 export async function api<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE" | "PUT", // S13 (external review)
   path: string,
   body?: unknown,
 ): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (body !== undefined) headers["Content-Type"] = "application/json"; // S13
 
   const response = await fetch(`${API_BASE}${path}`, {
     method,
@@ -56,6 +57,14 @@ export async function api<T>(
 
   if (!response.ok || !payload.success) {
     const error = payload.error ?? { code: "UNKNOWN", message: "خطای ناشناخته." };
+    // S13 (external review): an expired/revoked session ends at the login screen.
+    if (
+      response.status === 401 &&
+      ["AUTH_REQUIRED", "SESSION_EXPIRED", "SESSION_REVOKED"].includes(error.code)
+    ) {
+      clearToken();
+      if (window.location.pathname !== "/login") window.location.assign("/login");
+    }
     throw new ApiError(response.status, error.code, error.message);
   }
   return payload.data as T;

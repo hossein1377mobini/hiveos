@@ -5,6 +5,8 @@ caller's organization, current asset versions and non-deleted assets are
 searchable (ADR-024 + US-241).
 """
 
+import asyncio
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,7 +28,9 @@ async def semantic_search(
     if not query.strip():
         raise ApiError(400, "EMPTY_QUERY", "The search query is empty.")
 
-    vector = embed_one(query)
+    # H1-new (external review): local-model encode is CPU-bound; keep it off
+    # the event loop.
+    vector = await asyncio.to_thread(embed_one, query)
     rows = (
         (
             await session.execute(
