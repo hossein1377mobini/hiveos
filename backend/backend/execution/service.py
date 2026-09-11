@@ -17,7 +17,6 @@ from backend import llm
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
-from backend.llm import route_model
 from backend.models import AgentExecution, ChatMessage, ChatSession
 
 CANCELLABLE = ("PENDING", "STARTING", "RUNNING")
@@ -229,9 +228,9 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         chat = await session.get(ChatSession, execution.chat_session_id)
         if chat is not None:
             requested_model = (chat.settings or {}).get("model")
-    model = route_model(requested_model)
+    model = await llm.aroute_model(session, requested_model)
     try:
-        generated = llm.generate(model, prompt=query, context=context)
+        generated = await llm.agenerate(session, model, prompt=query, context=context)
     except ApiError as error:
         # US-313: aggregator/provider failures fail the execution cleanly.
         execution.error_code = error.code
@@ -255,7 +254,7 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
 
     # US-1201/1202 metering: usage rides on the execution row.
     execution.usage = {
-        "provider": get_settings().llm_provider,
+        "provider": generated["provider"],
         "model": generated["model"],
         "tokens_in": generated["tokens_in"],
         "tokens_out": generated["tokens_out"],
