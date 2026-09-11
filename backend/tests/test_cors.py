@@ -15,18 +15,30 @@ def _client(settings: Settings) -> TestClient:
 # Explicit DB URL keeps prod settings hermetic (R5-1: prod without DATABASE_URL raises).
 _DB_URL = "postgresql+asyncpg://hiveos:x@db:5432/hiveos"
 
+
 def test_cors_denied_when_no_origins_configured() -> None:
     """Empty CORS_ORIGINS (staging/prod default): no browser origin allowed."""
-    settings = Settings(environment="prod", cors_origins=[], database_url=_DB_URL)
-    resp = _client(settings).get(
-        "/api/health", headers={"Origin": "https://evil.example"}
+    settings = Settings(
+        environment="prod",
+        cors_origins=[],
+        database_url=_DB_URL,
+        system_admin_username="sa-test",
+        system_admin_password="xxxxxxxxxxxx",
+        ingestion_allowed_roots="C:/allowed,/allowed",
     )
+    resp = _client(settings).get("/api/health", headers={"Origin": "https://evil.example"})
     assert resp.status_code == 200  # server-to-server still works
     assert "access-control-allow-origin" not in resp.headers
 
+
 def test_cors_allows_configured_origin() -> None:
     settings = Settings(
-        environment="prod", cors_origins=["https://app.example"], database_url=_DB_URL
+        environment="prod",
+        cors_origins=["https://app.example"],
+        database_url=_DB_URL,
+        system_admin_username="sa-test",
+        system_admin_password="xxxxxxxxxxxx",
+        ingestion_allowed_roots="C:/allowed,/allowed",
     )
     client = _client(settings)
     resp = client.get("/api/health", headers={"Origin": "https://app.example"})
@@ -34,24 +46,41 @@ def test_cors_allows_configured_origin() -> None:
     resp = client.get("/api/health", headers={"Origin": "https://evil.example"})
     assert "access-control-allow-origin" not in resp.headers
 
+
 def test_cors_wildcard_dev_only() -> None:
     """'*' is a dev-only convenience, configured explicitly via CORS_ORIGINS=*."""
     client = _client(Settings(environment="dev", cors_origins=["*"]))
     resp = client.get("/api/health", headers={"Origin": "http://localhost:5173"})
     assert resp.headers["access-control-allow-origin"] == "*"
 
+
 def test_cors_wildcard_rejected_in_prod() -> None:
     """Review round 2: '*' must be refused for staging/prod, not just allowed in dev."""
     with pytest.raises(ValidationError):
-        Settings(environment="prod", cors_origins=["*"])
+        Settings(
+            environment="prod",
+            cors_origins=["*"],
+            system_admin_username="sa-test",
+            system_admin_password="xxxxxxxxxxxx",
+            ingestion_allowed_roots="C:/allowed,/allowed",
+        )
+
 
 def test_cors_wildcard_rejected_in_staging() -> None:
     with pytest.raises(ValidationError):
-        Settings(environment="staging", cors_origins=["*"])
+        Settings(
+            environment="staging",
+            cors_origins=["*"],
+            system_admin_username="sa-test",
+            system_admin_password="xxxxxxxxxxxx",
+            ingestion_allowed_roots="C:/allowed,/allowed",
+        )
+
 
 def test_cors_wildcard_still_allowed_in_dev() -> None:
     settings = Settings(environment="dev", cors_origins=["*"])
     assert settings.cors_origins == ["*"]
+
 
 def test_cors_comma_string_parsed() -> None:
     import os

@@ -121,6 +121,14 @@ async def register_owner(session: AsyncSession, payload: RegisterOwnerRequest) -
         )
     if organization.owner_user_id is not None:
         raise _conflict(409, "OWNER_ALREADY_EXISTS", "Organization already has an owner.")
+    # S2 (external review): a pending org whose expiry passed must not get an
+    # owner - mirror the onboarding-status C3 rule at write time.
+    if (
+        organization.pending_expires_at is not None
+        and organization.pending_expires_at.astimezone(UTC) < datetime.now(UTC)
+    ):
+        organization.status = OrganizationStatus.EXPIRED.value
+        raise _conflict(410, "ORGANIZATION_EXPIRED", "This organization has expired.")
 
     if payload.password != payload.confirm_password:
         raise _conflict(400, "PASSWORD_MISMATCH", "Password and confirmation do not match.")

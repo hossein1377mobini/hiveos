@@ -142,8 +142,15 @@ def client(synced_database, monkeypatch):
     sync_engine.dispose()
     # Close pooled asyncpg connections now (PG caps at 100; a per-test leak
     # saturates the server once the suite grows).
+    # B1/H3 (external review): the admin module now caches a shared engine -
+    # its pooled asyncpg connections are loop-bound too, so dispose per test.
+    from backend import admin as _admin
+
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(async_engine.dispose())
+        for _key, (_engine, _factory) in list(_admin._ENGINES.items()):
+            loop.run_until_complete(_engine.dispose())
+        _admin._ENGINES.clear()
     finally:
         loop.close()

@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # ADR-022: staging/prod MUST set these via env, never defaults there.
     system_admin_username: str = "system-admin"
     system_admin_password: str = "system-admin-dev"
+    # B1 (external review): panel session lifetime (hours) - DB sessions with
+    # expiry/revoke replace the process-memory token dict.
+    admin_session_ttl_hours: int = 12
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
@@ -93,6 +96,34 @@ class Settings(BaseSettings):
                 self.database_url = _DEV_DATABASE_URL
             else:
                 raise ValueError("DATABASE_URL must be set explicitly for staging/prod")
+        return self
+
+    @model_validator(mode="after")
+    def _reject_default_admin_credentials_outside_dev(self) -> "Settings":
+        """B2 (external review): default system-admin creds must fail fast in
+        staging/prod instead of leaving the panel on a known password."""
+        if self.environment != "dev":
+            if self.system_admin_username == "system-admin" or self.system_admin_password in (
+                "",
+                "system-admin-dev",
+            ):
+                raise ValueError(
+                    "SYSTEM_ADMIN_USERNAME / SYSTEM_ADMIN_PASSWORD defaults are not "
+                    "allowed outside dev - set them explicitly in the environment."
+                )
+            if len(self.system_admin_password) < 12:
+                raise ValueError("SYSTEM_ADMIN_PASSWORD must be at least 12 characters.")
+        return self
+
+    @model_validator(mode="after")
+    def _require_ingestion_roots_outside_dev(self) -> "Settings":
+        """B4 (external review): empty ingestion roots = arbitrary folder read.
+        Staging/prod must pin the allowed roots explicitly."""
+        if self.environment != "dev" and not self.ingestion_allowed_roots.strip():
+            raise ValueError(
+                "INGESTION_ALLOWED_ROOTS must list absolute allowed roots "
+                "outside dev (path-traversal guard)."
+            )
         return self
 
     @model_validator(mode="after")

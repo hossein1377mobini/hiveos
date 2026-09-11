@@ -43,6 +43,7 @@ EXPECTED_TABLES = {
     "hiveos.wallet_transactions",
     "hiveos.system_settings",
     "hiveos.charge_requests",
+    "hiveos.admin_sessions",
 }
 
 

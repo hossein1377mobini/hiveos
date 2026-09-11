@@ -59,8 +59,17 @@ def _utc_now() -> datetime:
 
 def _path_allowed(path: Path) -> bool:
     """US-007 path rules: absolute + inside configured roots (when set) and
-    never under a sensitive system prefix."""
-    raw = str(path).lower().rstrip("\\/") + os.sep
+    never under a sensitive system prefix.
+
+    B4 (external review): the check runs on the RESOLVED path (symlinks and
+    `..` segments eliminated), not the raw string - otherwise
+    `C:/allowed/../Windows` passes the string check and os.walk resolves it.
+    """
+    try:
+        resolved = path.resolve(strict=False)
+    except OSError:
+        return False
+    raw = str(resolved).lower().rstrip("\\/") + os.sep
     if any(raw.startswith(prefix + os.sep) or raw.rstrip(os.sep) == prefix for prefix in _SENSITIVE_PREFIXES):
         return False
     configured = get_settings().ingestion_allowed_roots
@@ -70,7 +79,7 @@ def _path_allowed(path: Path) -> bool:
             if not root:
                 continue
             try:
-                path.relative_to(Path(root))
+                resolved.relative_to(Path(root).resolve(strict=False))
                 return True
             except ValueError:
                 continue
@@ -117,9 +126,17 @@ def _walk_fingerprints(root: Path) -> dict[str, tuple[str, int]]:
     mtime is the classification concern (US-205, T-S2-4).
     """
     found: dict[str, tuple[str, int]] = {}
+    resolved_root = root.resolve(strict=False)
     for current_root, _dirs, files in os.walk(root):
+        # B4 (external review): skip anything that resolves outside the root
+        # (junction/symlink escape mid-walk).
         for name in files:
             full = Path(current_root) / name
+            try:
+                if not full.resolve(strict=False).is_relative_to(resolved_root):
+                    continue
+            except OSError:
+                continue
             rel = full.relative_to(root).as_posix()
             try:
                 stat = full.stat()

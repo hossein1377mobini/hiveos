@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, setToken } from "../api/client";
+import { api, ApiError, setToken } from "../api/client";
 
 interface LoginData {
   user_id: string;
@@ -48,8 +48,9 @@ export default function Login({ onDone }: { onDone: () => void }) {
       setToken(data.session.token);
       onDone();
     } catch (e) {
-      const message = e instanceof Error ? e.message : "خطا";
-      const wasLocked = message.includes("قفل");
+      // S1 (external review): the backend signals lockout with the ACCOUNT_LOCKED
+      // code, not with a Persian message string.
+      const wasLocked = e instanceof ApiError && e.code === "ACCOUNT_LOCKED";
       setLocked(wasLocked);
       setError(
         wasLocked

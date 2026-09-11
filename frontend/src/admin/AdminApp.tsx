@@ -168,7 +168,7 @@ function SettingsTab({ token }: { token: string }) {
       const loaded: Record<string, string> = {};
       for (const { key } of SETTING_KEYS) {
         try {
-          const data = await adminApi<Record<string, unknown>>("GET", token, "/settings/" + key);
+          const data = await adminApi<Record<string, unknown>>(token, "GET", "/settings/" + key);
           loaded[key] = JSON.stringify(data, null, 2);
         } catch {
           loaded[key] = "";
@@ -189,7 +189,7 @@ function SettingsTab({ token }: { token: string }) {
       return;
     }
     try {
-      await adminApi("PUT", token, "/settings/" + key, { value: parsed });
+      await adminApi(token, "PUT", "/settings/" + key, { value: parsed });
       setSaved(key);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ذخیره ناموفق");
@@ -245,12 +245,10 @@ interface Org {
 function OrgsTab({ token }: { token: string }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [amounts, setAmounts] = useState<Record<string, number>>({});
-  const [plans, setPlans] = useState<Record<string, string>>({});
-  const [days, setDays] = useState<Record<string, number>>({});
   const [msg, setMsg] = useState<string | null>(null);
 
   async function reload() {
-    const data = await adminApi<{ organizations: Org[] }>("GET", token, "/organizations");
+    const data = await adminApi<{ organizations: Org[] }>(token, "GET", "/organizations");
     setOrgs(data.organizations);
   }
 
@@ -258,22 +256,10 @@ function OrgsTab({ token }: { token: string }) {
     reload().catch(() => setMsg("دریافت سازمان‌ها ناموفق بود."));
   }, [token]);
 
-  async function setPlan(orgId: string) {
-    try {
-      await adminApi("POST", token, "/organizations/" + orgId + "/subscription", {
-        plan: plans[orgId] ?? "trial",
-        days: days[orgId] ?? 0,
-      });
-      setMsg("پلن ثبت شد ✓");
-      await reload();
-    } catch {
-      setMsg("ثبت پلن ناموفق بود.");
-    }
-  }
 
   async function credit(orgId: string) {
     try {
-      await adminApi("POST", token, "/organizations/" + orgId + "/credit", {
+      await adminApi(token, "POST", "/organizations/" + orgId + "/credit", {
         amount: amounts[orgId] ?? 0,
       });
       setMsg("اعتبار افزوده شد ✓");
@@ -357,8 +343,8 @@ function RequestsTab({ token }: { token: string }) {
 
   async function reload() {
     const data = await adminApi<{ requests: ChargeRequestItem[] }>(
-      "GET",
       token,
+      "GET",
       "/charge-requests",
     );
     setItems(data.requests);
@@ -370,7 +356,7 @@ function RequestsTab({ token }: { token: string }) {
 
   async function decide(id: string, approve: boolean) {
     try {
-      await adminApi("POST", token, "/charge-requests/" + id + "/decision", { approve });
+      await adminApi(token, "POST", "/charge-requests/" + id + "/decision", { approve });
       await reload();
       setMsg(approve ? "تأیید شد و اعتبار افزوده شد ✓" : "رد شد ✓");
     } catch {
@@ -426,7 +412,7 @@ function StatusTab({ token }: { token: string }) {
   const [status, setStatus] = useState<SystemStatus | null>(null);
 
   useEffect(() => {
-    adminApi<SystemStatus>("GET", token, "/system-status")
+    adminApi<SystemStatus>(token, "GET", "/system-status")
       .then(setStatus)
       .catch(() => setStatus({ overall: "ERROR", checks: [] }));
   }, [token]);
