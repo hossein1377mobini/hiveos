@@ -38,3 +38,23 @@ async def charge_endpoint(
 ) -> dict:
     """US-1203 AC2: mock charge (payment gateway lands with US-1204 UI)."""
     return ok(await wallet.charge(session, auth.organization.id, body.amount))
+
+
+class ChargeRequestBody(BaseModel):
+    """T-S3-8 (zero-open loop): self-serve top-up request for admin approval."""
+
+    amount: int = Field(gt=0, le=100000)
+    note: str | None = Field(default=None, max_length=300)
+
+
+@router.post("/charge-request", dependencies=[Depends(_rate_limit)], status_code=201)
+async def charge_request_endpoint(
+    body: ChargeRequestBody,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """User files a charge request; the System Admin approves it in the panel."""
+    data = await wallet.create_charge_request(
+        session, auth.organization.id, auth.user.id, body.amount, body.note
+    )
+    return ok(data)

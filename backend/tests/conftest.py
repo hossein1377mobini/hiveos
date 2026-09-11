@@ -45,6 +45,7 @@ MODEL_TABLES = (
     "chat_sessions",
     "agent_executions",
     "wallet_transactions",
+    "charge_requests",
     "wallets",
     "system_settings",
 )

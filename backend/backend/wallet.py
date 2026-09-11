@@ -14,7 +14,7 @@ from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.llm import read_setting
-from backend.models import Wallet, WalletTransaction
+from backend.models import ChargeRequest, Wallet, WalletTransaction
 
 
 async def _effective_provider(session: AsyncSession) -> str:
@@ -53,10 +53,26 @@ async def get_wallet_state(session: AsyncSession, organization_id) -> dict:
         .scalars()
         .all()
     )
+    pending = (
+        await session.execute(
+            select(ChargeRequest)
+            .where(
+                ChargeRequest.organization_id == organization_id,
+                ChargeRequest.status == "PENDING",
+            )
+            .order_by(ChargeRequest.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     return {
         "balance": wallet.balance,
         "welcome_credit": get_settings().wallet_welcome_credit,
         "blocked": wallet.balance <= 0,
+        "pending_request": (
+            {"id": pending.id, "amount": pending.amount, "created_at": pending.created_at}
+            if pending
+            else None
+        ),
         "transactions": [
             {
                 "id": row.id,
@@ -143,3 +159,83 @@ async def deduct_for_execution(
         entity_id=execution_id,
         detail={"cost": cost, "balance_after": new_balance},
     )
+
+
+async def create_charge_request(
+    session: AsyncSession, organization_id, user_id, amount: int, note: str | None
+) -> dict:
+    """T-S3-8 (zero-open loop): the user files a top-up request; the System
+    Admin approves it from the panel — no external gateway in v0.1."""
+    request = ChargeRequest(
+        organization_id=organization_id,
+        requested_by=user_id,
+        amount=amount,
+        note=(note or None),
+    )
+    session.add(request)
+    await session.flush()
+    await record_audit(
+        session,
+        "wallet.charge_requested",
+        organization_id=organization_id,
+        entity_type="charge_request",
+        entity_id=request.id,
+        detail={"amount": amount},
+    )
+    return {"request_id": request.id, "amount": amount, "status": request.status}
+
+
+async def decide_charge_request(
+    session: AsyncSession, request_id, approve: bool, decided_by: str
+) -> dict:
+    """Admin decision: APPROVED credits the wallet; terminal-once only."""
+    request = await session.get(ChargeRequest, request_id)
+    if request is None:
+        raise ApiError(404, "NOT_FOUND", "Charge request not found.")
+    if request.status != "PENDING":
+        raise ApiError(409, "REQUEST_DECIDED", "This request was already decided.")
+    if approve:
+        wallet = await get_or_create_wallet(session, request.organization_id)
+        wallet.balance += request.amount
+        wallet.updated_at = _utc_now()
+        session.add(
+            WalletTransaction(
+                organization_id=request.organization_id,
+                kind="CHARGE",
+                amount=request.amount,
+                balance_after=wallet.balance,
+            )
+        )
+        balance: int | None = wallet.balance
+    else:
+        balance = None
+    request.status = "APPROVED" if approve else "REJECTED"
+    request.decided_by = decided_by
+    request.decided_at = _utc_now()
+    await record_audit(
+        session,
+        "admin.charge_request.decided",
+        organization_id=request.organization_id,
+        entity_type="charge_request",
+        entity_id=request.id,
+        detail={"decision": request.status, "amount": request.amount},
+    )
+    return {"request_id": request.id, "status": request.status, "balance": balance}
+
+
+async def list_charge_requests(session: AsyncSession, status: str | None) -> list[dict]:
+    stmt = select(ChargeRequest).order_by(ChargeRequest.created_at.desc()).limit(100)
+    if status:
+        stmt = stmt.where(ChargeRequest.status == status)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "organization_id": r.organization_id,
+            "amount": r.amount,
+            "status": r.status,
+            "note": r.note,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]

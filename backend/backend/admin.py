@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend import wallet
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
@@ -77,6 +78,35 @@ async def admin_login(body: AdminLoginBody) -> dict:
 
 async def _authorized(authorization: str) -> None:
     require_system_admin(authorization)
+
+
+@router.get("/organizations", dependencies=[Depends(_rate_limit)])
+async def list_organizations(authorization: str = Header(default="")) -> dict:
+    """US-1607: org list with wallet balances for the admin panel."""
+    await _authorized(authorization)
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url)
+    try:
+        factory = async_sessionmaker(engine)
+        async with factory() as session:
+            rows = (
+                await session.execute(
+                    text(
+                        "SELECT o.id, o.name, o.status, COALESCE(w.balance, 0) AS balance "
+                        "FROM hiveos.organizations o LEFT JOIN hiveos.wallets w "
+                        "ON w.organization_id = o.id ORDER BY o.created_at DESC LIMIT 200"
+                    )
+                )
+            ).all()
+    finally:
+        await engine.dispose()
+    return ok(
+        {
+            "organizations": [
+                {"id": r[0], "name": r[1], "status": r[2], "balance": r[3]} for r in rows
+            ]
+        }
+    )
 
 
 @router.get("/settings/{key}", dependencies=[Depends(_rate_limit)])
@@ -164,6 +194,51 @@ async def admin_credit_op(
     finally:
         await engine.dispose()
     return ok({"balance": balance, "added": body.amount})
+
+
+
+class ChargeDecisionBody(BaseModel):
+    approve: bool
+
+
+@router.get("/charge-requests", dependencies=[Depends(_rate_limit)])
+async def list_charge_requests_endpoint(
+    status: str | None = None, authorization: str = Header(default="")
+) -> dict:
+    """T-S3-8: charge requests for the admin panel."""
+    await _authorized(authorization)
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url)
+    try:
+        factory = async_sessionmaker(engine)
+        async with factory() as session:
+            items = await wallet.list_charge_requests(session, status)
+    finally:
+        await engine.dispose()
+    return ok({"requests": items})
+
+
+@router.post("/charge-requests/{request_id}/decision", dependencies=[Depends(_rate_limit)])
+async def decide_charge_request_endpoint(
+    request_id: str,
+    body: ChargeDecisionBody,
+    authorization: str = Header(default=""),
+) -> dict:
+    """T-S3-8: approve/reject; approval credits the organization wallet."""
+    await _authorized(authorization)
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url)
+    try:
+        factory = async_sessionmaker(engine)
+        async with factory() as session:
+            data = await wallet.decide_charge_request(
+                session, request_id, body.approve, decided_by="system-admin"
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+    return ok(data)
+
 
 
 @router.get("/system-status", dependencies=[Depends(_rate_limit)])
