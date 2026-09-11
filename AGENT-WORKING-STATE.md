@@ -7,6 +7,7 @@
 
 7. **رفع یافته‌های ریویو خارجی v0.1** (`00ae41d`): B1–B7 / H1–H3 / S1–S13 بسته شدند — جلسات ادمین در DB (`admin_sessions`، 0021)، fail-fast اعتبارات پیش‌فرض در non-dev، کیف پول اتمیک + UNIQUE(org)، resolve مسیر انجمستون، اسکیمای settings، OTP ثابت‌زمان، binding/مرز SSE + TTL/cap، partial unique index اسکن (0022). رگرسیون: `tests/test_review_remediation.py` (8 تست). گزارش: `hive/reports/tasks/2026-09-11-review-remediation.md`.
 8. **منده‌های PO**: T-S5-4 (تأیید صریح حضور محصول)، provisioning سرور استیج، کلید‌ها/پلن‌های پنل، محتوای لندینگ، دامنه.
+9. **استیجینگ مستقر** (2026-09-11): `hiveos-staging` 193.93.169.136 — DB کانتینر + api `hiveos/api:staging-0e01c84` + nginx هاست (SPA+proxy)؛ 27 جدول، سموک پنل (login/logout/revoke) سبز. جزئیات: `hive/reports/tasks/2026-09-11-staging-server-deploy.md`. TLS + دامنه موکول PO.
 
 1. **runtime از پنل تغذیه می‌شود** (`7f99b49`): کلاینت openai-compatible از `providers_pricing` پنل (base_url/api_key)، allowlist (US-1601)، نرخ اعتبار (US-1203)، قالب پرامپت (system/user_template). `agenerate`/`aroute_model` در `backend/llm.py`.
 2. **پنل ادمین UI کامل** (`6f08aa0`): `/admin` — ورود، تنظیمات (۴ کلید JSON)، سازمان‌ها + اعتبار دستی + **پلن/تمدید**، درخواست‌های شارژ (تأیید/رد)، وضعیت سامانه.
