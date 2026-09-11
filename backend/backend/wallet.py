@@ -91,14 +91,21 @@ async def charge(session: AsyncSession, organization_id, amount: int) -> dict:
     """US-1203 AC2: add credit (payment gateway = mock in v0.1)."""
     if amount <= 0:
         raise ApiError(400, "VALIDATION_ERROR", "Charge amount must be positive.")
-    wallet = await get_or_create_wallet(session, organization_id)
-    wallet.balance += amount
-    wallet.updated_at = _utc_now()
+    await get_or_create_wallet(session, organization_id)
+    # B3 (external review): atomic read-modify-write via UPDATE ... RETURNING
+    result = await session.execute(
+        update(Wallet)
+        .where(Wallet.organization_id == organization_id)
+        .values(balance=Wallet.balance + amount, updated_at=_utc_now())
+        .returning(Wallet.balance, Wallet.id)
+    )
+    row = result.first()
+    new_balance, wallet_id = row[0], row[1]
     transaction = WalletTransaction(
         organization_id=organization_id,
         kind="CHARGE",
         amount=amount,
-        balance_after=wallet.balance,
+        balance_after=new_balance,
     )
     session.add(transaction)
     await session.flush()
@@ -107,10 +114,10 @@ async def charge(session: AsyncSession, organization_id, amount: int) -> dict:
         "wallet.charged",
         organization_id=organization_id,
         entity_type="wallet",
-        entity_id=wallet.id,
-        detail={"amount": amount, "balance_after": wallet.balance},
+        entity_id=wallet_id,
+        detail={"amount": amount, "balance_after": new_balance},
     )
-    return {"balance": wallet.balance, "charged": amount}
+    return {"balance": new_balance, "charged": amount}
 
 
 async def ensure_not_blocked(session: AsyncSession, organization_id) -> None:
@@ -194,21 +201,27 @@ async def decide_charge_request(
         raise ApiError(404, "NOT_FOUND", "Charge request not found.")
     if request.status != "PENDING":
         raise ApiError(409, "REQUEST_DECIDED", "This request was already decided.")
+    balance: int | None = None
     if approve:
-        wallet = await get_or_create_wallet(session, request.organization_id)
-        wallet.balance += request.amount
-        wallet.updated_at = _utc_now()
+        await get_or_create_wallet(session, request.organization_id)
+        # B3 (external review): atomic credit via UPDATE ... RETURNING.
+        result = await session.execute(
+            update(Wallet)
+            .where(Wallet.organization_id == request.organization_id)
+            .values(
+                balance=Wallet.balance + request.amount, updated_at=_utc_now()
+            )
+            .returning(Wallet.balance)
+        )
+        balance = result.scalar_one()
         session.add(
             WalletTransaction(
                 organization_id=request.organization_id,
                 kind="CHARGE",
                 amount=request.amount,
-                balance_after=wallet.balance,
+                balance_after=balance,
             )
         )
-        balance: int | None = wallet.balance
-    else:
-        balance = None
     request.status = "APPROVED" if approve else "REJECTED"
     request.decided_by = decided_by
     request.decided_at = _utc_now()
