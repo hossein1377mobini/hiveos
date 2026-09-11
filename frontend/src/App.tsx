@@ -9,6 +9,7 @@ import Onboarding from "./pages/Onboarding";
 import Wallet from "./pages/Wallet";
 import Chat from "./pages/Chat";
 import Knowledge from "./pages/Knowledge";
+import Subscription from "./pages/Subscription";
 import AdminApp from "./admin/AdminApp";
 
 interface Status {
@@ -16,7 +17,16 @@ interface Status {
   next_step: string;
 }
 
-type Screen = "login" | "register" | "owner" | "otp" | "onboarding" | "chat" | "wallet" | "knowledge";
+type Screen =
+  | "login"
+  | "register"
+  | "owner"
+  | "otp"
+  | "onboarding"
+  | "chat"
+  | "wallet"
+  | "knowledge"
+  | "subscription";
 
 // T-S1-9: bootstrap mockups wired to the API. Step selection follows the server
 // (onboarding-status.next_step), not client-side guesses (C2 resume semantics).
@@ -104,7 +114,15 @@ export default function App() {
     <AppShell
       active={screen as NavId}
       onNavigate={(id: NavId) =>
-        setScreen(id === "wallet" ? "wallet" : id === "knowledge" ? "knowledge" : "chat")}
+        setScreen(
+          id === "wallet"
+            ? "wallet"
+            : id === "knowledge"
+              ? "knowledge"
+              : id === "subscription"
+                ? "subscription"
+                : "chat",
+        )}
     >
       {screen === "wallet" ? (
         <Wallet />
@@ -112,6 +130,8 @@ export default function App() {
         <Chat />
       ) : screen === "knowledge" ? (
         <Knowledge />
+      ) : screen === "subscription" ? (
+        <Subscription />
       ) : (
         <section className="mx-auto max-w-xl rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
           <h1 className="text-lg font-bold">خوش آمدید — راه‌اندازی کامل شد</h1>

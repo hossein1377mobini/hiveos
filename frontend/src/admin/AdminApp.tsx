@@ -238,11 +238,15 @@ interface Org {
   name: string;
   status: string;
   balance: number;
+  plan?: string;
+  plan_expires_at?: string | null;
 }
 
 function OrgsTab({ token }: { token: string }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [amounts, setAmounts] = useState<Record<string, number>>({});
+  const [plans, setPlans] = useState<Record<string, string>>({});
+  const [days, setDays] = useState<Record<string, number>>({});
   const [msg, setMsg] = useState<string | null>(null);
 
   async function reload() {
@@ -253,6 +257,19 @@ function OrgsTab({ token }: { token: string }) {
   useEffect(() => {
     reload().catch(() => setMsg("دریافت سازمان‌ها ناموفق بود."));
   }, [token]);
+
+  async function setPlan(orgId: string) {
+    try {
+      await adminApi("POST", token, "/organizations/" + orgId + "/subscription", {
+        plan: plans[orgId] ?? "trial",
+        days: days[orgId] ?? 0,
+      });
+      setMsg("پلن ثبت شد ✓");
+      await reload();
+    } catch {
+      setMsg("ثبت پلن ناموفق بود.");
+    }
+  }
 
   async function credit(orgId: string) {
     try {
@@ -272,6 +289,7 @@ function OrgsTab({ token }: { token: string }) {
         <tr className="border-b border-neutral-200 text-neutral-600">
           <th className="p-3 text-start">سازمان</th>
           <th className="p-3 text-start">موجودی</th>
+          <th className="p-3 text-start">پلن</th>
           <th className="p-3 text-start">افزودن اعتبار</th>
         </tr>
       </thead>
@@ -281,6 +299,14 @@ function OrgsTab({ token }: { token: string }) {
             <td className="p-3 font-bold">{o.name}</td>
             <td className="p-3" data-testid={"balance-" + o.id}>
               {o.balance}
+            </td>
+            <td className="p-3 text-xs">
+              {o.plan ?? "trial"}
+              {o.plan_expires_at && (
+                <span dir="ltr" className="block text-neutral-500">
+                  {new Date(o.plan_expires_at).toISOString().slice(0, 10)}
+                </span>
+              )}
             </td>
             <td className="p-3">
               <div className="flex gap-2">
@@ -307,7 +333,7 @@ function OrgsTab({ token }: { token: string }) {
       {msg && (
         <tfoot>
           <tr>
-            <td colSpan={3} className="p-3 text-green-700">
+            <td colSpan={4} className="p-3 text-green-700">
               {msg}
             </td>
           </tr>

@@ -67,6 +67,11 @@ async def onboarding_status(session: AsyncSession, organization: Organization) -
         )
     ).scalar_one_or_none()
 
+    # US-1207 (minimal subscription): plan + expiry ride on every status read.
+    plan_expires_at = organization.plan_expires_at
+    plan_expired = (
+        plan_expires_at is not None and plan_expires_at.astimezone(UTC) < datetime.now(UTC)
+    )
     return {
         "organization_status": status_value(organization.status),
         "expired": expired,
@@ -75,6 +80,11 @@ async def onboarding_status(session: AsyncSession, organization: Organization) -
         "knowledge_source": None
         if source is None
         else {"id": source.id, "path": source.path, "status": source.status},
+        "subscription": {
+            "plan": organization.plan,
+            "expires_at": plan_expires_at,
+            "expired": plan_expired,
+        },
         # C2: the first incomplete step drives the UI redirect.
         "next_step": _next_step(organization, workspace, brain, source),
     }
