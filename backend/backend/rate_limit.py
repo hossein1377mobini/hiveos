@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 from fastapi import Request
 
 from backend.api_errors import ApiError
+from backend.config import get_settings
 
 
 class SlidingWindowLimiter:
@@ -40,7 +41,21 @@ class SlidingWindowLimiter:
 
 
 def client_key(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    """NB-1 (final review): key the limiter on the real client, not the proxy.
+
+    Behind staging nginx every request arrives from the proxy address, so
+    keying on request.client collapsed all users into one counter. When the
+    direct peer is a configured trusted proxy (settings.trusted_proxies), the
+    leftmost X-Forwarded-For entry (nginx appends the original client) is the
+    rate-limit key; direct callers keep their socket address.
+    """
+    peer = request.client.host if request.client else "unknown"
+    if get_settings().trust_proxy_xff(peer):
+        xff = request.headers.get("x-forwarded-for", "")
+        candidate = xff.split(",")[0].strip()
+        if candidate:
+            return candidate
+    return peer
 
 
 def rate_limit_dependency(limiter: SlidingWindowLimiter):

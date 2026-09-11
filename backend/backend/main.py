@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from backend.admin import router as admin_router
 from backend.api_errors import install_error_handlers
@@ -54,6 +55,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # S6 (external review): PUT included - the admin panel uses PUT /settings.
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["*"],
+    )
+
+    # NB-1 (final review): when a trusted proxy (staging nginx) fronts the api,
+    # scope["client"]/scheme become the real client from X-Forwarded-For, so the
+    # per-IP rate limiters and client_key() stay effective behind the proxy.
+    app.add_middleware(
+        ProxyHeadersMiddleware,
+        trusted_hosts=[h.strip() for h in settings.trusted_proxies.split(",") if h.strip()],
     )
 
     install_error_handlers(app)

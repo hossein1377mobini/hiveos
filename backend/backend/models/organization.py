@@ -38,6 +38,15 @@ class Organization(Base, TimestampMixin):
         ),
         # US-001 validation rules: 3..100 chars, Unicode supported, trimmed at the API edge.
         CheckConstraint("char_length(name) BETWEEN 3 AND 100", name="name_length"),
+        # NB-2 (final review): one owner per organization - DB-enforced (partial
+        # unique index, NULLs excluded) so a registration race cannot create two
+        # owners. Named explicitly to match migration 0023.
+        Index(
+            "uq_organizations_owner_user_id",
+            "owner_user_id",
+            unique=True,
+            postgresql_where=text("owner_user_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

@@ -8,6 +8,7 @@ zero balance blocks the run. The local/mock provider is exempt
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
@@ -34,7 +35,18 @@ async def get_or_create_wallet(session: AsyncSession, organization_id) -> Wallet
     if wallet is None:
         wallet = Wallet(organization_id=organization_id)
         session.add(wallet)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError:
+            # R3 (final review): the UNIQUE(organization_id) constraint means a
+            # concurrent caller won the create race; recover softly by rolling
+            # back the doomed transaction and re-selecting the winner's row.
+            await session.rollback()
+            wallet = (
+                await session.execute(
+                    select(Wallet).where(Wallet.organization_id == organization_id)
+                )
+            ).scalar_one()
     return wallet
 
 

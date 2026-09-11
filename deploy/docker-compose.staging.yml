@@ -32,6 +32,10 @@ services:
       LLM_PROVIDER: ${HIVEOS_LLM_PROVIDER:-mock}
       SMS_PROVIDER: ${HIVEOS_SMS_PROVIDER:-mock}
       WALLET_WELCOME_CREDIT: ${HIVEOS_WALLET_WELCOME_CREDIT:-50}
+      # NB-1 (final review): nginx is the only hop and the api container is not
+      # publicly exposed, so the proxy IP is trusted and X-Forwarded-For supplies
+      # the real client for the per-IP rate limiters.
+      TRUSTED_PROXIES: ${HIVEOS_TRUSTED_PROXIES:-*}
     depends_on:
       db:
         condition: service_healthy

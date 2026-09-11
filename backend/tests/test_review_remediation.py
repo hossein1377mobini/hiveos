@@ -4,11 +4,12 @@ Covers: B1 (admin session expiry/revoke), B2 (default creds fail-fast),
 B3 (unique wallet per org), B4 (path traversal), B5 (setting schemas),
 B6 (OTP constant-time path), B7 (SSE stream binding), S2 (expired pending org).
 """
-from sqlalchemy import text
+from sqlalchemy import text as sa_text
 
 from backend.config import Settings
 from tests.test_admin_api import ADMIN, _login
 from tests.test_knowledge_api import KS, _bootstrap_full, _sync_engine
+from tests.test_organization_api import _bootstrap_org, _register_owner
 
 _CREDS = dict(
     system_admin_username="sa-test",
@@ -36,7 +37,7 @@ def test_admin_expired_token_rejected(client):
     engine = _sync_engine()
     with engine.begin() as conn:
         conn.execute(
-            text("UPDATE hiveos.admin_sessions SET expires_at = now() - interval '1 hour'")
+            sa_text("UPDATE hiveos.admin_sessions SET expires_at = now() - interval '1 hour'")
         )
     engine.dispose()
 
@@ -93,11 +94,16 @@ def test_wallet_unique_per_org(client):
 
     import asyncio
 
+    loop = asyncio.new_event_loop()
     try:
-        asyncio.new_event_loop().run_until_complete(_make())
+        loop.run_until_complete(_make())
     except Exception:
         pass  # first insert races nothing; may already exist from bootstrap
-    engine.dispose()
+    finally:
+        # R5 (final review): dispose must be awaited or the coroutine is dropped
+        # (RuntimeWarning + cross-loop teardown errors).
+        loop.run_until_complete(engine.dispose())
+        loop.close()
 
 
 # --- B4: path traversal is refused --------------------------------------------
@@ -154,7 +160,7 @@ def test_expired_pending_org_cannot_register_owner(client):
     engine = _sync_engine()
     with engine.begin() as conn:
         conn.execute(
-            text(
+            sa_text(
                 "UPDATE hiveos.organizations"
                 " SET pending_expires_at = now() - interval '1 day'"
                 " WHERE id = :oid"
@@ -168,3 +174,135 @@ def test_expired_pending_org_cannot_register_owner(client):
     )
     assert response.status_code == 410
     assert response.json()["error"]["code"] == "ORGANIZATION_EXPIRED"
+
+# --- final review (2026-09-11): R3 / R4 / NB-1 / NB-2 regressions -------------
+
+
+def test_wallet_create_race_recovers_via_integrity_error(client, monkeypatch):
+    """R3: when the wallet INSERT collides with UNIQUE(organization_id), the
+    loser rolls back and re-selects the winner's row instead of 500."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from backend.config import get_settings
+    from backend.models import Wallet
+    from backend.wallet import get_or_create_wallet
+
+    org_id = _bootstrap_org(client)
+    engine = create_async_engine(get_settings().database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def _run():
+        async with factory() as loser:
+            original_flush = loser.flush
+
+            async def _collide_flush():
+                # A concurrent winner commits between the loser's SELECT and its
+                # INSERT flush - exactly the race the recovery branch is for.
+                async with factory() as winner:
+                    winner.add(Wallet(organization_id=org_id))
+                    await winner.commit()
+                await original_flush()  # UNIQUE violation for real
+
+            monkeypatch.setattr(loser, "flush", _collide_flush)
+            wallet = await get_or_create_wallet(loser, org_id)
+            assert str(wallet.organization_id) == org_id
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.run_until_complete(engine.dispose())
+        loop.close()
+
+
+def test_admin_credit_updates_wallet_timestamp(client):
+    """R4: the manual credit op must set updated_at to the DB clock, not the
+    stale value that was read earlier."""
+    ctx = _bootstrap_full(client)
+    admin = _login(client)
+
+    engine = _sync_engine()
+    with engine.begin() as conn:
+        # Wallet may not exist yet (welcome wallet is lazy); seed it stale.
+        conn.execute(
+            sa_text(
+                "INSERT INTO hiveos.wallets (organization_id, balance, updated_at)"
+                " VALUES (:o, 50, now() - interval '1 day')"
+                " ON CONFLICT (organization_id) DO UPDATE SET updated_at = now() - interval '1 day'"
+            ),
+            {"o": ctx["org_id"]},
+        )
+        stale = conn.execute(
+            sa_text("SELECT updated_at FROM hiveos.wallets WHERE organization_id = :o"),
+            {"o": ctx["org_id"]},
+        ).scalar_one()
+    engine.dispose()
+
+    response = client.post(
+        f"{ADMIN}/organizations/{ctx['org_id']}/credit",
+        json={"amount": 5, "reason": "final-review R4"},
+        headers=admin,
+    )
+    assert response.status_code == 200
+
+    engine = _sync_engine()
+    with engine.connect() as conn:
+        fresh = conn.execute(
+            sa_text("SELECT updated_at FROM hiveos.wallets WHERE organization_id = :o"),
+            {"o": ctx["org_id"]},
+        ).scalar_one()
+    engine.dispose()
+    assert fresh > stale
+
+
+def test_unique_owner_index_blocks_shared_owner(client):
+    """NB-2 DB backstop: one owner user id cannot be set on two organizations."""
+    from sqlalchemy.exc import IntegrityError
+
+    org1 = _bootstrap_org(client)
+    registered = _register_owner(client, org1)
+    assert registered.status_code == 200
+    owner_id = registered.json()["data"]["user_id"]
+    org2 = _bootstrap_org(client)
+
+    engine = _sync_engine()
+    try:
+        raised = False
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    sa_text(
+                        "UPDATE hiveos.organizations SET owner_user_id = :u WHERE id = :o"
+                    ),
+                    {"u": owner_id, "o": org2},
+                )
+        except IntegrityError:
+            raised = True
+        assert raised
+    finally:
+        engine.dispose()
+
+
+def test_rate_limit_keys_clients_behind_trusted_proxy(client):
+    """NB-1: behind a trusted proxy the limiter keys on X-Forwarded-For, so two
+    clients get independent budgets instead of one shared proxy bucket."""
+    from backend.organization.router import _auth_limiter
+
+    _auth_limiter.reset()
+    org_body = {"name": "آزمایش محدودیت", "industry": "fintech", "size": "10_50"}
+
+    def hit(ip: str):
+        return client.post(
+            "/api/v1/auth/register-organization",
+            json=org_body,
+            headers={"X-Forwarded-For": ip},
+        )
+
+    for _ in range(10):  # _auth_limiter allows 10 per 60s per key
+        assert hit("203.0.113.7").status_code == 200
+    assert hit("203.0.113.7").status_code == 429
+    # Independent client key still has budget.
+    assert hit("203.0.113.8").status_code == 200
+

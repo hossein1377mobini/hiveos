@@ -8,13 +8,14 @@ require_system_admin.
 
 import hashlib
 import hmac
+import json
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend import wallet
@@ -188,19 +189,15 @@ async def get_setting(key: str, authorization: str = Header(default="")) -> dict
 
 
 async def _read_setting(key: str) -> dict:
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url)
-    try:
-        factory = async_sessionmaker(engine, expire_on_commit=False)
-        async with factory() as session:
-            row = (
-                await session.execute(
-                    text("SELECT value FROM hiveos.system_settings WHERE key = :k"), {"k": key}
-                )
-            ).first()
-            return row[0] if row else {}
-    finally:
-        pass
+    # R1 (final review): H3 applies here too - shared engine, no engine/dispose per request.
+    _, factory = _shared_engine()
+    async with factory() as session:
+        row = (
+            await session.execute(
+                text("SELECT value FROM hiveos.system_settings WHERE key = :k"), {"k": key}
+            )
+        ).first()
+        return row[0] if row else {}
 
 
 
@@ -259,21 +256,17 @@ async def put_setting(key: str, body: SettingsBody, authorization: str = Header(
     if key not in SETTINGS_KEYS:
         raise ApiError(404, "SETTING_NOT_FOUND", "Unknown settings key.")
     _validate_setting(key, body.value)
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url)
-    try:
-        factory = async_sessionmaker(engine, expire_on_commit=False)
-        async with factory() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO hiveos.system_settings (key, value) VALUES (:k, CAST(:v AS jsonb)) "
-                    "ON CONFLICT (key) DO UPDATE SET value = CAST(:v AS jsonb), updated_at = now()"
-                ),
-                {"k": key, "v": __import__("json").dumps(body.value)},
-            )
-            await session.commit()
-    finally:
-        pass
+    # R1/R2 (final review): shared engine + top-level json import.
+    _, factory = _shared_engine()
+    async with factory() as session:
+        await session.execute(
+            text(
+                "INSERT INTO hiveos.system_settings (key, value) VALUES (:k, CAST(:v AS jsonb)) "
+                "ON CONFLICT (key) DO UPDATE SET value = CAST(:v AS jsonb), updated_at = now()"
+            ),
+            {"k": key, "v": json.dumps(body.value)},
+        )
+        await session.commit()
     return ok({"key": key, "value": body.value})
 
 
@@ -283,44 +276,42 @@ async def admin_credit_op(
 ) -> dict:
     """US-1604: manual credit operation (add/refund) with a mandatory reason."""
     await _authorized(authorization)
-    settings = get_settings()
-    engine = create_async_engine(settings.database_url)
-    try:
-        factory = async_sessionmaker(engine, expire_on_commit=False)
-        async with factory() as session:
-            wallet = (
-                await session.execute(select(Wallet).where(Wallet.organization_id == org_id))
-            ).scalar_one_or_none()
-            if wallet is None:
-                raise ApiError(404, "WALLET_NOT_FOUND", "Wallet not found for this organization.")
-            # B3 (external review): atomic credit via UPDATE ... RETURNING.
-            result = await session.execute(
-                update(Wallet)
-                .where(Wallet.organization_id == org_id)
-                .values(balance=Wallet.balance + body.amount, updated_at=wallet.updated_at)
-                .returning(Wallet.balance)
-            )
-            new_balance = result.scalar_one()
-            session.add(
-                WalletTransaction(
-                    organization_id=org_id,
-                    kind="CHARGE",
-                    amount=body.amount,
-                    balance_after=new_balance,
-                )
-            )
-            await record_audit(
-                session,
-                "admin.credit.manual",
+    # R1 (final review): shared engine - no engine/dispose per request.
+    _, factory = _shared_engine()
+    async with factory() as session:
+        wallet = (
+            await session.execute(select(Wallet).where(Wallet.organization_id == org_id))
+        ).scalar_one_or_none()
+        if wallet is None:
+            raise ApiError(404, "WALLET_NOT_FOUND", "Wallet not found for this organization.")
+        # B3 (external review): atomic credit via UPDATE ... RETURNING.
+        # R4 (final review): updated_at takes the DB clock, not the stale value
+        # that was read earlier.
+        result = await session.execute(
+            update(Wallet)
+            .where(Wallet.organization_id == org_id)
+            .values(balance=Wallet.balance + body.amount, updated_at=func.now())
+            .returning(Wallet.balance)
+        )
+        new_balance = result.scalar_one()
+        session.add(
+            WalletTransaction(
                 organization_id=org_id,
-                entity_type="wallet",
-                entity_id=wallet.id,
-                detail={"amount": body.amount, "reason": body.reason},
+                kind="CHARGE",
+                amount=body.amount,
+                balance_after=new_balance,
             )
-            await session.commit()
-            balance = new_balance
-    finally:
-        pass
+        )
+        await record_audit(
+            session,
+            "admin.credit.manual",
+            organization_id=org_id,
+            entity_type="wallet",
+            entity_id=wallet.id,
+            detail={"amount": body.amount, "reason": body.reason},
+        )
+        await session.commit()
+        balance = new_balance
     return ok({"balance": balance, "added": body.amount})
 
 
@@ -419,19 +410,16 @@ async def system_status(authorization: str = Header(default="")) -> dict:
     await _authorized(authorization)
     settings = get_settings()
     started = time.time()
+    # R1 (final review): shared engine; the health probe only observes it.
     try:
-        engine = create_async_engine(settings.database_url)
-        try:
-            factory = async_sessionmaker(engine)
-            async with factory() as session:
-                row = (
-                    await session.execute(
-                        text("SELECT version_num FROM alembic_version LIMIT 1")
-                    )
-                ).first()
-                head = row[0] if row else None
-        finally:
-            await engine.dispose()
+        _, factory = _shared_engine()
+        async with factory() as session:
+            row = (
+                await session.execute(
+                    text("SELECT version_num FROM alembic_version LIMIT 1")
+                )
+            ).first()
+            head = row[0] if row else None
         db_state = "up"
     except Exception:
         head = None

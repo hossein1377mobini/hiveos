@@ -1,7 +1,7 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-11 (رفع یافته‌های ریویو خارجی v0.1 — main = `00ae41d`؛ 202 تست backend + 13 vitest + tsc/build سبز؛ مهاجرت‌ها تا 0022)
+> آخرین به‌روزرسانی: 2026-09-11 (رفع نظارات بازبینی نهایی R1..R5 + NB-1/NB-2 — شاخه `task/review-final-remediation`؛ 206 تست backend + 13 vitest + tsc/build سبز؛ مهاجرت‌ها تا 0023)
 
 ## وضعیت فعلی (دستور PO: «هیچ چیز بازی نماند؛ من فقط در پنل ادمین ست می‌کنم»)
 
@@ -10,6 +10,15 @@
 9. **استیجینگ مستقر** (2026-09-11): `hiveos-staging` 193.93.169.136 — DB کانتینر + api `hiveos/api:staging-0e01c84` + nginx هاست (SPA+proxy)؛ 27 جدول، سموک پنل (login/logout/revoke) سبز. جزئیات: `hive/reports/tasks/2026-09-11-staging-server-deploy.md`. TLS + دامنه موکول PO.
 10. **سرور استیجینگ خاموش شد** (تصمیم PO، 2026-09-11): تست‌ها موقتا لوکال — UI `http://127.0.0.1:8080`، اجرا: دسکتاپ `HiveOS-Local.bat` یا `hiveos/start-local.ps1`. وضع سرور هنگام خاموش‌سازی: api `staging-0e01c84` Up، db healthy، 27 جدول، پورت 80 توسط هاستینگ باز شد، certbot 2.9 نصب، `server_name hivesystem.ir` ست، nginx روی 80/8080/2052+alt.
 11. **موانع هنوز باز (برای بازگشت به سرور)**: (a) DNS `hivesystem.ir` هنوز به edge اروان (185.143.234.x) اشاره می‌کند و edge به origin 502 می‌دهد — راهحل: A record → 193.93.169.136 یا درست کردن origin در پنل اروان (اکانت درست)؛ (b) بعد از DNS: `certbot --nginx -d hivesystem.ir`؛ (c) rebuild اپ ویندوزی با `https://hivesystem.ir` + آپلود دوباره.
+12. **رفع نظارات بازبینی نهایی** (2026-09-11، شاخه `task/review-final-remediation`): بازبینی نهایی (`2026-09-11-final-review.md`) ۷ مورد خواست — همگی بسته شدند:
+    - **R1** چهار endpoint ادمین (`_read_setting`/`put_setting`/`admin_credit_op`/`system_status`) → `_shared_engine()`؛ dispose حذف.
+    - **R2** `__import__("json")` → `import json`.
+    - **R3** `get_or_create_wallet` → IntegrityError → rollback + re-select.
+    - **R4** اعتبار ادمین → `updated_at=func.now()`.
+    - **R5** تست → `await dispose` (خطای ناپایدار teardown ریشه‌یابی و رفع شد).
+    - **NB-1** rate-limit پشت proxy → `ProxyHeadersMiddleware` + `trust_proxy_xff` + `client_key` از XFF + `TRUSTED_PROXIES` env (compose/.env) + `X-Forwarded-Proto` در nginx و `serve_ui.py`.
+    - **NB-2** race register_owner → `FOR UPDATE` + partial unique index `uq_organizations_owner_user_id` (مهاجرت 0023، برگشت‌پذیر).
+    - گیت‌ها: ruff سبز؛ pytest **206 passed** ×3 پیاپی (۴ رگرسیون جدید)؛ alembic head 0023 (downgrade↔upgrade سبز)؛ tsc/vitest سبز. گزارش‌ها به‌روز شدند. **merge به main منتظر تأیید صریح PO.**
 
 1. **runtime از پنل تغذیه می‌شود** (`7f99b49`): کلاینت openai-compatible از `providers_pricing` پنل (base_url/api_key)، allowlist (US-1601)، نرخ اعتبار (US-1203)، قالب پرامپت (system/user_template). `agenerate`/`aroute_model` در `backend/llm.py`.
 2. **پنل ادمین UI کامل** (`6f08aa0`): `/admin` — ورود، تنظیمات (۴ کلید JSON)، سازمان‌ها + اعتبار دستی + **پلن/تمدید**، درخواست‌های شارژ (تأیید/رد)، وضعیت سامانه.

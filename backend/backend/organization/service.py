@@ -112,7 +112,16 @@ async def username_available(session: AsyncSession, username: str) -> dict:
 
 async def register_owner(session: AsyncSession, payload: RegisterOwnerRequest) -> dict:
     """US-002 FR-001..FR-006: first user of the org, Owner role, initial session."""
-    organization = await session.get(Organization, payload.organization_id)
+    # NB-2 (final review): SELECT ... FOR UPDATE serializes concurrent owner
+    # registrations on the same org; the DB partial unique index (0023) is the
+    # last line of defense.
+    organization = (
+        await session.execute(
+            select(Organization)
+            .where(Organization.id == payload.organization_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
     if organization is None:
         raise _conflict(404, "ORGANIZATION_NOT_FOUND", "Organization was not found.")
     if organization.status != OrganizationStatus.PENDING_OWNER_REGISTRATION:

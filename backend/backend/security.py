@@ -10,7 +10,7 @@ import secrets
 import string
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import Argon2Error
 
 _hasher = PasswordHasher()
 
@@ -26,7 +26,9 @@ def hash_password(password: str) -> str:
 def verify_password(password_hash: str, password: str) -> bool:
     try:
         return _hasher.verify(password_hash, password)
-    except VerifyMismatchError:
+    except Argon2Error:
+        # T-S1-2 final review: a wrong password AND a malformed/stale hash must
+        # both be treated as "not verified", never a 500.
         return False
 
 

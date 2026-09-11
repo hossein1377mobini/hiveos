@@ -4,6 +4,7 @@ ADR-022: no secrets in code - everything comes from environment variables,
 validated at startup. Admin panel (US-1601+) overrides live values later.
 """
 
+import ipaddress
 from functools import lru_cache
 from typing import Annotated
 
@@ -88,6 +89,12 @@ class Settings(BaseSettings):
     # DATABASE_URL must now fail loudly at startup instead of silently targeting
     # localhost; dev keeps the local default (review round 2 intent, now enforced).
     database_url: str | None = None
+    # NB-1 (final review): per-IP rate limiting only works if the api knows the real
+    # client. Comma-separated trusted proxies (IPs/CIDRs, or "*" for the staging
+    # topology where nginx is the only hop and the api container is not exposed).
+    # When the direct peer is trusted, X-Forwarded-For supplies the client key and
+    # uvicorn's ProxyHeadersMiddleware rewrites scope client/scheme.
+    trusted_proxies: str = "*"
 
     @model_validator(mode="after")
     def _resolve_database_url(self) -> "Settings":
@@ -160,6 +167,32 @@ class Settings(BaseSettings):
         if env != "dev" and "*" in v:
             raise ValueError('CORS_ORIGINS="*" is only allowed with ENVIRONMENT=dev')
         return v
+
+    def trust_proxy_xff(self, peer: str) -> bool:
+        """NB-1 (final review): X-Forwarded-For is honored only when the direct
+        peer is one of the configured trusted proxies - otherwise a caller could
+        forge its own rate-limit key."""
+        hosts = [h.strip() for h in self.trusted_proxies.split(",") if h.strip()]
+        if "*" in hosts:
+            return True
+        try:
+            peer_ip = ipaddress.ip_address(peer)
+        except ValueError:
+            return peer in hosts
+        for host in hosts:
+            if "/" in host:
+                try:
+                    if peer_ip in ipaddress.ip_network(host, strict=False):
+                        return True
+                except ValueError:
+                    continue
+            else:
+                try:
+                    if peer_ip == ipaddress.ip_address(host):
+                        return True
+                except ValueError:
+                    continue
+        return False
 
     @property
     def is_prod(self) -> bool:

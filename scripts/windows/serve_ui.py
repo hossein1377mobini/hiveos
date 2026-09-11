@@ -29,6 +29,12 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else None
         conn = http.client.HTTPConnection(API_HOST, API_PORT, timeout=3600)
         headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_HEADERS}
+        # Mirror the staging nginx (NB-1): the api keys its per-IP rate limiters
+        # on X-Forwarded-For when the peer is a trusted proxy.
+        client_ip = self.client_address[0]
+        prior = self.headers.get("X-Forwarded-For")
+        headers["X-Forwarded-For"] = f"{prior}, {client_ip}" if prior else client_ip
+        headers["X-Forwarded-Proto"] = "http"
         try:
             conn.request(self.command, self.path, body=body, headers=headers)
             resp = conn.getresponse()
