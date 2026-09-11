@@ -67,7 +67,7 @@ describe("bootstrap flow (T-S1-9)", () => {
     expect(await screen.findByText("تعیین فولدر اسناد")).toBeInTheDocument();
   });
 
-  it("goes straight to the chat placeholder when onboarding is complete", async () => {
+  it("goes straight to the chat area when onboarding is complete", async () => {
     localStorage.setItem("hiveos.session", "tok");
     mockApi({
       "GET /auth/onboarding-status": {
@@ -77,9 +77,13 @@ describe("bootstrap flow (T-S1-9)", () => {
         knowledge_source: { id: "x", path: "p", status: "active" },
         next_step: "chat",
       },
+      "GET /chat/sessions": { sessions: [] },
+      "GET /wallet": { balance: 50, blocked: false },
     });
     render(<App />);
-    expect(await screen.findByText("خوش آمدید — راه‌اندازی کامل شد")).toBeInTheDocument();
+    expect(
+      await screen.findByText("سوال خود را بپرسید؛ پاسخ بر اساس دانش سازمان داده می‌شود."),
+    ).toBeInTheDocument();
   });
 
   it("reports an expired pending organization (C3)", async () => {
