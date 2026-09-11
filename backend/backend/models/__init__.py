@@ -6,6 +6,7 @@ models. Everything lives in the single 'hiveos' schema created by migration
 organization-scoped table carries organization_id.
 """
 
+from backend.models.admin_session import AdminSession
 from backend.models.audit import AuditLog
 from backend.models.base import Base, TimestampMixin
 from backend.models.brain import KnowledgeRepository, OrganizationBrain, VectorIndex
@@ -35,6 +36,7 @@ from backend.models.wallet import Wallet, WalletTransaction
 from backend.models.workspace_settings import WorkspaceSettings
 
 __all__ = [
+    "AdminSession",
     "AgentExecution",
     "AuditLog",
     "Base",
