@@ -17,7 +17,7 @@ from backend import llm
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
-from backend.models import AgentExecution, ChatMessage, ChatSession
+from backend.models import AgentExecution, ChatMessage, ChatSession, Organization
 
 CANCELLABLE = ("PENDING", "STARTING", "RUNNING")
 TERMINAL = ("CANCELLED", "COMPLETED", "FAILED")
@@ -80,6 +80,19 @@ async def create_execution(
         ).scalar_one_or_none()
         if existing is not None:
             return _payload(existing)
+
+    # US-1207 (minimal subscription): an expired plan blocks new runs.
+    org = await session.get(Organization, organization_id)
+    if (
+        org is not None
+        and org.plan_expires_at is not None
+        and org.plan_expires_at.astimezone(UTC) < datetime.now(UTC)
+    ):
+        raise ApiError(
+            402,
+            "SUBSCRIPTION_EXPIRED",
+            "The organization plan has expired — extend it from the admin panel.",
+        )
 
     # US-1203 AC7: the wallet gate fires before any online-model run.
     from backend import wallet

@@ -8,6 +8,7 @@ require_system_admin.
 
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
@@ -92,7 +93,7 @@ async def list_organizations(authorization: str = Header(default="")) -> dict:
             rows = (
                 await session.execute(
                     text(
-                        "SELECT o.id, o.name, o.status, COALESCE(w.balance, 0) AS balance "
+                        "SELECT o.id, o.name, o.status, COALESCE(w.balance, 0) AS balance, o.plan, o.plan_expires_at "
                         "FROM hiveos.organizations o LEFT JOIN hiveos.wallets w "
                         "ON w.organization_id = o.id ORDER BY o.created_at DESC LIMIT 200"
                     )
@@ -103,7 +104,15 @@ async def list_organizations(authorization: str = Header(default="")) -> dict:
     return ok(
         {
             "organizations": [
-                {"id": r[0], "name": r[1], "status": r[2], "balance": r[3]} for r in rows
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "status": r[2],
+                    "balance": r[3],
+                    "plan": r[4],
+                    "plan_expires_at": r[5],
+                }
+                for r in rows
             ]
         }
     )
@@ -238,6 +247,56 @@ async def decide_charge_request_endpoint(
     finally:
         await engine.dispose()
     return ok(data)
+
+
+class SubscriptionBody(BaseModel):
+    """US-1207: grant or extend a plan; days<=0 clears the expiry (demo gate)."""
+
+    plan: str = Field(min_length=2, max_length=50)
+    days: int = Field(default=0, ge=0, le=3650)
+
+
+@router.post("/organizations/{org_id}/subscription", dependencies=[Depends(_rate_limit)])
+async def set_subscription(
+    org_id: str,
+    body: SubscriptionBody,
+    authorization: str = Header(default=""),
+) -> dict:
+    """US-1207: the System Admin grants/extends an organization plan."""
+    await _authorized(authorization)
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url)
+    try:
+        factory = async_sessionmaker(engine)
+        async with factory() as session:
+            # days=0 suspends immediately (expired now); days>=1 grants/extends.
+            expires_at = datetime.now(UTC)
+            if body.days > 0:
+                expires_at = expires_at + timedelta(days=body.days)
+            result = await session.execute(
+                text(
+                    "UPDATE hiveos.organizations SET plan = :p, plan_expires_at = :e "
+                    "WHERE id = :i RETURNING plan, plan_expires_at"
+                ),
+                {"p": body.plan, "e": expires_at, "i": org_id},
+            )
+            row = result.first()
+            await session.commit()
+            if row is None:
+                raise ApiError(404, "NOT_FOUND", "Organization not found.")
+            await record_audit(
+                session,
+                "admin.subscription.set",
+                organization_id=org_id,
+                entity_type="organization",
+                entity_id=org_id,
+                detail={"plan": body.plan, "days": body.days},
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+    return ok({"plan": row[0], "plan_expires_at": row[1]})
+
 
 
 

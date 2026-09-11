@@ -66,6 +66,10 @@ class Organization(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Asia/Tehran")
     # C3 (Amendment 2): when a pending org must expire; resolved from US-1605 config at creation.
     pending_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # US-1207 (minimal subscription): plan name + expiry; the System Admin sets
+    # plans in the panel (subscription key) and grants/extends per organization.
+    plan: Mapped[str] = mapped_column(String(50), nullable=False, server_default="trial")
+    plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Filled when the owner account exists (US-002) - organizations are created first.
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
