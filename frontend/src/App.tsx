@@ -8,6 +8,7 @@ import OtpVerify from "./pages/OtpVerify";
 import Onboarding from "./pages/Onboarding";
 import Wallet from "./pages/Wallet";
 import Chat from "./pages/Chat";
+import Knowledge from "./pages/Knowledge";
 import AdminApp from "./admin/AdminApp";
 
 interface Status {
@@ -15,7 +16,7 @@ interface Status {
   next_step: string;
 }
 
-type Screen = "login" | "register" | "owner" | "otp" | "onboarding" | "chat" | "wallet";
+type Screen = "login" | "register" | "owner" | "otp" | "onboarding" | "chat" | "wallet" | "knowledge";
 
 // T-S1-9: bootstrap mockups wired to the API. Step selection follows the server
 // (onboarding-status.next_step), not client-side guesses (C2 resume semantics).
@@ -102,12 +103,15 @@ export default function App() {
   return (
     <AppShell
       active={screen as NavId}
-      onNavigate={(id: NavId) => setScreen(id === "wallet" ? "wallet" : "chat")}
+      onNavigate={(id: NavId) =>
+        setScreen(id === "wallet" ? "wallet" : id === "knowledge" ? "knowledge" : "chat")}
     >
       {screen === "wallet" ? (
         <Wallet />
       ) : screen === "chat" ? (
         <Chat />
+      ) : screen === "knowledge" ? (
+        <Knowledge />
       ) : (
         <section className="mx-auto max-w-xl rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
           <h1 className="text-lg font-bold">خوش آمدید — راه‌اندازی کامل شد</h1>
