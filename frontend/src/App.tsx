@@ -7,6 +7,7 @@ import OwnerAccount from "./pages/OwnerAccount";
 import OtpVerify from "./pages/OtpVerify";
 import Onboarding from "./pages/Onboarding";
 import Wallet from "./pages/Wallet";
+import Chat from "./pages/Chat";
 import AdminApp from "./admin/AdminApp";
 
 interface Status {
@@ -105,6 +106,8 @@ export default function App() {
     >
       {screen === "wallet" ? (
         <Wallet />
+      ) : screen === "chat" ? (
+        <Chat />
       ) : (
         <section className="mx-auto max-w-xl rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
           <h1 className="text-lg font-bold">خوش آمدید — راه‌اندازی کامل شد</h1>
