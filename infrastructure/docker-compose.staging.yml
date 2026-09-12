@@ -17,6 +17,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
     ports:
       - "127.0.0.1:8100:8100"
+    volumes:
+      - /opt/hiveos/storage:/opt/hiveos/storage
+      - /opt/hiveos/ingestion:/opt/hiveos/ingestion
     networks:
       - dbnet
     restart: unless-stopped

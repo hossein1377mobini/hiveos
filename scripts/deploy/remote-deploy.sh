@@ -48,6 +48,13 @@ MELIPAYAMAK_OTP_SERVICE_ID=$SMS_SERVICE_ID
 EOF
 umask 022
 
+# Host dirs bind-mounted into the api container (compose volumes). The api runs as
+# uid 10001, so ownership must match or workspace/brain init fails with 500
+# (WORKSPACE_INITIALIZATION_FAILED) - keep this before compose up.
+mkdir -p /opt/hiveos/storage /opt/hiveos/ingestion
+chown -R 10001:10001 /opt/hiveos/storage /opt/hiveos/ingestion
+chmod 750 /opt/hiveos/storage /opt/hiveos/ingestion
+
 echo "[deploy] docker compose up (tag=$TAG)"
 docker compose -f docker-compose.staging.yml up -d
 
