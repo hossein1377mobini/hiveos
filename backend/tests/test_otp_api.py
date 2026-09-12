@@ -83,7 +83,7 @@ def test_send_otp_success_creates_row_and_audits(client):
     assert row.consumed_at is None
     assert row.failed_attempts == 0
     codes = MockSmsProvider.SENT[mobile]
-    assert len(codes) == 1 and len(codes[0]) == 6 and codes[0].isdigit()
+    assert len(codes) == 1 and len(codes[0]) == 4 and codes[0].isdigit()
     # digest binds the user id: recompute from the stored user row
     with engine.connect() as conn:
         user_id = conn.execute(
@@ -150,7 +150,7 @@ def test_send_otp_delivery_failure_persists_event(client, monkeypatch):
 
     def _failing_provider():
         class _Broken:
-            async def send_otp(self, mobile: str, code: str) -> None:
+            async def send_otp(self, mobile: str) -> str:
                 raise SmsDeliveryError("gateway unreachable")
 
         return _Broken()

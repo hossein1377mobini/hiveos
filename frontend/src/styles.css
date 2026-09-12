@@ -25,11 +25,20 @@
   --color-warning-bg: #fbf1e3;
   --color-error: #b42318;
   --color-error-bg: #fdecec;
+  /* Step/accent colors for non-CTA markers (mockup assets/hiveos.css §1) */
+  --color-teal: #0e7c6b;
+  --color-teal-soft: #e3f4f0;
+  --color-amber: #c97b1f;
+  --color-amber-soft: #fbf1e3;
+  --color-violet: #6b4ab0;
+  --color-violet-soft: #f0ebfa;
   /* Geometry — single radius source, components derive (design-system §2.4) */
   --radius-card: 18px;
   --radius-control: 10px;
-  /* Elevation — level 1 (cards); max 3 levels, subtle */
+  --radius-xs: 8px;
+  /* Elevation — level 1 (cards) + level 2/3 (popover, modal); max 3, subtle */
   --shadow-card: 0 1px 2px rgba(28, 28, 25, 0.05), 0 12px 28px rgba(43, 58, 115, 0.07);
+  --shadow-pop: 0 14px 40px rgba(28, 28, 25, 0.18);
 }
 
 /* shadcn/ui semantic aliases (design-system §2.1) — kept in sync so components
@@ -61,6 +70,12 @@ body {
   line-height: 1.7;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Technical/ID fields — mockup assets/hiveos.css §۲ (.mono) */
+.mono {
+  font-family: Consolas, "Courier New", monospace;
+  unicode-bidi: embed;
 }
 
 /* Visible focus ring on every interactive element (design-system §2.7). */

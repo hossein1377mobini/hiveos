@@ -34,12 +34,12 @@ export default function App() {
   const [screen, setScreen] = useState<Screen | null>(null);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
 
-  // Admin panel rides the same SPA under /admin (epic-16).
-  if (window.location.pathname.startsWith("/admin")) {
-    return <AdminApp />;
-  }
+  // Admin panel rides the same SPA under /admin (epic-16). Checked before the
+  // effect but the effect stays unconditional (Rules of Hooks).
+  const isAdmin = window.location.pathname.startsWith("/admin");
 
   useEffect(() => {
+    if (isAdmin) return;
     (async () => {
       if (!getToken()) {
         setScreen("login");
@@ -52,7 +52,8 @@ export default function App() {
         setScreen("login");
       }
     })();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   function routeFromStatus(nextStep: string) {
     if (nextStep === "owner") setScreen("owner");
@@ -63,15 +64,21 @@ export default function App() {
     else setScreen("login");
   }
 
+  if (isAdmin) return <AdminApp />;
+
   if (screen === null) {
-    return <AppShell><p className="p-6 text-sm text-neutral-600">در حال بارگذاری…</p></AppShell>;
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-neutral-50">
+        <p className="text-sm text-neutral-600">در حال بارگذاری…</p>
+      </div>
+    );
   }
 
-  // Auth screens (00-03 mockups) are standalone pages WITHOUT the app shell —
-  // the shell (10-app-shell.html) only appears after onboarding completes.
+  // Auth screens (00–03 mockups) are standalone .auth-body pages WITHOUT the
+  // app shell — the shell (10-app-shell.html) only appears after onboarding.
   if (screen === "login" || screen === "register" || screen === "owner" || screen === "otp") {
     return (
-      <div className="flex min-h-screen items-start justify-center px-4 pb-16 pt-11">
+      <div className="flex min-h-dvh items-start justify-center bg-neutral-50 px-4 pb-16 pt-11">
         <div className="w-full max-w-[700px]">
           {screen === "login" && (
             <>
@@ -102,11 +109,15 @@ export default function App() {
     );
   }
 
+  // Onboarding steps 04–07 are also standalone .auth-body pages (stepper on top,
+  // no shell) — mockups 04-workspace-init … 07-onboarding-complete.
   if (screen === "onboarding") {
     return (
-      <AppShell>
-        <Onboarding onStatus={(status) => { if (status.next_step === "chat") setScreen("chat"); }} />
-      </AppShell>
+      <div className="flex min-h-dvh items-start justify-center bg-neutral-50 px-4 pb-16 pt-11">
+        <div className="w-full max-w-[700px]">
+          <Onboarding onStatus={(status) => { if (status.next_step === "chat") setScreen("chat"); }} />
+        </div>
+      </div>
     );
   }
 
@@ -131,7 +142,7 @@ export default function App() {
       ) : screen === "knowledge" ? (
         <Knowledge />
       ) : screen === "subscription" ? (
-        <Subscription />
+        <Subscription onNavigate={(id) => setScreen(id as Screen)} />
       ) : (
         <section className="mx-auto max-w-xl rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
           <h1 className="text-lg font-bold">خوش آمدید — راه‌اندازی کامل شد</h1>

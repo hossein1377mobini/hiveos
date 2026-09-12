@@ -35,8 +35,8 @@ describe("Wallet page (RG-15/16)", () => {
       },
     });
     render(<Wallet />);
-    expect(await screen.findByTestId("balance")).toHaveTextContent("50");
-    expect(screen.getByText("مصرف")).toBeInTheDocument();
+    expect(await screen.findByTestId("balance")).toHaveTextContent("۵۰");
+    expect(screen.getByText("مصرف گفتگو")).toBeInTheDocument();
   });
 
   it("shows the zero-credit banner when blocked", async () => {
@@ -51,6 +51,6 @@ describe("Wallet page (RG-15/16)", () => {
     });
     render(<Wallet />);
     expect(await screen.findByTestId("zero-credit-banner")).toBeInTheDocument();
-    expect(screen.getByTestId("pending")).toHaveTextContent("200");
+    expect(screen.getByTestId("pending")).toHaveTextContent("۲۰۰");
   });
 });

@@ -33,8 +33,10 @@ def _utc_now() -> datetime:
 
 
 def generate_code() -> str:
-    """6-digit, numeric-only, crypto-secure (US-003 OTP rules)."""
-    return f"{secrets.randbelow(1_000_000):06d}"
+    """4-digit, numeric-only, crypto-secure (US-003 OTP rules; length 4 per
+    PO decision CHANGE-029 — the production provider generates its own 4-digit
+    code, this default matches it for any local generation)."""
+    return f"{secrets.randbelow(10_000):04d}"
 
 
 def code_digest(user_id, code: str) -> str:
@@ -119,11 +121,25 @@ async def send_otp(
                 "Please wait before requesting a new code.",
             )
 
-    code = generate_code()
     expires_at = now + timedelta(seconds=settings.otp_ttl_seconds)
     if active is not None:
         # Sending a new code invalidates the previous one (one active per user+purpose).
         active.consumed_at = now
+
+    try:
+        # The provider owns code generation (ADR-016 amendment 2026-09-08):
+        # the Melipayamak console OTP service generates and delivers the
+        # 4-digit code and returns it; the mock generates locally and returns
+        # the same value the tests read from MockSmsProvider.SENT.
+        code = await get_sms_provider().send_otp(user.mobile)
+    except SmsDeliveryError as exc:
+        # US-003 FR-007 / scenario 5: explicit failure, clear message, event recorded.
+        await _record_delivery_failure(user, str(exc))
+        raise ApiError(
+            503,
+            "SMS_DELIVERY_FAILED",
+            "Server cannot reach the SMS gateway. Internet access is required to complete registration.",
+        ) from exc
 
     otp_row = OtpVerification(
         user_id=user.id,
@@ -135,17 +151,6 @@ async def send_otp(
     session.add(otp_row)
     await session.flush()
 
-    try:
-        await get_sms_provider().send_otp(user.mobile, code)
-    except SmsDeliveryError as exc:
-        # US-003 FR-007 / scenario 5: explicit failure, clear message, event recorded.
-        await _record_delivery_failure(user, str(exc))
-        raise ApiError(
-            503,
-            "SMS_DELIVERY_FAILED",
-            "Server cannot reach the SMS gateway. Internet access is required to complete registration.",
-        ) from exc
-
     await record_audit(
         session,
         event,
@@ -154,7 +159,14 @@ async def send_otp(
         entity_id=otp_row.id,
         detail={"purpose": purpose, "mobile": user.mobile},
     )
-    return {
+    result: dict = {
         "expires_at": expires_at,
         "resend_available_at": now + timedelta(seconds=settings.otp_resend_cooldown_seconds),
     }
+    # Dev convenience (staging/dev only): with the mock provider there is no
+    # real SMS, so surface the code in the API response for the UI toast.
+    # US-1605 (admin-configured SMS keys) makes this path unreachable in prod:
+    # mock is dev/staging-only per ADR-019/ADR-016.
+    if settings.sms_provider == "mock" and settings.environment != "prod":
+        result["dev_code"] = code
+    return result

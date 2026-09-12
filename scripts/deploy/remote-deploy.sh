@@ -26,10 +26,25 @@ if [[ -f "$PREV_FILE" ]]; then cp "$PREV_FILE" "$ROLLBACK_FILE"; fi
 PG_PASS="$(cat "$SECRETS_DIR/pg_password")"
 PG_ENC="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$PG_PASS")"
 umask 077
+# Staging/prod required vars: read from server-side secrets (ADR-022) so a CI
+# deploy keeps a fully valid .env. $(cat ) strips the trailing newline.
+ADMIN_USER="$(cat "$SECRETS_DIR/system_admin_username")"
+ADMIN_PASS="$(cat "$SECRETS_DIR/system_admin_password")"
+SMS_SERVICE_ID="$(cat "$SECRETS_DIR/melipayamak_otp_service_id" 2>/dev/null || true)"
+
 cat > "$APP_DIR/.env" <<EOF
 IMAGE_TAG=$TAG
 ENVIRONMENT=${ENVIRONMENT:-staging}
 DATABASE_URL=postgresql+asyncpg://hiveos:$PG_ENC@db:5432/hiveos
+SYSTEM_ADMIN_USERNAME=$ADMIN_USER
+SYSTEM_ADMIN_PASSWORD=$ADMIN_PASS
+INGESTION_ALLOWED_ROOTS=/opt/hiveos/ingestion
+STORAGE_ROOT=/opt/hiveos/storage
+WALLET_WELCOME_CREDIT=50
+ADMIN_SESSION_TTL_HOURS=12
+CORS_ORIGINS=https://staging.hivesystem.ir
+SMS_PROVIDER=melipayamak
+MELIPAYAMAK_OTP_SERVICE_ID=$SMS_SERVICE_ID
 EOF
 umask 022
 

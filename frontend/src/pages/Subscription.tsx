@@ -1,15 +1,27 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import type { NavId } from "../components/AppShell";
+import { Banner } from "../components/ui/banner";
+import { Button } from "../components/ui/button";
+import { faDate, faNum } from "../utils/format";
 
-// US-1207 minimal subscription (RG-21): the plan is granted/extended by the
-// System Admin in the panel; the organization only sees its state here.
+// 12-ai-access/04-subscription.html at mockup fidelity (hero status card +
+// «اشتراک و اعتبار» explainer rows). US-1207 minimal model: the plan is
+// granted/extended by the System Admin in the panel (epic-16), so the renewal
+// / gateway blocks of the mockup are intentionally absent (business change —
+// pattern kept, copy adjusted); «خرید اعتبار مکمل» routes to the wallet.
 interface Subscription {
   plan: string;
   expires_at: string | null;
   expired: boolean;
 }
 
-export default function Subscription() {
+const PLAN_FA: Record<string, string> = {
+  monthly: "ماهانه",
+  trial: "دوره آزمایشی",
+};
+
+export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) => void }) {
   const [sub, setSub] = useState<Subscription | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,30 +44,82 @@ export default function Subscription() {
         Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / (24 * 3600 * 1000)),
       )
     : null;
+  const planFa = PLAN_FA[sub.plan] ?? sub.plan;
 
   return (
-    <section className="mx-auto max-w-xl space-y-4" aria-label="اشتراک">
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
-        <p className="text-sm text-neutral-600">پلن فعلی</p>
-        <p className="mt-1 text-3xl font-bold" data-testid="plan">
-          {sub.plan}
-        </p>
-        <p className="mt-2 text-sm text-neutral-600" data-testid="expiry">
-          {sub.expires_at
-            ? daysLeft && daysLeft > 0
-              ? daysLeft + " روز باقی‌مانده"
-              : "منقضی شده"
-            : "بدون انقضا"}
-        </p>
-        {sub.expired && (
-          <p role="alert" className="mt-3 rounded-card bg-red-50 p-3 text-sm text-red-800">
-            پلن سازمان منقضی شده است؛ برای ادامه، از مدیر سامانه تمدید بخواهید.
+    <section className="mx-auto max-w-3xl space-y-4" aria-label="اشتراک">
+      <div className="flex flex-wrap items-start gap-3.5">
+        <div>
+          <h1 className="text-[19px] font-extrabold text-neutral-900">اشتراک</h1>
+          <p className="mt-[3px] text-[13px] text-neutral-600">
+            دسترسی به خود برنامه از طریق اشتراک دوره‌ای — مستقل از اعتبار مصرف هوش سازمان.
           </p>
-        )}
+        </div>
+        <div className="ms-auto flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => onNavigate?.("wallet")}>
+            خرید اعتبار مکمل
+          </Button>
+        </div>
       </div>
+
+      {sub.expired && (
+        <Banner tone="error" title="اشتراک شما منقضی شده است." data-testid="sub-expired-banner">
+          اجرای هوش سازمان متوقف است؛ اعتبار باقی‌مانده کیف پول شما محفوظ می‌ماند. برای ادامه، از مدیر سامانه تمدید بخواهید.
+        </Banner>
+      )}
+
+      {/* وضعیت اشتراک — الگوی wallet-hero (mockup §۲۱) */}
+      <div className="relative overflow-hidden rounded-[20px] bg-navy-600 px-7 py-[26px] text-white shadow-[0_14px_34px_rgba(43,58,115,0.3)]">
+        <span aria-hidden className="absolute -end-[30px] -top-[30px] size-40 rounded-full bg-white/[0.06]" />
+        <div className="text-xs font-bold opacity-75">وضعیت اشتراک</div>
+        <div className="mt-1.5 text-[22px] font-extrabold" data-testid="plan">
+          {sub.expired ? "منقضی شده" : `فعال — بسته‌ی ${planFa}`}
+        </div>
+        <div className="mt-2 text-xs opacity-85" data-testid="expiry">
+          {sub.expires_at
+            ? `پایان دوره: ${faDate(sub.expires_at)}${daysLeft && daysLeft > 0 ? ` · ${faNum(daysLeft)} روز باقی‌مانده` : ""}`
+            : "بدون انقضا"}
+        </div>
+      </div>
+
       <p className="text-xs text-neutral-500">
         تمدید و تغییر پلن توسط مدیر سامانه در پنل مدیریت انجام می‌شود.
       </p>
+
+      {/* اشتراک و اعتبار — تفاوت‌ها (setting-row, mockup) */}
+      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
+        <h2 className="mb-3 text-[15px] font-extrabold text-neutral-900">اشتراک و اعتبار — تفاوت‌ها</h2>
+        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-neutral-900">اشتراک فعال</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+            دسترسی به خود برنامه را تأمین می‌کند؛ بدون آن، اجرای هوش سازمان متوقف است.
+          </div>
+        </div>
+        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-neutral-900">اعتبار بسته‌ی اشتراک</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+            با خرید/تمدید، یک‌جا به کیف پول اضافه می‌شود و با مصرف کسر می‌شود.
+          </div>
+        </div>
+        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-neutral-900">اعتبار مکمل</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+            در هر لحظه از دوره قابل درخواست است — از «کیف پول ← شارژ حساب».
+          </div>
+        </div>
+        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-neutral-900">پایان دوره</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+            اعتبار باقی‌مانده حفظ می‌شود؛ تا تمدید اشتراک، اجرای هوش سازمان متوقف می‌ماند.
+          </div>
+        </div>
+        <div className="py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-neutral-900">دوره آزمایشی (سازمان جدید)</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+            با اعتبار خوش‌آمد — بدون نیاز به اشتراک. مدت و مقدار اعتبار از پنل ادمین تعیین می‌شود.
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

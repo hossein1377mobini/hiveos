@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 # US-002 Amendment 2 (appshell-spec:40): English letters/digits/._-, min 3 chars.
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{3,50}$")
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9.@]{3,50}$")
 # US-002: pragmatic email shape check; uniqueness is enforced case-insensitively.
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -60,7 +60,7 @@ class RegisterOwnerRequest(BaseModel):
     """US-002: first account of a pending organization; becomes the Owner."""
 
     organization_id: uuid.UUID
-    username: str = Field(pattern=r"^[A-Za-z0-9._-]{3,50}$")
+    username: str = Field(pattern=USERNAME_PATTERN)
     mobile: str = Field(min_length=10, max_length=15)
     email: str | None = Field(default=None, max_length=255)
     password: str = Field(min_length=1, max_length=128)
@@ -102,10 +102,16 @@ class UsernameAvailability(BaseModel):
 
 
 class OtpSent(BaseModel):
-    """US-003: response of send-otp / resend-otp (timers drive the UI countdown)."""
+    """US-003: response of send-otp / resend-otp (timers drive the UI countdown).
+
+    dev_code is populated ONLY when the mock SMS provider serves a non-prod
+    environment (ADR-019): there is no real SMS there, so the UI can show the
+    code in a dev toast. Always None with a real gateway (ADR-016 amendment).
+    """
 
     expires_at: datetime
     resend_available_at: datetime
+    dev_code: str | None = None
 
 
 # Persian (۰-۹) and Arabic-Indic (٠-٩) digits -> Latin digits.
@@ -113,7 +119,8 @@ _OTP_DIGIT_MAP = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "0123
 
 
 class VerifyOtpRequest(BaseModel):
-    """US-003: the 6-digit code; Persian/Arabic digits and separators are normalized."""
+    """US-003: the 4-digit code (length 4 per PO decision CHANGE-029);
+Persian/Arabic digits and separators are normalized."""
 
     code: str
 
@@ -121,8 +128,8 @@ class VerifyOtpRequest(BaseModel):
     @classmethod
     def _normalize_code(cls, value: str) -> str:
         cleaned = value.translate(_OTP_DIGIT_MAP).replace(" ", "").replace("-", "")
-        if not cleaned.isdigit() or len(cleaned) != 6:
-            raise ValueError("code must be exactly 6 digits")
+        if not cleaned.isdigit() or len(cleaned) != 4:
+            raise ValueError("code must be exactly 4 digits")
         return cleaned
 
 
@@ -168,8 +175,8 @@ class PasswordResetVerify(BaseModel):
     @classmethod
     def _normalize_code(cls, value: str) -> str:
         cleaned = value.translate(_OTP_DIGIT_MAP).replace(" ", "").replace("-", "")
-        if not cleaned.isdigit() or len(cleaned) != 6:
-            raise ValueError("code must be exactly 6 digits")
+        if not cleaned.isdigit() or len(cleaned) != 4:
+            raise ValueError("code must be exactly 4 digits")
         return cleaned
 
 
@@ -190,8 +197,8 @@ class PasswordReset(BaseModel):
     @classmethod
     def _normalize_code(cls, value: str) -> str:
         cleaned = value.translate(_OTP_DIGIT_MAP).replace(" ", "").replace("-", "")
-        if not cleaned.isdigit() or len(cleaned) != 6:
-            raise ValueError("code must be exactly 6 digits")
+        if not cleaned.isdigit() or len(cleaned) != 4:
+            raise ValueError("code must be exactly 4 digits")
         return cleaned
 
 

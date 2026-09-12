@@ -96,7 +96,7 @@ export default function AdminApp() {
             />
           </label>
           {error && (
-            <p role="alert" className="mt-3 text-sm text-red-700" data-testid="admin-error">
+            <p role="alert" className="mt-3 text-sm text-error" data-testid="admin-error">
               {error}
             </p>
           )}
@@ -220,12 +220,12 @@ function SettingsTab({ token }: { token: string }) {
             >
               ذخیره
             </button>
-            {saved === key && <span className="text-sm text-green-700">ذخیره شد ✓</span>}
+            {saved === key && <span className="text-sm text-success">ذخیره شد ✓</span>}
           </div>
         </section>
       ))}
       {error && (
-        <p role="alert" className="text-sm text-red-700">
+        <p role="alert" className="text-sm text-error">
           {error}
         </p>
       )}
@@ -319,7 +319,7 @@ function OrgsTab({ token }: { token: string }) {
       {msg && (
         <tfoot>
           <tr>
-            <td colSpan={4} className="p-3 text-green-700">
+            <td colSpan={4} className="p-3 text-success">
               {msg}
             </td>
           </tr>
@@ -366,7 +366,7 @@ function RequestsTab({ token }: { token: string }) {
 
   return (
     <div className="space-y-3">
-      {msg && <p className="text-sm text-green-700">{msg}</p>}
+      {msg && <p className="text-sm text-success">{msg}</p>}
       {items.length === 0 && <p className="text-sm text-neutral-600">درخواستی ثبت نشده است.</p>}
       {items.map((r) => (
         <div
@@ -383,14 +383,14 @@ function RequestsTab({ token }: { token: string }) {
             <div className="flex gap-2">
               <button
                 type="button"
-                className="rounded-control bg-green-600 px-3 py-1 text-sm font-bold text-white"
+                className="rounded-control bg-success px-3 py-1 text-sm font-bold text-white"
                 onClick={() => decide(r.id, true)}
               >
                 تأیید
               </button>
               <button
                 type="button"
-                className="rounded-control bg-red-600 px-3 py-1 text-sm font-bold text-white"
+                className="rounded-control bg-error px-3 py-1 text-sm font-bold text-white"
                 onClick={() => decide(r.id, false)}
               >
                 رد

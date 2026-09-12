@@ -125,7 +125,7 @@ def test_reset_request_unknown_mobile_is_generic_and_silent(client):
 
 def test_reset_verify_unknown_mobile_no_disclosure(client):
     response = client.post(
-        f"{AUTH}/password/reset-verify", json={"mobile": "+989120000000", "code": "123456"}
+        f"{AUTH}/password/reset-verify", json={"mobile": "+989120000000", "code": "1234"}
     )
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "OTP_INVALID"
@@ -138,7 +138,7 @@ def test_reset_wrong_code_counts_attempts_and_locks(client):
     assert _request_reset(client, mobile).status_code == 200
     for _ in range(5):
         response = client.post(
-            f"{AUTH}/password/reset-verify", json={"mobile": mobile, "code": "000000"}
+            f"{AUTH}/password/reset-verify", json={"mobile": mobile, "code": "0000"}
         )
     assert response.status_code == 429
     assert response.json()["error"]["code"] == "OTP_LOCKED"

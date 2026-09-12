@@ -1,8 +1,17 @@
+import { FolderOpen, FolderSearch, House, Server, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, clearToken } from "../api/client";
+import { AuthBrand, Field, PanelHead, StepsList, Stepper } from "../components/auth/parts";
+import { Banner } from "../components/ui/banner";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { faNum } from "../utils/format";
 
-// 04/05/06/07 mockups — the automatic steps run in order; the ingestion folder
-// is the only user input (US-007). «شروع گفتگو» ends onboarding (US-008 later).
+// 04/05/06/07 mockups — the automatic steps (workspace, brain) run in order
+// behind the stepper, then the ingestion folder card (06) is the only user
+// input (US-007); «شروع گفتگو» ends onboarding (US-008 later). 07-complete is
+// skipped because the server flips next_step to "chat" and App navigates
+// straight to the chat area.
 interface Status {
   organization_status: string;
   workspace_ready: boolean;
@@ -81,66 +90,124 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
     }
   }
 
-  if (busy && !status) {
-    return <Card><p className="text-sm text-neutral-600">در حال راه‌اندازی فضای کاری و هوش سازمان…</p></Card>;
-  }
-
-  if (status?.next_step === "expired") {
-    return (
-      <Card>
-        <h1 className="text-lg font-bold">ثبت‌نام این سازمان منقضی شد</h1>
-        <p className="mt-2 text-sm text-neutral-600">سازمان در بازه‌ی مجاز تکمیل نشد. از ابتدا ثبت‌نام کنید.</p>
-        <button onClick={() => { clearToken(); location.reload(); }} className="mt-4 rounded-control border border-neutral-200 px-4 py-2 text-sm">
-          بازگشت به ورود
-        </button>
-      </Card>
-    );
-  }
+  const stage = !status ? "workspace" : !status.workspace_ready ? "workspace" : !status.brain_ready ? "brain" : "folder";
 
   return (
-    <Card>
-      <h1 className="text-lg font-bold">تعیین فولدر اسناد</h1>
-      <p className="mt-1 text-sm text-neutral-600">
-        مسیر یک فولدر روی همین سرور را وارد کنید؛ اسناد آن به دانش سازمان اضافه می‌شود.
-      </p>
-      <div className="mt-4 flex gap-2">
-        <input
-          dir="ltr"
-          value={folder}
-          onChange={(e) => setFolder(e.target.value)}
-          placeholder="C:/HiveOS/Documents"
-          className="flex-1 rounded-control border border-neutral-200 px-3 py-2 text-left"
-        />
-        <button onClick={checkFolder} disabled={busy || !folder} className="rounded-control bg-navy-600 px-4 py-2 font-bold text-white disabled:opacity-60">
-          بررسی
-        </button>
-      </div>
-      {error && <div className="mt-3 rounded-control bg-error-bg p-3 text-sm text-error">{error}</div>}
-      {checked && (
-        <div className="mt-4 rounded-control bg-success-bg p-3 text-sm text-success">
-          {fileCount !== null && fileCount > 0
-            ? `پوشه ثبت شد؛ ${fileCount} فایل شناسایی شد و برای پردازش به صف رفت.`
-            : "پوشه ثبت شد؛ در انتظار فایل است. می‌توانید همین حالا گفتگو را شروع کنید."}
-        </div>
-      )}
-      {checked && (
-        <div className="mt-4 flex gap-2">
-          <button onClick={scanNow} disabled={busy} className="rounded-control border border-neutral-200 px-4 py-2 text-sm disabled:opacity-60">
-            پویش اکنون
-          </button>
-          <button onClick={() => onStatus(status!)} className="flex-1 rounded-control bg-navy-600 py-2 font-bold text-white">
-            شروع گفتگو
-          </button>
-        </div>
-      )}
-    </Card>
-  );
-}
+    <section aria-label="راه‌اندازی سازمان">
+      <AuthBrand title="راه‌اندازی سازمان" subtitle="چند گام کوتاه تا گفتگو با هوش سازمان." />
+      <Stepper current={stage === "workspace" ? 4 : stage === "brain" ? 5 : 6} />
 
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <section className="mx-auto w-full max-w-md rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
-      {children}
+      {status?.next_step === "expired" && (
+        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+          <PanelHead icon={FolderOpen} tone="error" title="ثبت‌نام این سازمان منقضی شد" />
+          <p className="text-[13px] text-neutral-600">سازمان در بازه‌ی مجاز تکمیل نشد. از ابتدا ثبت‌نام کنید.</p>
+          <Button variant="secondary" className="mt-4" onClick={() => { clearToken(); location.reload(); }}>
+            بازگشت به ورود
+          </Button>
+        </div>
+      )}
+
+      {status?.next_step !== "expired" && stage === "workspace" && (
+        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+          <PanelHead icon={Server} tone="violet" title="در حال آماده‌سازی فضای کار" hint="گام ۴ از ۶" />
+          <p className="mb-2 text-[13px] text-neutral-600">این مرحله خودکار انجام می‌شود؛ چند لحظه صبر کنید.</p>
+          <StepsList
+            items={[
+              { name: "ایجاد فضای کار", state: busy ? "active" : "done", marker: "۱" },
+              { name: "اعمال تنظیمات اولیه", state: busy ? "active" : "done", marker: "۲" },
+              { name: "آماده‌سازی فضای ذخیره‌سازی", state: busy ? "active" : "done", marker: "۳" },
+            ]}
+          />
+          {error && (
+            <div className="mt-4">
+              <Banner tone="error" title="راه‌اندازی فضای کار ناموفق بود.">{error}</Banner>
+            </div>
+          )}
+        </div>
+      )}
+
+      {status?.next_step !== "expired" && stage === "brain" && (
+        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+          <PanelHead icon={Sparkles} tone="teal" title="در حال ساخت هوش سازمان" hint="گام ۵ از ۶" />
+          <p className="mb-2 text-[13px] text-neutral-600">
+            مخزن دانش ساخته می‌شود؛ تا پایان این مرحله، توصیف کسب‌وکار شما پاسخ‌گوی اولیه است.
+          </p>
+          <StepsList
+            items={[
+              { name: "ایجاد مخزن دانش", state: busy ? "active" : "done", marker: "۱" },
+              { name: "در حال پیکربندی", state: busy ? "active" : "done", marker: "۲" },
+              { name: "به‌کارگیری مدل", state: busy ? "active" : "done", marker: "۳" },
+            ]}
+          />
+          {error && (
+            <div className="mt-4">
+              <Banner tone="error" title="ساخت هوش سازمان ناموفق بود.">{error}</Banner>
+            </div>
+          )}
+        </div>
+      )}
+
+      {status?.next_step !== "expired" && stage === "folder" && (
+        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+          <PanelHead icon={FolderSearch} tone="amber" title="تعیین پوشه اسناد" hint="گام ۶ از ۶" />
+          <p className="mb-4 text-[13px] text-neutral-600">
+            مسیر یک پوشه روی همین سرور را وارد کنید؛ اسناد آن به دانش سازمان اضافه می‌شود.
+          </p>
+
+          {/* الگوی folder-pick ماک‌آپ (بازبینی پنجم): ردیف پوشه + مسیر mono */}
+          <Field label="مسیر پوشه اسناد" required hint="مثلاً C:\HiveOS\Documents یا /srv/hive-docs">
+            <div className="flex items-center gap-3 rounded-[12px] border border-neutral-200 bg-neutral-0 p-2.5 ps-3">
+              <span
+                aria-hidden
+                className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-amber-soft text-amber"
+              >
+                <FolderOpen className="size-5" />
+              </span>
+              <Input
+                dir="ltr"
+                value={folder}
+                onChange={(e) => setFolder(e.target.value)}
+                placeholder="C:/HiveOS/Documents"
+                className="flex-1 border-0 font-mono text-[13px] shadow-none focus:ring-0"
+                aria-label="مسیر پوشه اسناد"
+              />
+              <Button size="sm" onClick={checkFolder} loading={busy} disabled={!folder.trim()}>
+                بررسی و ثبت
+              </Button>
+            </div>
+          </Field>
+
+          <Banner tone="info">
+            فایل‌های این پوشه در پویش بعدی (حداکثر هر ۳۰ دقیقه) شناسایی و پردازش می‌شوند. برای پردازش فوری از
+            «پویش اکنون» استفاده کنید.
+          </Banner>
+
+          {error && (
+            <div className="mt-4">
+              <Banner tone="error" title="ثبت پوشه ناموفق بود.">{error}</Banner>
+            </div>
+          )}
+          {checked && (
+            <div className="mt-4">
+              <Banner tone="success" title={`پوشه ثبت شد${fileCount !== null && fileCount > 0 ? ` — ${faNum(fileCount)} فایل شناسایی شد و برای پردازش به صف رفت.` : "؛ در انتظار فایل است."}`}>
+                می‌توانید همین حالا گفتگو را شروع کنید.
+              </Banner>
+            </div>
+          )}
+
+          {checked && (
+            <div className="mt-5 flex gap-2.5">
+              <Button variant="secondary" onClick={scanNow} loading={busy}>
+                پویش اکنون
+              </Button>
+              <Button className="flex-1" onClick={() => { if (status) onStatus(status); }}>
+                <House aria-hidden className="rtl:-scale-x-100" />
+                شروع گفتگو
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

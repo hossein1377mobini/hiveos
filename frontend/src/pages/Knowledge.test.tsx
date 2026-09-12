@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Knowledge from "./Knowledge";
 
@@ -40,8 +40,10 @@ describe("Knowledge page (RG-04/05 UI)", () => {
     expect(screen.getByTestId("asset-status-queued")).toHaveTextContent("در صف");
     expect(screen.getByTestId("asset-status-failed")).toHaveTextContent("ناموفق");
     expect(screen.getByText("PARSE_FAILED")).toBeInTheDocument();
-    expect(screen.getByTestId("upload")).toBeInTheDocument();
     expect(screen.getByText("پویش اکنون")).toBeInTheDocument();
+    // Upload button lives inside the «افزودن سند» dialog (mockup pattern).
+    fireEvent.click(screen.getByText("افزودن سند"));
+    expect(await screen.findByTestId("upload")).toBeInTheDocument();
   });
 
   it("shows the empty state", async () => {

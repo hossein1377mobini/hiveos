@@ -64,7 +64,7 @@ describe("bootstrap flow (T-S1-9)", () => {
       },
     });
     render(<App />);
-    expect(await screen.findByText("تعیین فولدر اسناد")).toBeInTheDocument();
+    expect(await screen.findByText("تعیین پوشه اسناد")).toBeInTheDocument();
   });
 
   it("goes straight to the chat area when onboarding is complete", async () => {
@@ -82,7 +82,7 @@ describe("bootstrap flow (T-S1-9)", () => {
     });
     render(<App />);
     expect(
-      await screen.findByText("سوال خود را بپرسید؛ پاسخ بر اساس دانش سازمان داده می‌شود."),
+      await screen.findByText("سوال خود را درباره سازمان یا اسناد آن بپرسید. پاسخ‌ها با ارجاع به منابع داده می‌شوند."),
     ).toBeInTheDocument();
   });
 

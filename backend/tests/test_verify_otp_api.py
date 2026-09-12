@@ -88,7 +88,7 @@ def test_verify_accepts_persian_digits(client):
 
 def test_verify_wrong_code_counts_attempts_and_keeps_state(client):
     token = _bootstrap_with_otp(client)
-    response = client.post(f"{AUTH}/verify-otp", json={"code": "000001"}, headers=_headers(token))
+    response = client.post(f"{AUTH}/verify-otp", json={"code": "0001"}, headers=_headers(token))
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "OTP_INVALID"
     assert "Remaining attempts: 4" in response.json()["error"]["message"]
@@ -112,7 +112,7 @@ def test_verify_locks_after_max_attempts(client):
     token = _bootstrap_with_otp(client)
     statuses = []
     for _ in range(5):
-        response = client.post(f"{AUTH}/verify-otp", json={"code": "000001"}, headers=_headers(token))
+        response = client.post(f"{AUTH}/verify-otp", json={"code": "0001"}, headers=_headers(token))
         body = response.json()
         statuses.append((response.status_code, body.get("error", {}).get("code"), body.get("error", {}).get("message")))
     assert response.status_code == 429, f"statuses={statuses}"
@@ -143,7 +143,7 @@ def test_verify_expired_code_rejected_then_resend_works(client, fast_otp):  # no
     with engine.begin() as conn:
         conn.execute(text("UPDATE hiveos.otp_verifications SET expires_at = now() - interval '1 minute'"))
     engine.dispose()
-    response = client.post(f"{AUTH}/verify-otp", json={"code": "123456"}, headers=_headers(token))
+    response = client.post(f"{AUTH}/verify-otp", json={"code": "1234"}, headers=_headers(token))
     assert response.status_code == 410
     assert response.json()["error"]["code"] == "OTP_EXPIRED"
 
@@ -160,7 +160,7 @@ def test_verify_without_active_code_404(client):
     with engine.begin() as conn:
         conn.execute(text("UPDATE hiveos.otp_verifications SET consumed_at = now()"))
     engine.dispose()
-    response = client.post(f"{AUTH}/verify-otp", json={"code": "123456"}, headers=_headers(token))
+    response = client.post(f"{AUTH}/verify-otp", json={"code": "1234"}, headers=_headers(token))
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "OTP_NOT_FOUND"
 

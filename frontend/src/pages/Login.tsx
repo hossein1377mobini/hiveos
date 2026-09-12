@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, ApiError, setToken } from "../api/client";
+import { sanitizeUsernameInput, usernameError } from "../utils/username";
 
 interface LoginData {
   user_id: string;
@@ -63,7 +64,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="auth-page mx-auto w-full max-w-[420px]">
+    <div className="auth-page w-full">
       <div className="brand mb-5 text-center">
         <span className="logo-box inline-flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-navy-600 text-white shadow-[0_8px_20px_rgba(43,58,115,0.25)] [&>svg]:h-[26px] [&>svg]:w-[26px]">
           {HOUSE_SVG}
@@ -85,20 +86,25 @@ export default function Login({ onDone }: { onDone: () => void }) {
               placeholder="manager.ar"
               autoComplete="username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              minLength={3}
+              maxLength={50}
+              onChange={(e) => setUsername(sanitizeUsernameInput(e.target.value))}
               required
             />
+            {username.length > 0 && usernameError(username) && (
+              <p className="mt-1.5 text-[12px] text-error">{usernameError(username)}</p>
+            )}
           </div>
 
           <div className="mb-[18px]">
             <label className="mb-1.5 block text-[13px] font-bold">
               رمز عبور <span className="text-error">*</span>
             </label>
-            <div className="relative">
+            <div className="relative" dir="ltr">
               <input
                 type={showPw ? "text" : "password"}
                 dir="ltr"
-                className="w-full rounded-[10px] border border-neutral-200 bg-neutral-0 px-[13px] py-[11px] pe-11 text-left text-[14px] transition-colors placeholder:text-neutral-400 focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50"
+                className="w-full rounded-[10px] border border-neutral-200 bg-neutral-0 px-[13px] py-[11px] pe-12 text-left text-[14px] transition-colors placeholder:text-neutral-400 focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50"
                 placeholder="••••••••"
                 autoComplete="current-password"
                 value={password}
@@ -109,7 +115,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
                 type="button"
                 aria-label="نمایش رمز"
                 onClick={() => setShowPw((v) => !v)}
-                className="absolute end-2 top-1/2 -translate-y-1/2 rounded-[6px] p-1 text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-600"
+                className="absolute end-3 top-1/2 -translate-y-1/2 rounded-[6px] p-1 text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-600"
               >
                 <span className="block h-5 w-5 [&>svg]:h-5 [&>svg]:w-5">{EYE_SVG}</span>
               </button>

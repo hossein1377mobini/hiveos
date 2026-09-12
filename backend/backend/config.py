@@ -81,9 +81,10 @@ class Settings(BaseSettings):
     # SMS provider (ADR-022: gateway credentials come from environment, never git;
     # the PO enters service keys via the admin panel US-1601/1605).
     sms_provider: str = Field(default="mock", pattern="^(mock|melipayamak)$")
-    melipayamak_username: str | None = None
-    melipayamak_password: str | None = None
-    melipayamak_sender: str | None = None
+    # ADR-016 amendment 2026-09-08: the console OTP service id (credential of
+    # console.melipayamak.com/api/send/otp/{serviceId}); Melipayamak generates
+    # and sends the 4-digit code itself.
+    melipayamak_otp_service_id: str | None = None
     # T-S0-5 review R5-1: the old non-empty default made the staging/prod fail-fast
     # validator unreachable (default always filled the field). Staging/prod without
     # DATABASE_URL must now fail loudly at startup instead of silently targeting
@@ -137,11 +138,9 @@ class Settings(BaseSettings):
     def _require_sms_credentials_when_real_provider(self) -> "Settings":
         # Fail fast on a misconfigured gateway instead of failing every OTP send
         # silently (US-003 FR-007 requires explicit, never silent, failures).
-        if self.sms_provider == "melipayamak" and not (
-            self.melipayamak_username and self.melipayamak_password and self.melipayamak_sender
-        ):
+        if self.sms_provider == "melipayamak" and not self.melipayamak_otp_service_id:
             raise ValueError(
-                "MELIPAYAMAK_USERNAME / MELIPAYAMAK_PASSWORD / MELIPAYAMAK_SENDER"
+                "MELIPAYAMAK_OTP_SERVICE_ID"
                 " must be set when SMS_PROVIDER=melipayamak"
             )
         return self
