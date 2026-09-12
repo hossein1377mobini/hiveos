@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError, setToken } from "../api/client";
 import { sanitizeUsernameInput, usernameError } from "../utils/username";
+import { Surface } from "../components/ui/surface";
 
 interface LoginData {
   user_id: string;
@@ -53,11 +54,9 @@ export default function Login({ onDone }: { onDone: () => void }) {
       // code, not with a Persian message string.
       const wasLocked = e instanceof ApiError && e.code === "ACCOUNT_LOCKED";
       setLocked(wasLocked);
-      setError(
-        wasLocked
-          ? "ورود موقتاً قفل شد. ۱۵ دقیقه بعد دوباره تلاش کنید."
-          : "نام کاربری یا رمز عبور درست نیست. دوباره تلاش کنید.",
-      );
+      // PO request: never replace the real cause (lockout, rate limit, server
+      // down) with a canned "wrong password" - show the mapped Persian text.
+      setError(e instanceof Error ? e.message : "ورود ناموفق بود؛ دوباره تلاش کنید.");
     } finally {
       setBusy(false);
     }
@@ -73,7 +72,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
         <p className="mt-1 text-[13px] text-neutral-600">با نام کاربری و رمز عبور حساب خود وارد شوید.</p>
       </div>
 
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+      <Surface className="p-7">
         <form onSubmit={submit} noValidate={false}>
           <div className="mb-[18px]">
             <label className="mb-1.5 block text-[13px] font-bold">
@@ -149,7 +148,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
             {busy ? "در حال ورود…" : "ورود"}
           </button>
         </form>
-      </div>
+      </Surface>
     </div>
   );
 }

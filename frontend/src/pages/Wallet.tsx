@@ -1,11 +1,13 @@
 import { ArrowDownLeft, ArrowUpRight, CircleAlert, Search, Wallet as WalletIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { RetryNotice } from "../components/ui/retry";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import { faDateTime, faNum, norm } from "../utils/format";
+import { Surface } from "../components/ui/surface";
 
 // 12-ai-access/02-wallet.html at mockup fidelity: page-head, wallet-hero navy
 // card, charge card, transactions card with live search + pagination, zero-
@@ -47,36 +49,52 @@ export default function Wallet() {
   const [sent, setSent] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [sending, setSending] = useState(false);
+
+  // PO request: a failed load shows the server's own Persian explanation plus
+  // a «تلاش مجدد» button, instead of a dead "..." screen.
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      setState(await api<WalletState>("GET", "/wallet"));
+    } catch (e) {
+      setState(null);
+      setError(e instanceof Error ? e.message : "دریافت وضعیت کیف پول ناموفق بود.");
+    }
+  }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        setState(await api<WalletState>("GET", "/wallet"));
-      } catch {
-        setError("دریافت وضعیت کیف پول ناموفق بود.");
-      }
-    })();
-  }, []);
+    void load();
+  }, [load]);
 
   async function submitChargeRequest(e: React.FormEvent) {
     e.preventDefault();
+    // D7: without a guard a double click files the same charge request twice.
+    if (sending) return;
     setError(null);
     const value = amount === "custom" ? Number(customAmount) : amount;
     if (!value || value < 1) return;
+    setSending(true);
+    setSent(false);
     try {
       await api("POST", "/wallet/charge-request", { amount: value, note: note || null });
       setSent(true);
       setState(await api<WalletState>("GET", "/wallet"));
-    } catch {
-      setError("ثبت درخواست شارژ ناموفق بود.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ثبت درخواست شارژ ناموفق بود.");
+    } finally {
+      setSending(false);
     }
   }
 
   const filtered = useMemo(() => {
     if (!state) return [];
+    // D7: a payload without 'transactions' used to throw on the next line and
+    // white-screen the page.
+    const transactions = state.transactions ?? [];
     const q = norm(search);
-    if (!q) return state.transactions;
-    return state.transactions.filter((t) =>
+    if (!q) return transactions;
+    return transactions.filter((t) =>
       norm(faNum(t.amount) + " " + t.amount + " " + t.kind + " " + faDateTime(t.created_at)).includes(q),
     );
   }, [state, search]);
@@ -86,7 +104,10 @@ export default function Wallet() {
   const pageItems = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
 
   if (!state) {
-    return <p className="text-sm text-neutral-600">{error ?? "در حال بارگذاری…"}</p>;
+    if (error) {
+      return <RetryNotice message={error} onRetry={() => void load()} testId="wallet-retry" />;
+    }
+    return <p className="text-sm text-neutral-600">در حال بارگذاری…</p>;
   }
 
   const blocked = state.blocked;
@@ -99,12 +120,12 @@ export default function Wallet() {
           <p className="mt-[3px] text-[13px] text-neutral-600">اعتبار هوش سازمان و تراکنش‌های شارژ.</p>
         </div>
         <div className="ms-auto flex items-center gap-2">
-          <Button
+          <LoadingButton
             size="sm"
             onClick={() => document.getElementById("charge-request")?.scrollIntoView({ behavior: "smooth" })}
           >
             شارژ حساب
-          </Button>
+          </LoadingButton>
         </div>
       </div>
 
@@ -147,7 +168,7 @@ export default function Wallet() {
       <form
         onSubmit={submitChargeRequest}
         id="charge-request"
-        className="rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card"
+        className="rounded-card border border-border bg-card p-6 shadow-card"
         aria-label="درخواست شارژ"
       >
         <h2 className="text-[15px] font-extrabold text-neutral-900">شارژ حساب</h2>
@@ -217,13 +238,13 @@ export default function Wallet() {
             aria-label="توضیح تراکنش"
           />
         </div>
-        <Button type="submit" className="mt-4">
+        <LoadingButton type="submit" className="mt-4" loading={sending} disabled={sending}>
           ثبت درخواست شارژ
-        </Button>
+        </LoadingButton>
       </form>
 
       {/* تراکنش‌ها (mockup §۲۱ .txn) */}
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
+      <Surface className="p-6">
         <h2 className="mb-3 text-[15px] font-extrabold text-neutral-900">تراکنش‌ها</h2>
         <div className="relative mb-3">
           <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
@@ -286,20 +307,20 @@ export default function Wallet() {
             نمایش {faNum(pageItems.length)} از {faNum(filtered.length)} تراکنش
           </span>
           <div className="flex gap-2">
-            <Button variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            <LoadingButton variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
               قبلی
-            </Button>
-            <Button
+            </LoadingButton>
+            <LoadingButton
               variant="secondary"
               size="xs"
               disabled={safePage >= pageCount - 1}
               onClick={() => setPage(safePage + 1)}
             >
               بعدی
-            </Button>
+            </LoadingButton>
           </div>
         </div>
-      </div>
+      </Surface>
 
       <p className="flex items-start gap-2 text-[11px] text-neutral-400">
         <CircleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />

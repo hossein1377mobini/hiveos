@@ -72,7 +72,12 @@ async def replace_chunks(
     Returns the created rows so the embedding step (T-S2-6) can fill the
     vectors in place.
     """
-    await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.asset_id == asset.id))
+    await session.execute(
+        delete(KnowledgeChunk).where(
+            KnowledgeChunk.asset_id == asset.id,
+            KnowledgeChunk.organization_id == asset.organization_id,  # ADR-024
+        )
+    )
     chunks = chunk_text(normalized)
     now = datetime.now(UTC)
     rows: list[KnowledgeChunk] = []

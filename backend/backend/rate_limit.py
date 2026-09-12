@@ -22,10 +22,19 @@ class SlidingWindowLimiter:
         self.window_seconds = window_seconds
         self._events: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
+        self._calls = 0
+
+    # D4: a public HTTP listener sees a fresh key for every scanner/bot that
+    # ever connects, and an expired deque was never dropped - the dict grew
+    # without bound. Sweep idle keys occasionally.
+    _SWEEP_EVERY = 512
 
     def allow(self, key: str, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
         with self._lock:
+            self._calls += 1
+            if self._calls % self._SWEEP_EVERY == 0:
+                self._sweep(now)
             window = self._events[key]
             while window and now - window[0] > self.window_seconds:
                 window.popleft()
@@ -33,6 +42,16 @@ class SlidingWindowLimiter:
                 return False
             window.append(now)
             return True
+
+    def _sweep(self, now: float) -> None:
+        """Drop keys whose window has fully expired (caller holds the lock)."""
+        stale = [
+            key
+            for key, window in self._events.items()
+            if not window or now - window[-1] > self.window_seconds
+        ]
+        for key in stale:
+            del self._events[key]
 
     def reset(self) -> None:
         """Drop all counters (used by the test suite between tests)."""

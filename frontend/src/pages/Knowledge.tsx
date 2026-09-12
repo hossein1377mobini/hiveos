@@ -1,14 +1,17 @@
 import { CircleAlert, FileText, FolderOpen, RefreshCw, Search, UploadCloud, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api/client";
-import { Badge } from "../components/ui/badge";
+import { ApiError, api } from "../api/client";
+import { StatusBadge } from "../components/ui/status-badge";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
-import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { LoadingButton } from "../components/ui/button-loading";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { DialogBody } from "../components/ui/dialog-body";
 import { Input } from "../components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { RetryNotice } from "../components/ui/retry";
 import { cn } from "../lib/utils";
 import { faNum, humanSize, norm } from "../utils/format";
+import { Surface } from "../components/ui/surface";
 
 // 02-knowledge/01-knowledge-home.html at mockup fidelity: page-head with
 // پویش اکنون/افزودن سند, source card (folder icon, active badge, auto-scan
@@ -41,7 +44,7 @@ const STATUS_FA: Record<string, string> = {
   deleted: "حذف‌شده",
 };
 
-const STATUS_VARIANT: Record<string, "success" | "error" | "info" | "warning" | "neutral"> = {
+const STATUS_TONE: Record<string, "success" | "error" | "info" | "warning" | "neutral"> = {
   ready: "success",
   failed: "error",
   deleted: "neutral",
@@ -49,7 +52,10 @@ const STATUS_VARIANT: Record<string, "success" | "error" | "info" | "warning" | 
   processing: "info",
 };
 
-const ACCEPTED = ".pdf,.docx,.txt,.md,.csv";
+// Must stay identical to the server's US-205 table (backend/knowledge/assets.py):
+// an extension the picker offers but the server refuses is a broken promise.
+const ACCEPTED =
+  ".txt,.md,.pdf,.docx,.pptx,.xlsx,.csv,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp";
 
 type TabKey = "all" | "ready" | "processing" | "queued" | "failed";
 const PAGE_SIZE = 8;
@@ -70,6 +76,8 @@ export default function Knowledge() {
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const reload = useCallback(async () => {
     const [a, j, s] = await Promise.all([
       api<{ assets: Asset[] }>("GET", "/knowledge/assets"),
@@ -81,11 +89,22 @@ export default function Knowledge() {
     setSource(
       s && "id" in s ? { id: String(s.id), path: String(s.path ?? ""), status: String(s.status ?? "") } : null,
     );
+    setLoadError(null);
   }, []);
 
-  useEffect(() => {
-    reload().catch(() => setError("دریافت وضعیت دانش ناموفق بود."));
+  // PO request: the server's Persian reason stays visible and a retry button
+  // replaces the empty page when the first load fails.
+  const refresh = useCallback(async () => {
+    try {
+      await reload();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "دریافت وضعیت دانش ناموفق بود.");
+    }
   }, [reload]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   async function upload() {
     if (picked.length === 0) {
@@ -98,19 +117,15 @@ export default function Knowledge() {
     try {
       const form = new FormData();
       for (const f of picked) form.append("files", f);
-      const token = localStorage.getItem("hiveos.session");
-      const response = await fetch("/api/v1/knowledge/upload", {
-        method: "POST",
-        headers: { Authorization: "Bearer " + token },
-        body: form,
-      });
-      if (!response.ok) throw new Error("upload failed");
+      await api("POST", "/knowledge/upload", form);
       setNotice("فایل‌ها در صف پردازش قرار گرفتند.");
       setPicked([]);
       setDialogOpen(false);
       await reload();
-    } catch {
-      setError("آپلود ناموفق بود.");
+    } catch (exc) {
+      // D6: keep the server's reason (size cap, format, quota) instead of a
+      // generic message that hides it.
+      setError(exc instanceof ApiError ? exc.message : "آپلود ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -119,12 +134,14 @@ export default function Knowledge() {
   async function scanNow() {
     if (!source) return;
     setBusy(true);
+    setError(null);
+    setNotice(null);
     try {
       await api("POST", "/knowledge/" + source.id + "/scan");
       setNotice("پویش دستی اجرا شد.");
       await reload();
-    } catch {
-      setError("پویش ناموفق بود.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "پویش ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -132,12 +149,14 @@ export default function Knowledge() {
 
   async function classify(assetId: string) {
     setBusy(true);
+    setError(null);
+    setNotice(null);
     try {
       await api("POST", "/knowledge/assets/" + assetId + "/classify");
       setNotice("دسته‌بندی سند اجرا شد.");
       await reload();
-    } catch {
-      setError("دسته‌بندی ناموفق بود.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "دسته‌بندی ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -182,14 +201,14 @@ export default function Knowledge() {
         </div>
         <div className="ms-auto flex items-center gap-2">
           {source && (
-            <Button variant="secondary" size="sm" onClick={scanNow} loading={busy}>
+            <LoadingButton variant="secondary" size="sm" onClick={scanNow} loading={busy}>
               <RefreshCw aria-hidden />
               پویش اکنون
-            </Button>
+            </LoadingButton>
           )}
-          <Button size="sm" onClick={() => setDialogOpen(true)}>
+          <LoadingButton size="sm" onClick={() => setDialogOpen(true)}>
             افزودن سند
-          </Button>
+          </LoadingButton>
         </div>
       </div>
 
@@ -203,10 +222,20 @@ export default function Knowledge() {
           <Banner tone="error" data-testid="knowledge-error">{error}</Banner>
         </div>
       )}
+      {loadError && (
+        <div className="mb-4">
+          <RetryNotice
+            message={loadError}
+            onRetry={() => void refresh()}
+            testId="knowledge-retry"
+            compact
+          />
+        </div>
+      )}
 
       {/* کارت منبع پوشه (mockup) */}
       {source && (
-        <div className="mb-4 rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
+        <Surface className="mb-4 p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span
@@ -223,9 +252,9 @@ export default function Knowledge() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Badge variant="success" size="lg" dot>
+              <StatusBadge tone="success" className="px-3.5 py-[5px] text-xs" dot>
                 {source.status === "active" ? "فعال" : source.status}
-              </Badge>
+              </StatusBadge>
               <span className="text-[11px] text-neutral-400">پویش خودکار هر ۳۰ دقیقه</span>
             </div>
           </div>
@@ -235,7 +264,7 @@ export default function Knowledge() {
               برای پردازش فوری از «پویش اکنون» استفاده کنید یا سند را مستقیم از رایانه اضافه کنید.
             </Banner>
           </div>
-        </div>
+        </Surface>
       )}
 
       {/* آمار (stat-card, mockup §۲۱) */}
@@ -247,7 +276,7 @@ export default function Knowledge() {
       </div>
 
       {/* tabs + search (mockup §۱۷) */}
-      <div className="mb-4 rounded-card border border-neutral-200 bg-neutral-0 p-4 shadow-card">
+      <Surface className="mb-4 p-4">
         <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setPage(0); }}>
           <TabsList>
             <TabsTrigger value="all">
@@ -298,10 +327,10 @@ export default function Knowledge() {
             ))}
           </select>
         </div>
-      </div>
+      </Surface>
 
       {/* جدول اسناد (mockup §۸) */}
-      <div className="overflow-x-auto rounded-card border border-neutral-200 bg-neutral-0 shadow-card">
+      <Surface className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-neutral-200 text-[12px] text-neutral-400">
@@ -330,9 +359,9 @@ export default function Knowledge() {
                     {humanSize(a.size_bytes)}
                   </td>
                   <td className="p-3" data-testid={"asset-status-" + a.status}>
-                    <Badge variant={STATUS_VARIANT[a.status] ?? "neutral"} dot>
+                    <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"} dot>
                       {STATUS_FA[a.status] ?? a.status}
-                    </Badge>
+                    </StatusBadge>
                     {failedCode && (
                       <div className="mt-1 font-mono text-[10.5px] text-error" dir="ltr">
                         {failedCode}
@@ -341,9 +370,9 @@ export default function Knowledge() {
                   </td>
                   <td className="p-3 pe-5 text-end">
                     {a.status === "queued" && (
-                      <Button variant="secondary" size="xs" onClick={() => classify(a.id)} disabled={busy}>
+                      <LoadingButton variant="secondary" size="xs" onClick={() => classify(a.id)} disabled={busy}>
                         دسته‌بندی
-                      </Button>
+                      </LoadingButton>
                     )}
                   </td>
                 </tr>
@@ -366,9 +395,9 @@ export default function Knowledge() {
                         : "با «افزودن سند» یا قرار دادن فایل در پوشه اسناد، پردازش آغاز می‌شود."}
                     </p>
                     {!search && tab === "all" && format === "all" && (
-                      <Button size="sm" className="mt-4" onClick={() => setDialogOpen(true)}>
+                      <LoadingButton size="sm" className="mt-4" onClick={() => setDialogOpen(true)}>
                         افزودن سند
-                      </Button>
+                      </LoadingButton>
                     )}
                   </div>
                 </td>
@@ -381,15 +410,15 @@ export default function Knowledge() {
             نمایش {faNum(pageItems.length)} از {faNum(filtered.length)} سند
           </span>
           <div className="flex gap-2">
-            <Button variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            <LoadingButton variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
               قبلی
-            </Button>
-            <Button variant="secondary" size="xs" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
+            </LoadingButton>
+            <LoadingButton variant="secondary" size="xs" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
               بعدی
-            </Button>
+            </LoadingButton>
           </div>
         </div>
-      </div>
+      </Surface>
 
       {/* Dialog افزودن سند — الگوی آپلود متعارف ماک‌آپ (بازبینی سوم) */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -455,12 +484,12 @@ export default function Knowledge() {
             )}
           </DialogBody>
           <DialogFooter>
-            <Button variant="secondary" size="sm" onClick={() => setDialogOpen(false)}>
+            <LoadingButton variant="secondary" size="sm" onClick={() => setDialogOpen(false)}>
               انصراف
-            </Button>
-            <Button size="sm" onClick={upload} loading={busy} disabled={picked.length === 0} data-testid="upload">
+            </LoadingButton>
+            <LoadingButton size="sm" onClick={upload} loading={busy} disabled={picked.length === 0} data-testid="upload">
               {picked.length > 0 ? `افزودن به پردازش (${faNum(picked.length)})` : "افزودن به پردازش"}
-            </Button>
+            </LoadingButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

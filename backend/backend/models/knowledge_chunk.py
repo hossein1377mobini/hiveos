@@ -7,7 +7,7 @@ these rows with T-S2-6.
 
 import uuid
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -47,8 +47,10 @@ class KnowledgeChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    # US-212 (T-S2-6): bge-m3 dense vector; NULL until the embedding step runs.
-    embedding: Mapped[object | None] = mapped_column(Vector(1024))
+    # US-212 (T-S2-6): 1024-dim dense vector; NULL until embedding runs.
+    # halfvec (float16) since migration 0025 - half the bytes of vector at a
+    # measured recall loss under 1% at this width.
+    embedding: Mapped[object | None] = mapped_column(HALFVEC(1024))
     created_at: Mapped[object | None] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

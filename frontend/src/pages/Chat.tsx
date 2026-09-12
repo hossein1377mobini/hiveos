@@ -1,7 +1,7 @@
 import { AlertCircle, Copy, FileText, House, Plus, Search, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
 import { ZeroCreditBanner } from "./Wallet";
 import { faDate, faTime, norm } from "../utils/format";
@@ -68,6 +68,7 @@ export default function Chat() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastSentRef = useRef<string>("");
+  const activeIdRef = useRef<string | null>(null);
 
   const loadSessions = useCallback(async () => {
     const data = await api<{ sessions: SessionItem[] }>("GET", "/chat/sessions");
@@ -76,30 +77,45 @@ export default function Chat() {
   }, []);
 
   const openSession = useCallback(async (id: string) => {
+    activeIdRef.current = id;
     setActiveId(id);
-    const data = await api<{ messages: ChatMessage[] }>(
-      "GET",
-      "/chat/sessions/" + id + "/messages",
-    );
-    setMessages(data.messages ?? []);
+    try {
+      const data = await api<{ messages: ChatMessage[] }>(
+        "GET",
+        "/chat/sessions/" + id + "/messages",
+      );
+      // Two fast rail clicks can land out of order: keep only the newest answer.
+      if (activeIdRef.current !== id) return;
+      setMessages(data.messages ?? []);
+      setError(null);
+    } catch (e) {
+      if (activeIdRef.current !== id) return;
+      setError(e instanceof Error ? e.message : "دریافت پیام‌های گفتگو ناموفق بود.");
+    }
   }, []);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const list = await loadSessions();
-        if (list.length > 0) await openSession(list[0].id);
-      } catch {
-        setError("دریافت گفتگوها ناموفق بود.");
-      }
-      try {
-        const w = await api<WalletMini>("GET", "/wallet");
-        setWallet({ balance: w.balance, blocked: w.blocked });
-      } catch {
-        /* wallet view shows the error itself */
-      }
-    })();
+  // PO request: the first load can fail (server down, expired session); the
+  // page keeps the Persian reason and offers «تلاش مجدد» instead of an empty rail.
+  const bootstrap = useCallback(async () => {
+    try {
+      const list = await loadSessions();
+      if (list.length > 0) await openSession(list[0].id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "دریافت گفتگوها ناموفق بود.");
+    }
+    try {
+      const w = await api<WalletMini>("GET", "/wallet");
+      setWallet({ balance: w.balance, blocked: w.blocked });
+    } catch (e) {
+      // F: swallowing this left 'blocked' at its old value — the composer and
+      // the zero-credit banner could both contradict the real balance.
+      setError(e instanceof Error ? e.message : "دریافت وضعیت اعتبار ناموفق بود.");
+    }
   }, [loadSessions, openSession]);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
@@ -109,16 +125,19 @@ export default function Chat() {
     try {
       const data = await api<{ id: string }>("POST", "/chat/sessions", {});
       await loadSessions();
+      activeIdRef.current = data.id;
       setActiveId(data.id);
       setMessages([]);
-    } catch {
-      setError("ساخت گفتگو ناموفق بود.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ساخت گفتگو ناموفق بود.");
     }
   }
 
-  async function send(e?: React.FormEvent) {
+  async function send(e?: React.FormEvent, override?: string) {
     e?.preventDefault();
-    const text = input.trim();
+    // The retry button passes the failed text explicitly: reading 'input' here
+    // would see the already-cleared state and the retry would silently no-op.
+    const text = (override ?? input).trim();
     if (!text || !activeId || busy) return;
     lastSentRef.current = text;
     setInput("");
@@ -144,8 +163,8 @@ export default function Chat() {
       await openSession(activeId);
       const w = await api<WalletMini>("GET", "/wallet");
       setWallet({ balance: w.balance, blocked: w.blocked });
-    } catch {
-      setError("ارسال پیام ناموفق بود.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "ارسال پیام ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -174,10 +193,10 @@ export default function Chat() {
         aria-label="فهرست گفتگوها"
       >
         <div className="flex gap-2 border-b border-neutral-200 p-3.5">
-          <Button size="sm" className="flex-1" onClick={newChat}>
+          <LoadingButton size="sm" className="flex-1" onClick={newChat}>
             <Plus aria-hidden />
             گفتگوی جدید
-          </Button>
+          </LoadingButton>
         </div>
         <div className="border-b border-neutral-200 px-3.5 py-2.5">
           <div className="relative">
@@ -358,11 +377,29 @@ export default function Chat() {
               <AlertCircle aria-hidden className="mt-0.5 size-[17px] shrink-0" />
               <div>
                 {error}
-                {lastSentRef.current && !busy && (
+                {lastSentRef.current && !busy ? (
                   <div className="mt-2">
-                    <Button variant="secondary" size="xs" onClick={() => { setInput(lastSentRef.current); void send(); }}>
+                    <LoadingButton
+                      variant="secondary"
+                      size="xs"
+                      data-testid="chat-retry"
+                      onClick={() => void send(undefined, lastSentRef.current)}
+                    >
                       تلاش مجدد
-                    </Button>
+                    </LoadingButton>
+                  </div>
+                ) : (
+                  // A failed FIRST load (sessions/wallet) has no text to resend:
+                  // the way out is reloading the page data.
+                  <div className="mt-2">
+                    <LoadingButton
+                      variant="secondary"
+                      size="xs"
+                      data-testid="chat-reload"
+                      onClick={() => void bootstrap()}
+                    >
+                      تلاش مجدد
+                    </LoadingButton>
                   </div>
                 )}
               </div>

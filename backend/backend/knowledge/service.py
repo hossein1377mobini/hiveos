@@ -22,6 +22,7 @@ from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.db import audit_session_factory
+from backend.knowledge.assets import ALLOWED_EXTENSIONS
 from backend.knowledge.processing import enqueue_job
 from backend.models import (
     KnowledgeAsset,
@@ -101,7 +102,8 @@ def validate_folder(path_text: str) -> Path:
     if not path.is_dir():
         raise ApiError(400, "INGESTION_PATH_NOT_FOUND", "The folder does not exist.")
     try:
-        next(iter(os.scandir(path)), None)
+        with os.scandir(path) as entries:
+            next(iter(entries), None)
     except OSError as exc:
         raise ApiError(
             400, "INGESTION_PATH_NOT_READABLE", "The server cannot read this folder."
@@ -127,6 +129,7 @@ def _walk_fingerprints(root: Path) -> dict[str, tuple[str, int]]:
     """
     found: dict[str, tuple[str, int]] = {}
     resolved_root = root.resolve(strict=False)
+    limit_hit = False
     for current_root, _dirs, files in os.walk(root):
         # B4 (external review): skip anything that resolves outside the root
         # (junction/symlink escape mid-walk).
@@ -138,6 +141,11 @@ def _walk_fingerprints(root: Path) -> dict[str, tuple[str, int]]:
             except OSError:
                 continue
             rel = full.relative_to(root).as_posix()
+            # PO decision 2026-09-12: the folder scan applies the SAME US-205
+            # format table as the upload path - an off-list file is skipped
+            # instead of entering the pipeline (and the review queue).
+            if full.suffix.lstrip(".").lower() not in ALLOWED_EXTENSIONS:
+                continue
             try:
                 stat = full.stat()
             except OSError:
@@ -147,7 +155,13 @@ def _walk_fingerprints(root: Path) -> dict[str, tuple[str, int]]:
             ).hexdigest()
             found[rel] = (digest, stat.st_size)
             if len(found) >= _SCAN_FILE_LIMIT:
-                return found
+                # E: this used to 'return found' from inside the os.walk loop,
+                # which closed the generator early and leaked its directory
+                # handle. Break out and let the loop finish normally.
+                limit_hit = True
+                break
+        if limit_hit:
+            break
     return found
 
 
@@ -436,16 +450,24 @@ async def find_due_sources(session: AsyncSession, now: datetime) -> list[Knowled
     for source in rows:
         if source.last_scanned_at is None:
             continue  # initial scan happens at registration
-        elapsed = (now - source.last_scanned_at.replace(tzinfo=UTC)).total_seconds() / 60.0
+        # E: stamping tzinfo unconditionally shifts an already-aware value by
+        # the server offset, which silently stops scheduled scans forever.
+        last = source.last_scanned_at
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        elapsed = (now - last).total_seconds() / 60.0
         if elapsed >= source.scan_interval_minutes:
             due.append(source)
     return due
 
 
 def _payload(source: KnowledgeSource, files_state) -> dict:
+    label = source.path_label or source.path
     return {
         "id": source.id,
-        "path": source.path,
+        "path": label,
+        "path_label": label,
+        "source_type": source.source_type,
         "status": source.status,
         "file_state": files_state,  # 'pending_files' (scenario 3) or the discovered count
         "scan_interval_minutes": source.scan_interval_minutes,

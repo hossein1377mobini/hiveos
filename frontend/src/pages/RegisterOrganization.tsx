@@ -3,10 +3,11 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { AuthBrand, Field, PanelHead, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { cn } from "../lib/utils";
+import { Surface } from "../components/ui/surface";
 
 // 01-register-organization.html — US-001 merged path (US-001/006). Three
 // in-card panels (اطلاعات / توصیف / دسترسی هوش) behind the global stepper,
@@ -71,7 +72,7 @@ export default function RegisterOrganization({
       <AuthBrand title="ساخت سازمان" subtitle="سازمان جدید را در چند گام کوتاه تنظیم کنید." />
       <Stepper current={1} />
 
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+      <Surface className="p-7">
         {step === 0 && (
           <div>
             <PanelHead icon={Building2} title="اطلاعات سازمان" hint="گام ۱ از ۳" />
@@ -124,10 +125,10 @@ export default function RegisterOrganization({
               </div>
             )}
             <div className="mt-6 flex items-center gap-2.5">
-              <Button className="flex-1" onClick={() => setStep(1)} disabled={name.trim().length < 3 || !industry}>
+              <LoadingButton className="flex-1" onClick={() => setStep(1)} disabled={name.trim().length < 3 || !industry}>
                 ادامه
                 <ChevronLeft aria-hidden className="rtl:-scale-x-100" />
-              </Button>
+              </LoadingButton>
             </div>
           </div>
         )}
@@ -151,14 +152,14 @@ export default function RegisterOrganization({
               </div>
             )}
             <div className="mt-6 flex items-center gap-2.5">
-              <Button variant="ghost" onClick={() => setStep(0)}>
+              <LoadingButton variant="ghost" onClick={() => setStep(0)}>
                 <ChevronRight aria-hidden className="rtl:-scale-x-100" />
                 قبلی
-              </Button>
-              <Button className="flex-1" onClick={() => setStep(2)} disabled={businessDescription.trim().length === 0}>
+              </LoadingButton>
+              <LoadingButton className="flex-1" onClick={() => setStep(2)} disabled={businessDescription.trim().length === 0}>
                 ادامه
                 <ChevronLeft aria-hidden className="rtl:-scale-x-100" />
-              </Button>
+              </LoadingButton>
             </div>
           </div>
         )}
@@ -197,13 +198,13 @@ export default function RegisterOrganization({
               </div>
             )}
             <div className="mt-6 flex items-center gap-2.5">
-              <Button variant="ghost" onClick={() => setStep(1)}>
+              <LoadingButton variant="ghost" onClick={() => setStep(1)}>
                 <ChevronRight aria-hidden className="rtl:-scale-x-100" />
                 قبلی
-              </Button>
-              <Button className="flex-1" onClick={submit} loading={busy}>
+              </LoadingButton>
+              <LoadingButton className="flex-1" onClick={submit} loading={busy}>
                 ساخت سازمان
-              </Button>
+              </LoadingButton>
             </div>
             <button
               type="button"
@@ -214,7 +215,7 @@ export default function RegisterOrganization({
             </button>
           </div>
         )}
-      </div>
+      </Surface>
     </section>
   );
 }

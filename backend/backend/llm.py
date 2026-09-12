@@ -98,8 +98,9 @@ async def agenerate(session: AsyncSession, model: str, prompt: str, context: str
         return result
 
     if provider == "openai-compatible":
-        base_url = (pricing.get("base_url") or "").rstrip("/")
-        api_key = pricing.get("api_key") or ""
+        # Panel-first, env as the bootstrap fallback (PO 2026-09-12).
+        base_url = (pricing.get("base_url") or get_settings().llm_base_url or "").rstrip("/")
+        api_key = pricing.get("api_key") or get_settings().llm_api_key or ""
         if not base_url or not api_key:
             raise ApiError(
                 503,

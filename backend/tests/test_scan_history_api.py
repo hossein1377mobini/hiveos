@@ -183,6 +183,6 @@ def test_find_due_sources_respects_interval(client, tmp_path):
 
     import asyncio
 
-    fresh, due = asyncio.get_event_loop().run_until_complete(_probe())
+    fresh, due = asyncio.run(_probe())
     assert fresh == []  # just scanned by registration
     assert len(due) == 1 and str(due[0].id) == ctx["source_id"]  # 31 min >= 30 min interval

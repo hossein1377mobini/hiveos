@@ -3,11 +3,12 @@ import { useEffect, useState } from "react";
 import { api, setToken } from "../api/client";
 import { AuthBrand, Field, PanelHead, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import { normDigits } from "../utils/format";
 import { sanitizeUsernameInput, usernameError } from "../utils/username";
+import { Surface } from "../components/ui/surface";
 
 // 02-owner-account.html — US-002: first account + role assignment. Global
 // stepper at step ۲, panel head, +98 mobile input group (design-system §6),
@@ -15,9 +16,12 @@ import { sanitizeUsernameInput, usernameError } from "../utils/username";
 export default function OwnerAccount({
   organizationId,
   onDone,
+  onBack,
 }: {
   organizationId: string;
   onDone: (sessionToken: string) => void;
+  /** PO request: step back to the previous screen of the signup flow. */
+  onBack?: () => void;
 }) {
   const [username, setUsername] = useState("");
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -33,18 +37,24 @@ export default function OwnerAccount({
       setAvailable(null);
       return;
     }
+    let stale = false;
     const timer = setTimeout(async () => {
       try {
         const data = await api<{ available: boolean }>(
           "GET",
           `/auth/username-available?username=${encodeURIComponent(username)}`,
         );
-        setAvailable(data.available);
+        // F: a slow answer for an earlier prefix used to overwrite the verdict
+        // for what the user has typed since ("آزاد نیست" on a free name).
+        if (!stale) setAvailable(data.available);
       } catch {
-        setAvailable(null);
+        if (!stale) setAvailable(null);
       }
     }, 400);
-    return () => clearTimeout(timer);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
   }, [username]);
 
   const checks = [
@@ -93,7 +103,7 @@ export default function OwnerAccount({
       <AuthBrand title="حساب مدیر سازمان" subtitle="حساب اول سازمان و نقش مدیر را بسازید." />
       <Stepper current={2} />
 
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+      <Surface className="p-7">
         <PanelHead icon={UserRound} title="حساب مدیر سازمان" hint="گام ۲ از ۶" />
         <form onSubmit={submit}>
           <Field
@@ -187,12 +197,22 @@ export default function OwnerAccount({
               <Banner tone="error">{error}</Banner>
             </div>
           )}
-          <Button type="submit" className="w-full" loading={busy}>
+          <LoadingButton type="submit" className="w-full" loading={busy}>
             <ShieldCheck aria-hidden />
             ایجاد حساب و دریافت کد تأیید
-          </Button>
+          </LoadingButton>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              data-testid="owner-back"
+              className="mt-3 w-full cursor-pointer text-center text-xs text-neutral-600 underline-offset-4 hover:underline"
+            >
+              بازگشت
+            </button>
+          )}
         </form>
-      </div>
+      </Surface>
     </section>
   );
 }

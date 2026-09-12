@@ -1,21 +1,23 @@
-import { forwardRef, type LabelHTMLAttributes } from "react";
-import { cn } from "../../lib/utils";
+"use client"
 
-// HiveOS label — mockup §۶ (13px, bold, 6px margin). Plain element: no Radix
-// primitive needed for a static label (shadcn equates it anyway).
-const Label = forwardRef<HTMLLabelElement, LabelHTMLAttributes<HTMLLabelElement>>(
-  ({ className, ...props }, ref) => (
-    <label
-      ref={ref}
+import * as React from "react"
+import { cn } from "@/lib/utils"
+import { Label as LabelPrimitive } from "radix-ui"
+
+function Label({
+  className,
+  ...props
+}: React.ComponentProps<typeof LabelPrimitive.Root>) {
+  return (
+    <LabelPrimitive.Root
+      data-slot="label"
       className={cn(
-        "block text-[13px] font-bold text-neutral-900 select-none",
-        "peer-disabled:cursor-not-allowed peer-disabled:opacity-50",
-        className,
+        "flex items-center gap-2 text-sm leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50",
+        className
       )}
       {...props}
     />
-  ),
-);
-Label.displayName = "Label";
+  )
+}
 
-export { Label };
+export { Label }

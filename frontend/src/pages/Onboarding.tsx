@@ -1,17 +1,21 @@
-import { FolderOpen, FolderSearch, House, Server, Sparkles } from "lucide-react";
+import { FolderOpen, FolderSearch, House, RefreshCw, Server, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, clearToken } from "../api/client";
 import { AuthBrand, Field, PanelHead, StepsList, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
+import { syncClientFolder } from "../lib/folderSync";
+import { rememberFolder, startAutoSync, stopAutoSync } from "../lib/autoSync";
+import { isDesktop, pickFolder } from "../lib/desktop";
 import { faNum } from "../utils/format";
+import { Surface } from "../components/ui/surface";
 
 // 04/05/06/07 mockups — the automatic steps (workspace, brain) run in order
 // behind the stepper, then the ingestion folder card (06) is the only user
-// input (US-007); «شروع گفتگو» ends onboarding (US-008 later). 07-complete is
-// skipped because the server flips next_step to "chat" and App navigates
-// straight to the chat area.
+// input (US-007); «شروع گفتگو» ends onboarding. In the cloud client the folder
+// is on the owner's own machine (ADR-023), so step 06 opens a native picker and
+// syncs the file listing; the server-side path variant stays for on-prem.
 interface Status {
   organization_status: string;
   workspace_ready: boolean;
@@ -20,13 +24,27 @@ interface Status {
   next_step: string;
 }
 
+interface SyncSummary {
+  files: number;
+  added: number;
+  skipped: number;
+  rejected: number;
+  failed: number;
+}
+
 export default function Onboarding({ onStatus }: { onStatus: (status: Status) => void }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [folder, setFolder] = useState("");
   const [checked, setChecked] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
   const [fileCount, setFileCount] = useState<number | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [summary, setSummary] = useState<SyncSummary | null>(null);
+  // The browser build cannot open a native picker; it keeps the manual path
+  // field so an admin on a laptop is not blocked.
+  const desktop = isDesktop();
 
   async function refresh(): Promise<Status> {
     const next = await api<Status>("GET", "/auth/onboarding-status");
@@ -43,7 +61,8 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
         if (!next.workspace_ready) await api("POST", "/workspaces/initialize");
         const now = await refresh();
         if (!now.brain_ready) await api("POST", "/brain/initialize");
-        await refresh();
+        const ready = await refresh();
+        if (ready.knowledge_source?.path) setFolder(ready.knowledge_source.path);
         setBusy(false);
       } catch (e) {
         setError(e instanceof Error ? e.message : "خطا");
@@ -53,12 +72,73 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // PO request: the client keeps the folder in sync on its own. The loop asks
+  // the server for the cadence, so the 30-minute interval stays an admin-panel
+  // setting; manual sync stays available for "now".
+  useEffect(() => {
+    if (!desktop) return;
+    const stop = startAutoSync();
+    return stop;
+  }, [desktop]);
+
+  /** Native picker: pick, register, then sync the listing in one go. */
+  async function chooseFolder() {
+    setError(null);
+    try {
+      const picked = await pickFolder();
+      if (!picked) return; // cancelled - not a failure
+      setFolder(picked);
+      await registerAndSync(picked);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "خطا");
+    }
+  }
+
+  async function registerAndSync(folderPath: string) {
+    setBusy(true);
+    setError(null);
+    setSummary(null);
+    try {
+      // US-007: the folder belongs to the owner's machine, so it is registered
+      // as a client folder (never validated as a path on this server).
+      const data = await api<{ id: string; file_state: string | number }>(
+        "POST",
+        "/knowledge-sources/client-folder",
+        { path: folderPath },
+      );
+      setChecked(data.id);
+      rememberFolder(folderPath); // the background loop picks this folder up
+      setProgress({ done: 0, total: 0 });
+      const result = await syncClientFolder(folderPath, (done, total) =>
+        setProgress({ done, total }),
+      );
+      setFileCount(result.discovered_files);
+      setSummary({
+        files: result.discovered_files,
+        added: result.added,
+        skipped: result.skipped,
+        rejected: result.rejected.length,
+        failed: result.failed.length,
+      });
+      await refresh();
+    } catch (e) {
+      // Local (bridge) failures carry bare codes; give them a Persian reason.
+      setError(localReason(e));
+    } finally {
+      setProgress(null);
+      setBusy(false);
+    }
+  }
+
+  /** «بررسی و ثبت» in the browser/on-prem variant (server-side folder). */
   async function checkFolder() {
+    if (desktop) {
+      await registerAndSync(folder.trim());
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      // US-007 FR-002: «بررسی» = validate before registration (register is
-      // idempotent for the single v0.1 folder; a failed register leaves nothing).
       const data = await api<{ id: string; file_state: string | number }>(
         "POST",
         "/knowledge-sources",
@@ -77,16 +157,50 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
   async function scanNow() {
     if (!status?.knowledge_source) return;
     setBusy(true);
+    setError(null);
     try {
-      const data = await api<{ file_state: string | number }>(
-        "POST",
-        `/knowledge-sources/${status.knowledge_source.id}/scan`,
-      );
-      if (typeof data.file_state === "number") setFileCount(data.file_state);
+      if (desktop) {
+        const result = await syncClientFolder(folder, (done, total) =>
+          setProgress({ done, total }),
+        );
+        setFileCount(result.discovered_files);
+        setSummary({
+          files: result.discovered_files,
+          added: result.added,
+          skipped: result.skipped,
+          rejected: result.rejected.length,
+          failed: result.failed.length,
+        });
+      } else {
+        const data = await api<{ file_state: string | number }>(
+          "POST",
+          "/knowledge-sources/" + status.knowledge_source.id + "/scan",
+        );
+        if (typeof data.file_state === "number") setFileCount(data.file_state);
+      }
+    } catch (e) {
+      setError(localReason(e));
+    } finally {
+      setProgress(null);
+      setBusy(false);
+    }
+  }
+
+  // F: "شروع گفتگو" only re-published the status it already had, so with the
+  // server still on next_step "knowledge_source" the click did nothing at all.
+  // Ask the server again; the shell leaves this screen when it answers "chat".
+  async function startChat() {
+    setStarting(true);
+    setError(null);
+    try {
+      const next = await refresh();
+      if (next.next_step !== "chat") {
+        setError("برای شروع گفتگو، پوشه اسناد را ثبت کنید.");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "خطا");
     } finally {
-      setBusy(false);
+      setStarting(false);
     }
   }
 
@@ -98,17 +212,17 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       <Stepper current={stage === "workspace" ? 4 : stage === "brain" ? 5 : 6} />
 
       {status?.next_step === "expired" && (
-        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+        <Surface className="p-7">
           <PanelHead icon={FolderOpen} tone="error" title="ثبت‌نام این سازمان منقضی شد" />
           <p className="text-[13px] text-neutral-600">سازمان در بازه‌ی مجاز تکمیل نشد. از ابتدا ثبت‌نام کنید.</p>
-          <Button variant="secondary" className="mt-4" onClick={() => { clearToken(); location.reload(); }}>
+          <LoadingButton variant="secondary" className="mt-4" onClick={() => { stopAutoSync(); clearToken(); location.reload(); }}>
             بازگشت به ورود
-          </Button>
-        </div>
+          </LoadingButton>
+        </Surface>
       )}
 
       {status?.next_step !== "expired" && stage === "workspace" && (
-        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+        <Surface className="p-7">
           <PanelHead icon={Server} tone="violet" title="در حال آماده‌سازی فضای کار" hint="گام ۴ از ۶" />
           <p className="mb-2 text-[13px] text-neutral-600">این مرحله خودکار انجام می‌شود؛ چند لحظه صبر کنید.</p>
           <StepsList
@@ -121,13 +235,17 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
           {error && (
             <div className="mt-4">
               <Banner tone="error" title="راه‌اندازی فضای کار ناموفق بود.">{error}</Banner>
+              <LoadingButton variant="secondary" className="mt-3" onClick={() => location.reload()}>
+                <RefreshCw aria-hidden />
+                تلاش مجدد
+              </LoadingButton>
             </div>
           )}
-        </div>
+        </Surface>
       )}
 
       {status?.next_step !== "expired" && stage === "brain" && (
-        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+        <Surface className="p-7">
           <PanelHead icon={Sparkles} tone="teal" title="در حال ساخت هوش سازمان" hint="گام ۵ از ۶" />
           <p className="mb-2 text-[13px] text-neutral-600">
             مخزن دانش ساخته می‌شود؛ تا پایان این مرحله، توصیف کسب‌وکار شما پاسخ‌گوی اولیه است.
@@ -142,21 +260,31 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
           {error && (
             <div className="mt-4">
               <Banner tone="error" title="ساخت هوش سازمان ناموفق بود.">{error}</Banner>
+              <LoadingButton variant="secondary" className="mt-3" onClick={() => location.reload()}>
+                <RefreshCw aria-hidden />
+                تلاش مجدد
+              </LoadingButton>
             </div>
           )}
-        </div>
+        </Surface>
       )}
 
       {status?.next_step !== "expired" && stage === "folder" && (
-        <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+        <Surface className="p-7">
           <PanelHead icon={FolderSearch} tone="amber" title="تعیین پوشه اسناد" hint="گام ۶ از ۶" />
           <p className="mb-4 text-[13px] text-neutral-600">
-            مسیر یک پوشه روی همین سرور را وارد کنید؛ اسناد آن به دانش سازمان اضافه می‌شود.
+            {desktop
+              ? "پوشه‌ای روی همین کامپیوتر انتخاب کنید؛ اسناد آن به دانش سازمان اضافه می‌شود و هر ۳۰ دقیقه به‌روز می‌شود."
+              : "مسیر یک پوشه روی همین سرور را وارد کنید؛ اسناد آن به دانش سازمان اضافه می‌شود."}
           </p>
 
           {/* الگوی folder-pick ماک‌آپ (بازبینی پنجم): ردیف پوشه + مسیر mono */}
-          <Field label="مسیر پوشه اسناد" required hint="مثلاً C:\HiveOS\Documents یا /srv/hive-docs">
-            <div className="flex items-center gap-3 rounded-[12px] border border-neutral-200 bg-neutral-0 p-2.5 ps-3">
+          <Field
+            label="پوشه اسناد"
+            required
+            hint={desktop ? "با دکمهٔ انتخاب پوشه، مسیر به‌طور خودکار پر می‌شود" : "مثلاً /srv/hive-docs"}
+          >
+            <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-neutral-200 bg-neutral-0 p-2.5 ps-3">
               <span
                 aria-hidden
                 className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-amber-soft text-amber"
@@ -167,29 +295,83 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
                 dir="ltr"
                 value={folder}
                 onChange={(e) => setFolder(e.target.value)}
-                placeholder="C:/HiveOS/Documents"
-                className="flex-1 border-0 font-mono text-[13px] shadow-none focus:ring-0"
+                placeholder={desktop ? "ابتدا پوشه را انتخاب کنید" : "/srv/hive-docs"}
+                readOnly={desktop}
+                className="min-w-40 flex-1 border-0 font-mono text-[13px] shadow-none focus:ring-0"
                 aria-label="مسیر پوشه اسناد"
               />
-              <Button size="sm" onClick={checkFolder} loading={busy} disabled={!folder.trim()}>
-                بررسی و ثبت
-              </Button>
+              {desktop && (
+                <LoadingButton size="sm" variant="secondary" onClick={chooseFolder} disabled={busy}>
+                  <FolderOpen aria-hidden />
+                  انتخاب پوشه
+                </LoadingButton>
+              )}
+              <LoadingButton
+                size="sm"
+                onClick={checkFolder}
+                loading={busy}
+                disabled={!folder.trim()}
+              >
+                {desktop ? "همگام‌سازی" : "بررسی و ثبت"}
+              </LoadingButton>
             </div>
           </Field>
 
           <Banner tone="info">
             فایل‌های این پوشه در پویش بعدی (حداکثر هر ۳۰ دقیقه) شناسایی و پردازش می‌شوند. برای پردازش فوری از
-            «پویش اکنون» استفاده کنید.
+            «همگام‌سازی اکنون» استفاده کنید. حجم هر فایل می‌تواند حداکثر ۲۵ مگابایت باشد.
           </Banner>
+
+          {progress && (
+            <div className="mt-4">
+              <Banner tone="info">
+                {progress.total > 0
+                  ? `در حال ارسال فایل‌ها: ${faNum(progress.done)} از ${faNum(progress.total)}`
+                  : "در حال خواندن فهرست فایل‌های پوشه…"}
+              </Banner>
+            </div>
+          )}
 
           {error && (
             <div className="mt-4">
               <Banner tone="error" title="ثبت پوشه ناموفق بود.">{error}</Banner>
+              <div className="mt-3 flex gap-2.5">
+                {desktop && (
+                  <LoadingButton variant="secondary" onClick={chooseFolder}>
+                    <FolderOpen aria-hidden />
+                    انتخاب پوشه دیگر
+                  </LoadingButton>
+                )}
+                <LoadingButton
+                  variant="secondary"
+                  onClick={() => registerAndSync(folder.trim())}
+                  disabled={!folder.trim()}
+                >
+                  <RefreshCw aria-hidden />
+                  تلاش مجدد
+                </LoadingButton>
+              </div>
             </div>
           )}
-          {checked && (
+
+          {checked && !error && (
             <div className="mt-4">
-              <Banner tone="success" title={`پوشه ثبت شد${fileCount !== null && fileCount > 0 ? ` — ${faNum(fileCount)} فایل شناسایی شد و برای پردازش به صف رفت.` : "؛ در انتظار فایل است."}`}>
+              <Banner
+                tone="success"
+                title={
+                  fileCount !== null && fileCount > 0
+                    ? `پوشه ثبت شد — ${faNum(fileCount)} فایل شناسایی شد.`
+                    : "پوشه ثبت شد؛ در انتظار فایل است."
+                }
+              >
+                {summary && (
+                  <span className="block">
+                    {faNum(summary.added)} فایل جدید به صف پردازش رفت
+                    {summary.skipped > 0 && ` و ${faNum(summary.skipped)} فایل نادیده گرفته شد`}
+                    {summary.rejected > 0 && ` و ${faNum(summary.rejected)} فایل بزرگ‌تر از ۲۵ مگابایت رد شد`}
+                    {summary.failed > 0 && ` و ارسال ${faNum(summary.failed)} فایل ناموفق بود`}.
+                  </span>
+                )}
                 می‌توانید همین حالا گفتگو را شروع کنید.
               </Banner>
             </div>
@@ -197,17 +379,36 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
 
           {checked && (
             <div className="mt-5 flex gap-2.5">
-              <Button variant="secondary" onClick={scanNow} loading={busy}>
-                پویش اکنون
-              </Button>
-              <Button className="flex-1" onClick={() => { if (status) onStatus(status); }}>
+              <LoadingButton variant="secondary" onClick={scanNow} loading={busy}>
+                {desktop ? "همگام‌سازی اکنون" : "پویش اکنون"}
+              </LoadingButton>
+              <LoadingButton className="flex-1" onClick={startChat} loading={starting}>
                 <House aria-hidden className="rtl:-scale-x-100" />
                 شروع گفتگو
-              </Button>
+              </LoadingButton>
             </div>
           )}
-        </div>
+        </Surface>
       )}
     </section>
   );
+}
+
+/** Client-side failures are bare codes: never show them raw to the owner. */
+function localReason(exc: unknown): string {
+  const code = exc instanceof Error ? exc.message : "";
+  const known: Record<string, string> = {
+    CLIENT_BRIDGE_MISSING: "این کار فقط در نسخهٔ ویندوزی برنامه امکان‌پذیر است.",
+    NOT_A_DIRECTORY: "مسیر انتخاب‌شده یک پوشه نیست؛ دوباره انتخاب کنید.",
+    EMPTY_PATH: "ابتدا پوشه را انتخاب کنید.",
+    SCAN_FAILED: "خواندن فهرست فایل‌های پوشه ممکن نشد؛ دوباره تلاش کنید.",
+    TOO_LARGE: "حجم این فایل از ۲۵ مگابایت بیشتر است.",
+    FORMAT_NOT_ALLOWED: "قالب این فایل پشتیبانی نمی‌شود.",
+    PATH_ESCAPE: "دسترسی به این فایل مجاز نیست.",
+    NOT_A_FILE: "این مورد یک فایل نیست.",
+    READ_FAILED: "خواندن این فایل ممکن نشد؛ ممکن است باز یا قفل باشد.",
+  };
+  if (known[code]) return known[code];
+  if (exc instanceof Error && exc.message) return exc.message;
+  return "انجام این کار ممکن نشد؛ دوباره تلاش کنید.";
 }

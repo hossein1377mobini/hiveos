@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { NavId } from "../components/AppShell";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
+import { RetryNotice } from "../components/ui/retry";
 import { faDate, faNum } from "../utils/format";
+import { Surface } from "../components/ui/surface";
 
 // 12-ai-access/04-subscription.html at mockup fidelity (hero status card +
 // «اشتراک و اعتبار» explainer rows). US-1207 minimal model: the plan is
@@ -25,18 +27,28 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
   const [sub, setSub] = useState<Subscription | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const s = await api<{ subscription: Subscription }>("GET", "/auth/onboarding-status");
-        setSub(s.subscription);
-      } catch {
-        setError("دریافت وضعیت اشتراک ناموفق بود.");
-      }
-    })();
+  // PO request: a failed load shows the server's Persian reason + «تلاش مجدد».
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const s = await api<{ subscription: Subscription }>("GET", "/auth/onboarding-status");
+      setSub(s.subscription);
+    } catch (e) {
+      setSub(null);
+      setError(e instanceof Error ? e.message : "دریافت وضعیت اشتراک ناموفق بود.");
+    }
   }, []);
 
-  if (!sub) return <p className="text-sm text-neutral-600">{error ?? "در حال بارگذاری…"}</p>;
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (!sub) {
+    if (error) {
+      return <RetryNotice message={error} onRetry={() => void load()} testId="subscription-retry" />;
+    }
+    return <p className="text-sm text-neutral-600">در حال بارگذاری…</p>;
+  }
 
   const daysLeft = sub.expires_at
     ? Math.max(
@@ -56,9 +68,9 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
           </p>
         </div>
         <div className="ms-auto flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={() => onNavigate?.("wallet")}>
+          <LoadingButton variant="secondary" size="sm" onClick={() => onNavigate?.("wallet")}>
             خرید اعتبار مکمل
-          </Button>
+          </LoadingButton>
         </div>
       </div>
 
@@ -87,7 +99,7 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
       </p>
 
       {/* اشتراک و اعتبار — تفاوت‌ها (setting-row, mockup) */}
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
+      <Surface className="p-6">
         <h2 className="mb-3 text-[15px] font-extrabold text-neutral-900">اشتراک و اعتبار — تفاوت‌ها</h2>
         <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
           <div className="text-[13.5px] font-bold text-neutral-900">اشتراک فعال</div>
@@ -119,7 +131,7 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
             با اعتبار خوش‌آمد — بدون نیاز به اشتراک. مدت و مقدار اعتبار از پنل ادمین تعیین می‌شود.
           </div>
         </div>
-      </div>
+      </Surface>
     </section>
   );
 }

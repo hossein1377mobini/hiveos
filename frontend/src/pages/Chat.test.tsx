@@ -9,9 +9,12 @@ function mockApi(routes: Record<string, unknown>) {
     const key = method + " " + url.replace("/api/v1", "");
     const value = routes[key];
     if (value === undefined) throw new Error("unexpected call: " + key);
-    const body = { success: true, data: value, message: null };
+    const failure = value as { status?: number; code?: string; message?: string };
+    const body = failure.code
+      ? { success: false, error: { code: failure.code, message: failure.message ?? "" } }
+      : { success: true, data: value, message: null };
     return new Response(JSON.stringify(body), {
-      status: 200,
+      status: failure.status ?? 200,
       headers: { "Content-Type": "application/json" },
     });
   });
@@ -22,6 +25,21 @@ function mockApi(routes: Record<string, unknown>) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Chat page (RG-14)", () => {
+  it("reports a failed credit check instead of keeping a stale banner", async () => {
+    mockApi({
+      "GET /chat/sessions": { sessions: [] },
+      "GET /wallet": { status: 500, code: "SERVER_ERROR", message: "boom" },
+    });
+    render(<Chat />);
+    // PO request: the panel shows an explanatory Persian sentence for the
+    // failure - never the server's English "boom", never a stale banner.
+    const box = await screen.findByTestId("chat-error");
+    expect(box).toHaveTextContent("خطای غیرمنتظره در سرور رخ داد");
+    expect(box).not.toHaveTextContent("boom");
+    // ...and a first-load failure still offers a way out.
+    expect(screen.getByTestId("chat-reload")).toBeInTheDocument();
+  });
+
   it("renders messages and disabled composer when wallet is blocked", async () => {
     mockApi({
       "GET /chat/sessions": {

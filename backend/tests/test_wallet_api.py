@@ -51,7 +51,7 @@ def test_zero_balance_blocks_online_execution(client, monkeypatch):
             await session.commit()
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_zero())
+    asyncio.run(_zero())
 
     blocked = client.post(EX, json={"input": {"text": "سلام"}}, headers=ctx["headers"])
     assert blocked.status_code == 402

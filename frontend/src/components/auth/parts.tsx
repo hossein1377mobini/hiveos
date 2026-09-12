@@ -1,24 +1,32 @@
-import { Check, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
-import { cn } from "../../lib/utils";
+import { CheckIcon, type LucideIcon } from "lucide-react"
 
-// Shared building blocks of the 01-bootstrap mockup pages: brand block,
-// global 6-step stepper, panel head, form field, vertical step list.
-// Values follow assets/hiveos.css §۳/§۴/§۵/§۶/«مراحل عمودی».
+
+import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
+import { Field as FieldPrimitive, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { cn } from "@/lib/utils"
+
+/**
+ * Shared building blocks of the 01-bootstrap pages. Each one is a thin, typed
+ * composition over an official shadcn primitive (Field, Item, Separator) so the
+ * shape, spacing scale and RTL behaviour stay in the registry — HiveOS only
+ * supplies the values from design-system §3..§6.
+ */
 
 export function AuthBrand({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <div className="mb-5 text-center">
+    <div className="mb-5 flex flex-col items-center gap-3 text-center">
       <span
         aria-hidden
-        className="inline-flex size-[52px] items-center justify-center rounded-[14px] bg-navy-600 text-white shadow-[0_8px_20px_rgba(43,58,115,0.25)]"
+        className="inline-flex size-[52px] items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-card"
       >
         <HouseLogo className="size-[26px]" />
       </span>
-      <h1 className="mt-3.5 text-[21px] font-extrabold text-neutral-900">{title}</h1>
-      <p className="mt-1 text-[13px] text-neutral-600">{subtitle}</p>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-[21px] font-extrabold text-foreground">{title}</h1>
+        <p className="text-[13px] text-muted-foreground">{subtitle}</p>
+      </div>
     </div>
-  );
+  )
 }
 
 export function HouseLogo({ className }: { className?: string }) {
@@ -27,57 +35,68 @@ export function HouseLogo({ className }: { className?: string }) {
       <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
       <polyline points="9 22 9 12 15 12 15 22" />
     </svg>
-  );
+  )
 }
 
-const STEPS = ["ساخت سازمان", "مدیر", "تأیید کد", "فضای کار", "هوش سازمان", "اسناد"] as const;
+const STEPS = ["ساخت سازمان", "مدیر", "تأیید کد", "فضای کار", "هوش سازمان", "اسناد"] as const
 
 export function Stepper({ current }: { current: number }) {
   return (
-    <div className="mb-[22px] flex items-center gap-0.5 overflow-hidden rounded-[14px] border border-neutral-200 bg-neutral-0 p-3 shadow-card">
+    <div
+      role="group"
+      aria-label="مراحل راه‌اندازی"
+      data-slot="stepper"
+      className="mb-[22px] flex items-center gap-0.5 overflow-hidden rounded-xl border bg-card p-3 shadow-card"
+    >
       {STEPS.map((label, i) => {
-        const n = i + 1;
-        const state = n < current ? "done" : n === current ? "active" : "todo";
+        const n = i + 1
+        const state = n < current ? "done" : n === current ? "active" : "todo"
         return (
           <div key={label} className="contents">
-            {i > 0 && <div className={cn("mx-px h-0.5 min-w-1 flex-1 rounded-[2px]", n <= current ? "bg-success" : "bg-neutral-200")} />}
+            {i > 0 && (
+              <div
+                aria-hidden
+                className={cn("mx-px h-0.5 min-w-1 flex-1 rounded-xs", n <= current ? "bg-success" : "bg-border")}
+              />
+            )}
             <div className="flex shrink-0 items-center gap-[5px]">
               <span
+                data-state={state}
                 className={cn(
                   "inline-flex size-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold",
-                  state === "todo" && "border-neutral-200 bg-neutral-50 text-neutral-400",
-                  state === "active" && "border-navy-600 bg-navy-600 text-white",
+                  state === "todo" && "border-border bg-secondary text-muted-foreground",
+                  state === "active" && "border-primary bg-primary text-primary-foreground",
                   state === "done" && "border-success bg-success text-white",
                 )}
               >
-                {state === "done" ? <Check className="size-3" /> : faDigit(n)}
+                {state === "done" ? <CheckIcon className="size-3" /> : faDigit(n)}
               </span>
               <span
                 className={cn(
                   "whitespace-nowrap text-[11.5px]",
-                  state === "active" ? "font-bold text-navy-600" : state === "done" ? "text-neutral-600" : "text-neutral-400",
+                  state === "active" ? "font-bold text-primary" : state === "done" ? "text-muted-foreground" : "text-muted-foreground/70",
                 )}
               >
                 {label}
               </span>
             </div>
           </div>
-        );
+        )
       })}
     </div>
-  );
+  )
 }
 
-export type PanelTone = "primary" | "teal" | "amber" | "violet" | "success" | "error";
+export type PanelTone = "primary" | "teal" | "amber" | "violet" | "success" | "error"
 
 const TONE_CLASS: Record<PanelTone, string> = {
-  primary: "bg-navy-50 text-navy-600",
+  primary: "bg-info-bg text-info",
   teal: "bg-teal-soft text-teal",
   amber: "bg-amber-soft text-amber",
   violet: "bg-violet-soft text-violet",
   success: "bg-success-bg text-success",
   error: "bg-error-bg text-error",
-};
+}
 
 export function PanelHead({
   icon: Icon,
@@ -86,23 +105,27 @@ export function PanelHead({
   hint,
   center = false,
 }: {
-  icon: LucideIcon;
-  tone?: PanelTone;
-  title: string;
-  hint?: string;
-  center?: boolean;
+  icon: LucideIcon
+  tone?: PanelTone
+  title: string
+  hint?: string
+  center?: boolean
 }) {
   return (
     <div className={cn("mb-5 flex items-center gap-3", center && "justify-center")}>
-      <span aria-hidden className={cn("inline-flex size-[38px] shrink-0 items-center justify-center rounded-[11px]", TONE_CLASS[tone])}>
+      <span aria-hidden className={cn("inline-flex size-[38px] shrink-0 items-center justify-center rounded-lg", TONE_CLASS[tone])}>
         <Icon className="size-[19px]" />
       </span>
-      <h2 className="text-[17px] font-extrabold text-neutral-900">{title}</h2>
-      {hint && <span className="ms-auto whitespace-nowrap text-[11px] text-neutral-400">{hint}</span>}
+      <h2 className="text-[17px] font-extrabold text-foreground">{title}</h2>
+      {hint && <span className="ms-auto whitespace-nowrap text-[11px] text-muted-foreground">{hint}</span>}
     </div>
-  );
+  )
 }
 
+/**
+ * Form field — the official Field/FieldLabel/FieldDescription trio plus the
+ * HiveOS label affordances (required star, «اختیاری» mark).
+ */
 export function Field({
   label,
   required = false,
@@ -111,67 +134,73 @@ export function Field({
   error,
   children,
   className,
+  htmlFor,
 }: {
-  label: ReactNode;
-  required?: boolean;
-  optional?: boolean;
-  hint?: ReactNode;
-  error?: ReactNode;
-  children: ReactNode;
-  className?: string;
+  label: React.ReactNode
+  required?: boolean
+  optional?: boolean
+  hint?: React.ReactNode
+  error?: React.ReactNode
+  children: React.ReactNode
+  className?: string
+  htmlFor?: string
 }) {
   return (
-    <div className={cn("mb-[18px] last:mb-0", className)}>
-      <label className="mb-1.5 block text-[13px] font-bold text-neutral-900">
-        {label} {required && <span className="text-error">*</span>}
-        {optional && <span className="text-[11.5px] font-normal text-neutral-400"> (اختیاری)</span>}
-      </label>
+    <FieldPrimitive data-invalid={error ? true : undefined} className={cn("mb-[18px] gap-1.5 last:mb-0", className)}>
+      <FieldLabel htmlFor={htmlFor} className="w-auto gap-1 text-[13px] font-bold text-foreground">
+        {label}
+        {required && <span className="text-error">*</span>}
+        {optional && <span className="text-[11.5px] font-normal text-muted-foreground">(اختیاری)</span>}
+      </FieldLabel>
       {children}
-      {hint && <div className="mt-[5px] text-xs text-neutral-400">{hint}</div>}
-      {error && <div className="mt-1.5 text-xs text-error">{error}</div>}
-    </div>
-  );
+      {hint && <FieldDescription className="text-xs">{hint}</FieldDescription>}
+      {error && <FieldDescription className="text-xs text-error">{error}</FieldDescription>}
+    </FieldPrimitive>
+  )
 }
 
 export function StepsList({
   items,
 }: {
-  items: ReadonlyArray<{ name: string; desc?: string; state: "done" | "active" | "todo" | "error"; marker?: string }>;
+  items: ReadonlyArray<{ name: string; desc?: string; state: "done" | "active" | "todo" | "error"; marker?: string }>
 }) {
   return (
-    <div>
-      {items.map((item) => (
-        <div key={item.name} className="relative flex gap-3.5 py-3">
-          {!Object.is(items[items.length - 1], item) && (
-            <span aria-hidden className="absolute bottom-0 end-[11px] top-[34px] w-0.5 bg-neutral-200" />
+    <Item variant="default" size="default" className="flex-col gap-0 rounded-none border-0 p-0">
+      {items.map((item, index) => (
+        <div key={item.name} className="contents">
+          {index > 0 && (
+            <span aria-hidden className="ms-[11px] h-2 w-0.5 self-start bg-border" />
           )}
-          <span
-            className={cn(
-              "z-[1] flex size-6 shrink-0 items-center justify-center rounded-full border-2 bg-neutral-0 text-[13px] font-bold",
-              item.state === "todo" && "border-neutral-200 text-neutral-400",
-              item.state === "active" && "border-navy-600 bg-navy-50 text-navy-600",
-              item.state === "done" && "border-success bg-success text-white",
-              item.state === "error" && "border-error bg-error text-white",
-            )}
-          >
-            {item.state === "done" ? <Check className="size-3.5" /> : (item.marker ?? "")}
-          </span>
-          <div className="min-w-0 flex-1 pt-px">
-            <div className="text-sm font-bold text-neutral-900">{item.name}</div>
-            {item.desc && <div className="mt-0.5 text-xs text-neutral-600">{item.desc}</div>}
-          </div>
+          <Item className="items-start gap-3.5 rounded-none border-0 px-0 py-3">
+            <ItemMedia
+              data-state={item.state}
+              className={cn(
+                "flex size-6 shrink-0 items-center justify-center rounded-full border-2 bg-card text-[13px] font-bold",
+                item.state === "todo" && "border-border text-muted-foreground",
+                item.state === "active" && "border-primary bg-info-bg text-primary",
+                item.state === "done" && "border-success bg-success text-white",
+                item.state === "error" && "border-error bg-error text-white",
+              )}
+            >
+              {item.state === "done" ? <CheckIcon className="size-3.5" /> : (item.marker ?? "")}
+            </ItemMedia>
+            <ItemContent className="gap-0.5 pt-px">
+              <ItemTitle className="text-sm font-bold">{item.name}</ItemTitle>
+              {item.desc && <ItemDescription className="text-xs">{item.desc}</ItemDescription>}
+            </ItemContent>
+          </Item>
         </div>
       ))}
-    </div>
-  );
+    </Item>
+  )
 }
 
-const FA = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"];
+const FA = ["۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹"]
 
 /** Integer or digit string → Persian digits (no separators). */
 export function faDigit(n: number | string): string {
   return String(n)
     .split("")
     .map((c) => FA[Number(c)] ?? c)
-    .join("");
+    .join("")
 }

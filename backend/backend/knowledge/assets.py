@@ -10,6 +10,7 @@ FR-008: a source can be disabled/re-enabled; disabled sources accept no
 new queue entries (the scheduler itself is US-202/S2).
 """
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,6 +31,10 @@ ALLOWED_EXTENSIONS = frozenset(
 )
 
 _SCAN_BLOCKED = ("disabled", "failed")
+# US-1606 caps each file; these bound the request itself so one multipart POST
+# cannot fill the disk or the worker's memory.
+MAX_FILES_PER_UPLOAD = 20
+MAX_UPLOAD_REQUEST_MB = 100
 
 
 def _utc_now() -> datetime:
@@ -78,6 +83,12 @@ async def upload_assets(
     """US-201 scenario 5: validate, persist, and queue each file."""
     if not files:
         raise ApiError(400, "UPLOAD_EMPTY", "No files were provided.")
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise ApiError(
+            400,
+            "UPLOAD_TOO_MANY_FILES",
+            f"At most {MAX_FILES_PER_UPLOAD} files can be uploaded at once.",
+        )
 
     source = await _active_source(session, organization.id)
     if source is not None and source.status in _SCAN_BLOCKED:
@@ -89,8 +100,32 @@ async def upload_assets(
     rejected: list[dict] = []
     upload_dir = _storage_dir(organization.id)
 
+    settings = get_settings()
+    per_file_max = settings.upload_max_file_mb * 1024 * 1024
+    request_max = MAX_UPLOAD_REQUEST_MB * 1024 * 1024
+    total_bytes = 0
+
     for upload in files:
+        # US-1606: reject on the declared size BEFORE buffering the body — the
+        # old order read the whole file into memory and only then measured it.
+        declared = getattr(upload, "size", None)
+        if declared is not None and declared > per_file_max:
+            rejected.append(
+                {
+                    "name": upload.filename,
+                    "code": "UPLOAD_TOO_LARGE",
+                    "message": f"File exceeds the {settings.upload_max_file_mb}MB limit.",
+                }
+            )
+            continue
         content = await upload.read()
+        total_bytes += len(content)
+        if total_bytes > request_max:
+            raise ApiError(
+                400,
+                "UPLOAD_TOO_LARGE",
+                f"Upload exceeds the {MAX_UPLOAD_REQUEST_MB}MB request limit.",
+            )
         try:
             extension = _validate_file(upload.filename or "", len(content))
         except ApiError as exc:
@@ -111,8 +146,9 @@ async def upload_assets(
         await session.flush()
 
         target = upload_dir / f"{asset.id}.{extension}"
-        with open(target, "wb") as handle:
-            handle.write(content)
+        # the write is blocking file IO; keep the event loop free to serve
+        # the other requests waiting on this worker.
+        await asyncio.to_thread(target.write_bytes, content)
         asset.storage_path = str(target)
         stored.append(
             {

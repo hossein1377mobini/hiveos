@@ -48,6 +48,14 @@ def _magic(path: Path) -> bytes:
         return handle.read(16)
 
 
+# E: OOXML packages are identified by their main part, not by a directory
+# prefix - a single smuggled "ppt/x" member used to masquerade as a presentation
+# (and could disagree with what python-docx/python-pptx then actually parsed).
+_OOXML_TEXT_PART = "word/document.xml"
+_OOXML_SLIDE_PART = "ppt/presentation.xml"
+_OOXML_SHEET_PART = "xl/workbook.xml"
+
+
 def _sniff(path: Path) -> str:
     """Magic-byte sniffing -> one of ASSET_TYPES (US-205 FR-001)."""
     magic = _magic(path)
@@ -60,11 +68,9 @@ def _sniff(path: Path) -> str:
                 names = bundle.namelist()
         except Exception:  # noqa: BLE001 - broken zip falls through to unknown
             return "unknown"
-        if any(name.startswith("word/") for name in names):
+        if any(name in (_OOXML_TEXT_PART, _OOXML_SLIDE_PART) for name in names):
             return "office"
-        if any(name.startswith("ppt/") for name in names):
-            return "office"
-        if any(name.startswith("xl/") for name in names):
+        if any(name == _OOXML_SHEET_PART for name in names):
             return "spreadsheet"
         return "archive"  # plain zip -> extraction out of scope in v0.1 (US-204)
     if magic.startswith((b"\xff\xd8", b"\x89PNG", b"II*\x00", b"MM\x00*", b"BM")):
@@ -126,15 +132,20 @@ def extract_text(asset: KnowledgeAsset, source_path: str | None = None) -> str:
 
 
 def _extract_text_file(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    # E: Postgres rejects NUL in text columns - a binary file that sniffs as a
+    # text type made the whole worker batch answer "invalid byte sequence".
+    return path.read_text(encoding="utf-8", errors="replace").replace("\x00", "")
 
 
 def _extract_pdf(path: Path) -> str:
     from pypdf import PdfReader
 
+    # E: PdfReader keeps the file open; the worker runs this once per asset per
+    # scan, so leaked handles piled up until the process hit its limit.
     try:
-        reader = PdfReader(str(path))
-        pages = [page.extract_text() or "" for page in reader.pages]
+        with open(path, "rb") as handle:
+            reader = PdfReader(handle)
+            pages = [page.extract_text() or "" for page in reader.pages]
     except Exception as exc:  # noqa: BLE001 - corrupt PDF = failed extraction
         raise ApiError(400, "EXTRACTION_FAILED", "The PDF could not be read.") from exc
     text = "\n".join(pages).strip()
@@ -148,7 +159,7 @@ def _extract_office(path: Path) -> str:
     try:
         with zipfile.ZipFile(path) as bundle:
             names = bundle.namelist()
-        if any(name.startswith("ppt/") for name in names):
+        if _OOXML_SLIDE_PART in names:
             from pptx import Presentation
 
             presentation = Presentation(str(path))
@@ -175,14 +186,18 @@ def _extract_spreadsheet(path: Path) -> str:
         return "\n".join(",".join(row) for row in rows)
     from openpyxl import load_workbook
 
+    # E: a read_only workbook holds its file handle until close().
     workbook = load_workbook(str(path), read_only=True, data_only=True)
-    lines: list[str] = []
-    for sheet in workbook.worksheets:
-        for row in sheet.iter_rows(values_only=True):
-            cells = ["" if value is None else str(value) for value in row]
-            if any(cells):
-                lines.append(",".join(cells))
-    return "\n".join(lines)
+    try:
+        lines: list[str] = []
+        for sheet in workbook.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                cells = ["" if value is None else str(value) for value in row]
+                if any(cells):
+                    lines.append(",".join(cells))
+        return "\n".join(lines)
+    finally:
+        workbook.close()
 
 
 def _extract_ocr(path: Path) -> str:

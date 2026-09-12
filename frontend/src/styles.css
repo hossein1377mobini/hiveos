@@ -4,6 +4,12 @@
    self-hosted IranYekanX license step; air-gapped fallback (Tahoma) is intact. */
 @import url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css");
 @import "tailwindcss";
+/* Preset webfonts (Roboto Slab / DM Sans). Both are Latin-only — no Arabic
+   subset exists — so Persian glyphs always fall through to the Vazirmatn stack. */
+@import "@fontsource-variable/roboto-slab";
+@import "@fontsource-variable/dm-sans";
+
+@custom-variant dark (&:is(.dark *));
 
 @theme {
   /* Neutral palette (design-system §2.1) */
@@ -41,22 +47,57 @@
   --shadow-pop: 0 14px 40px rgba(28, 28, 25, 0.18);
 }
 
-/* shadcn/ui semantic aliases (design-system §2.1) — kept in sync so components
-   can adopt shadcn/ui later without renaming tokens. */
+/* Status tones (design-system §2.3). Tailwind emits bg-success, text-success,
+   border-success, bg-success-bg, ... from these four roles, so every status
+   surface stays one token away from its meaning instead of a literal colour. */
+@theme {
+  --color-info: var(--color-navy-600);
+  --color-info-bg: var(--color-navy-50);
+  --color-info-border: var(--color-navy-200);
+  --color-success-border: #bfe3ce;
+  --color-warning-border: #eed9b6;
+  --color-error-border: #f3c2be;
+}
+
+/* shadcn/ui semantic tokens (design-system §2.1). Every official shadcn
+   component reads these, so the HiveOS palette is expressed once here instead
+   of being re-applied per component. Light mode only (PO decision 2026-08-17). */
 :root {
-  --background: var(--color-neutral-0);
+  --background: var(--color-neutral-50);
   --foreground: var(--color-neutral-900);
   --card: var(--color-neutral-0);
   --card-foreground: var(--color-neutral-900);
+  --popover: var(--color-neutral-0);
+  --popover-foreground: var(--color-neutral-900);
+  /* Navy is the single CTA colour (design-system §2.3) */
   --primary: var(--color-navy-600);
   --primary-foreground: #ffffff;
   --secondary: var(--color-neutral-50);
   --secondary-foreground: var(--color-neutral-900);
-  --muted: var(--color-neutral-400);
+  /* Hover/selected surface inside menus, ghost buttons, table rows */
+  --accent: var(--color-navy-50);
+  --accent-foreground: var(--color-navy-600);
+  --muted: var(--color-neutral-50);
   --muted-foreground: var(--color-neutral-600);
+  --destructive: var(--color-error);
   --border: var(--color-neutral-200);
   --input: var(--color-neutral-200);
   --ring: var(--color-navy-600);
+  --chart-1: var(--color-navy-600);
+  --chart-2: var(--color-teal);
+  --chart-3: var(--color-amber);
+  --chart-4: var(--color-violet);
+  --chart-5: var(--color-success);
+  --sidebar: var(--color-neutral-0);
+  --sidebar-foreground: var(--color-neutral-900);
+  --sidebar-primary: var(--color-navy-600);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--color-navy-50);
+  --sidebar-accent-foreground: var(--color-navy-600);
+  --sidebar-border: var(--color-neutral-200);
+  --sidebar-ring: var(--color-navy-600);
+  /* Geometry — single radius source (design-system §2.4). shadcn sizes are
+     derived from --radius in @theme inline, so 18px cascades to every part. */
   --radius: 18px;
 }
 
@@ -83,4 +124,98 @@ body {
   outline: 2px solid var(--color-navy-600);
   outline-offset: 2px;
   border-radius: var(--radius-control);
+}
+
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.424 0.199 265.638);
+  --primary-foreground: oklch(0.97 0.014 254.604);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --chart-1: oklch(0.828 0.111 230.318);
+  --chart-2: oklch(0.685 0.169 237.323);
+  --chart-3: oklch(0.588 0.158 241.966);
+  --chart-4: oklch(0.5 0.134 242.749);
+  --chart-5: oklch(0.443 0.11 240.79);
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.623 0.214 259.815);
+  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.552 0.016 285.938);
+}
+
+@theme inline {
+  /* Persian first (IranYekanXFaNum → Vazirmatn → Tahoma for air-gapped hosts);
+     Roboto Slab / DM Sans only render the Latin/technical glyphs Vazirmatn lacks. */
+  --font-sans: "IranYekanXFaNum", "Vazirmatn", Tahoma, sans-serif;
+  --font-serif: "IranYekanXFaNum", "Vazirmatn", "Roboto Slab Variable", Tahoma, serif;
+  --font-heading: "IranYekanXFaNum", "Vazirmatn", "DM Sans Variable", Tahoma, sans-serif;
+  --font-mono: Consolas, "Courier New", monospace;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* RTL/Persian baseline: the preset themes <html> with the Latin serif; keep the
+   Persian stack instead so every inherited surface stays Vazirmatn. */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+  }
+  /* Technical identifiers stay LTR even inside RTL copy (mockup §۲ .mono). */
+  .mono {
+    font-family: var(--font-mono);
+    unicode-bidi: embed;
+  }
 }

@@ -11,6 +11,7 @@ import Chat from "./pages/Chat";
 import Knowledge from "./pages/Knowledge";
 import Subscription from "./pages/Subscription";
 import AdminApp from "./admin/AdminApp";
+import { Surface } from "./components/ui/surface";
 
 interface Status {
   organization_status: string;
@@ -26,6 +27,7 @@ type Screen =
   | "chat"
   | "wallet"
   | "knowledge"
+  | "usage"
   | "subscription";
 
 // T-S1-9: bootstrap mockups wired to the API. Step selection follows the server
@@ -101,9 +103,18 @@ export default function App() {
             />
           )}
           {screen === "owner" && (
-            <OwnerAccount organizationId={organizationId ?? ""} onDone={() => setScreen("otp")} />
+            <OwnerAccount
+              organizationId={organizationId ?? ""}
+              onDone={() => setScreen("otp")}
+              onBack={() => setScreen("register")}
+            />
           )}
-          {screen === "otp" && <OtpVerify onVerified={() => setScreen("onboarding")} />}
+          {screen === "otp" && (
+            <OtpVerify
+              onVerified={() => setScreen("onboarding")}
+              onBack={() => setScreen("owner")}
+            />
+          )}
         </div>
       </div>
     );
@@ -125,15 +136,10 @@ export default function App() {
     <AppShell
       active={screen as NavId}
       onNavigate={(id: NavId) =>
-        setScreen(
-          id === "wallet"
-            ? "wallet"
-            : id === "knowledge"
-              ? "knowledge"
-              : id === "subscription"
-                ? "subscription"
-                : "chat",
-        )}
+        // F: every id used to fall back to "chat", so «اعتبار و مصرف» silently
+        // opened the chat page while still highlighting itself in the sidebar.
+        setScreen(id)
+      }
     >
       {screen === "wallet" ? (
         <Wallet />
@@ -143,13 +149,21 @@ export default function App() {
         <Knowledge />
       ) : screen === "subscription" ? (
         <Subscription onNavigate={(id) => setScreen(id as Screen)} />
+      ) : screen === "usage" ? (
+        <Surface className="mx-auto max-w-xl p-6">
+          <h1 className="text-lg font-bold">اعتبار و مصرف</h1>
+          <p className="mt-2 text-sm leading-[1.9] text-neutral-600">
+            گزارش تفصیلی مصرف در نسخه‌ی بعدی اسپرینت‌ها اضافه می‌شود. موجودی و تراکنش‌ها همین حالا
+            در «کیف پول» قابل مشاهده است.
+          </p>
+        </Surface>
       ) : (
-        <section className="mx-auto max-w-xl rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
+        <Surface className="mx-auto max-w-xl p-6">
           <h1 className="text-lg font-bold">خوش آمدید — راه‌اندازی کامل شد</h1>
           <p className="mt-2 text-sm text-neutral-600">
             گفتگو با هوش سازمان در نسخه‌ی بعدی اسپرینت‌ها اضافه می‌شود.
           </p>
-        </section>
+        </Surface>
       )}
     </AppShell>
   );

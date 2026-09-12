@@ -60,6 +60,9 @@ class KnowledgeAsset(Base, TimestampMixin):
     # US-202 scanner bookkeeping (uploads leave these NULL).
     rel_path: Mapped[str | None] = mapped_column(String(500))
     file_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    # US-007 (client folder): when the owner's client last confirmed this file
+    # in its manifest - the server never touches the file itself.
+    manifest_synced_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
     # US-205/US-206 (T-S2-4): classification + extraction output.
     asset_type: Mapped[str | None] = mapped_column(String(15))
     pipeline: Mapped[str | None] = mapped_column(String(20))
