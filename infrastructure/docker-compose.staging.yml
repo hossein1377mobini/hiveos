@@ -10,6 +10,8 @@ services:
   api:
     image: hiveos/api:${IMAGE_TAG:?IMAGE_TAG required}
     container_name: hiveos-api
+    env_file:
+      - .env
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-staging}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
