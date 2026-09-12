@@ -24,10 +24,15 @@ dependencies = [
     "python-docx>=1.2.0",
     "python-multipart>=0.0.32",
     "python-pptx>=1.0.2",
-    "sentence-transformers>=6.0.1",
     "sqlalchemy[asyncio]>=2.0.44",
     "uvicorn[standard]>=0.52.4",
 ]
+
+# Heavy optional ML stack (torch + sentence-transformers ~19GB image). v0.1 uses the
+# deterministic mock embedding provider which never imports it, so it stays out of
+# the base image. Build with --extra local-embeddings for the real BAAI/bge-m3 provider.
+[project.optional-dependencies]
+local-embeddings = ["sentence-transformers>=6.0.1"]
 
 [dependency-groups]
 dev = [
