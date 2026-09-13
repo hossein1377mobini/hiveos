@@ -48,6 +48,19 @@ MELIPAYAMAK_OTP_SERVICE_ID=$SMS_SERVICE_ID
 EOF
 umask 022
 
+# PO decision 2026-09-12: retrieval runs on this host. Defaults live in the
+# compose file; these two let the PO flip a provider without editing the image.
+# Only append when unset, so a PO-set value survives the next deploy.
+grep -q '^EMBEDDING_PROVIDER=' "$APP_DIR/.env" || echo "EMBEDDING_PROVIDER=onnx" >> "$APP_DIR/.env"
+grep -q '^RERANK_PROVIDER=' "$APP_DIR/.env" || echo "RERANK_PROVIDER=onnx" >> "$APP_DIR/.env"
+
+# The int8 graphs the api container mounts read-only. Failing here beats a
+# container that boots and then returns EMBEDDING_UNAVAILABLE on every upload.
+if [[ ! -f /opt/models/bge-m3-onnx/model.onnx ]]; then
+  echo "FATAL: /opt/models/bge-m3-onnx/model.onnx missing - upload the exported models first"
+  exit 1
+fi
+
 # Host dirs bind-mounted into the api container (compose volumes). The api runs as
 # uid 10001, so ownership must match or workspace/brain init fails with 500
 # (WORKSPACE_INITIALIZATION_FAILED) - keep this before compose up.
