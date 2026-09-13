@@ -72,6 +72,26 @@ async def read_setting(session: AsyncSession, key: str) -> dict:
     return (row.value or {}) if row else {}
 
 
+def provider_error(status_code: int, raw: str) -> tuple[int, str, str]:
+    """Translate a provider failure into something the PO can act on.
+
+    HTTP 429 alone is not actionable: the same status covers an exhausted
+    account balance and a genuine rate limit, and the PO needs to know whether
+    to top up the account or slow down. The provider body is never forwarded;
+    only the reason we recognise becomes a code.
+    """
+    lowered = (raw or "").lower()
+    if status_code in (401, 403):
+        return 502, "LLM_PROVIDER_AUTH", f"Provider rejected the key (HTTP {status_code})."
+    if status_code == 402 or "insufficient" in lowered or "quota" in lowered or "balance" in lowered:
+        return 502, "LLM_PROVIDER_CREDIT", "The provider account is out of credit."
+    if status_code == 429:
+        return 502, "LLM_PROVIDER_RATE_LIMIT", "The provider is rate limiting this server."
+    if status_code in (400, 404):
+        return 502, "LLM_PROVIDER_MODEL", f"Provider rejected the request (HTTP {status_code})."
+    return 502, "LLM_PROVIDER_ERROR", f"Provider returned HTTP {status_code}."
+
+
 async def aroute_model(session: AsyncSession, requested_model: str | None) -> str:
     """Allowlist enforcement (US-1601): a model outside the admin allowlist
     falls back to the allowlist default instead of hard-failing the chat."""
@@ -132,11 +152,10 @@ async def agenerate(session: AsyncSession, model: str, prompt: str, context: str
         except httpx.HTTPError as error:
             raise ApiError(502, "LLM_PROVIDER_ERROR", f"Provider unreachable: {error}") from error
         if response.status_code != 200:
-            raise ApiError(
-                502,
-                "LLM_PROVIDER_ERROR",
-                f"Provider returned HTTP {response.status_code}.",
-            )
+            # PO 2026-09-12: an out-of-credit account must not look like a
+            # transient outage - the PO has to know to top the account up.
+            status_code, code, message = provider_error(response.status_code, response.text)
+            raise ApiError(status_code, code, message)
         body = response.json()
         try:
             answer = body["choices"][0]["message"]["content"]

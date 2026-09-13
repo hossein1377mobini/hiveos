@@ -91,6 +91,16 @@ const MESSAGES: Record<string, string> = {
     "سرویس هوش مصنوعی هنوز تنظیم نشده است. کلید و نشانی سرویس را در پنل تنظیمات وارد کنید.",
   LLM_PROVIDER_UNAVAILABLE: "سرویس هوش مصنوعی در دسترس نیست؛ کمی بعد دوباره تلاش کنید.",
   LLM_PROVIDER_ERROR: "سرویس هوش مصنوعی پاسخ نداد؛ کمی بعد دوباره تلاش کنید.",
+  // The provider reports an exhausted balance and a rate limit with the same
+  // HTTP 429, so these stay separate: one means "top up", the other "slow down".
+  LLM_PROVIDER_CREDIT:
+    "اعتبار حساب سرویس هوش مصنوعی تمام شده است. اعتبار سرویس‌دهنده را شارژ کنید و دوباره تلاش کنید.",
+  LLM_PROVIDER_RATE_LIMIT:
+    "سرویس هوش مصنوعی درخواست‌ها را محدود کرده است؛ کمی بعد دوباره تلاش کنید.",
+  LLM_PROVIDER_AUTH:
+    "کلید سرویس هوش مصنوعی پذیرفته نشد. کلید را در پنل تنظیمات بررسی کنید.",
+  LLM_PROVIDER_MODEL:
+    "مدل انتخاب‌شده در سرویس هوش مصنوعی موجود نیست. نام مدل را در پنل بررسی کنید.",
   EMBEDDING_UNAVAILABLE: "سرویس جست‌وجوی معنایی در دسترس نیست.",
 
   // --- admin ----------------------------------------------------------------

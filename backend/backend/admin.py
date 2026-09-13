@@ -26,6 +26,7 @@ from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.envelope import ok
+from backend.llm import provider_error
 from backend.models import AdminSession, Wallet, WalletTransaction
 from backend.rate_limit import SlidingWindowLimiter, rate_limit_dependency
 
@@ -646,11 +647,10 @@ async def test_provider(body: ProviderTestBody, authorization: str = Header(defa
                 502, "LLM_PROVIDER_ERROR", f"The provider is unreachable: {error}"
             ) from error
         if chat.status_code != 200:
-            raise ApiError(
-                502,
-                "LLM_PROVIDER_ERROR",
-                f"The provider refused the request (HTTP {chat.status_code}).",
-            )
+            # Same 429 covers "out of credit" and "slow down"; the panel must
+            # say which, or the PO retries a request that cannot succeed.
+            status_code, code, message = provider_error(chat.status_code, chat.text)
+            raise ApiError(status_code, code, message)
         # The embedding model is optional: an installation may run chat only.
         embedding_ok = None
         embedding_dim = None
