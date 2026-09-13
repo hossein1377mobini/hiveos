@@ -18,7 +18,18 @@ DIST = (Path(__file__).resolve().parents[2] / "frontend" / "dist").resolve()
 API_HOST, API_PORT = "127.0.0.1", 8000
 UI_HOST, UI_PORT = "127.0.0.1", 8080
 
-HOP_HEADERS = {"connection", "keep-alive", "transfer-encoding", "upgrade", "content-encoding"}
+# Upstream headers that must not be relayed verbatim. content-length is here on
+# purpose: http.client decodes content-encoding transparently, but the upstream
+# Content-Length counts the *compressed* bytes, so forwarding it desynchronizes
+# the client (it waits for bytes that never arrive). The proxy sets its own.
+HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "transfer-encoding",
+    "upgrade",
+    "content-encoding",
+    "content-length",
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -38,14 +49,47 @@ class Handler(BaseHTTPRequestHandler):
         try:
             conn.request(self.command, self.path, body=body, headers=headers)
             resp = conn.getresponse()
-            data = resp.read()
         except OSError as exc:
+            conn.close()
             self.send_error(502, f"API unreachable: {exc}")
             return
+        try:
+            self._relay(resp)
+        finally:
+            # the proxy runs for the whole session: one socket per request would
+            # otherwise pile up until the GC happens to reap it.
+            conn.close()
+
+    def _relay(self, resp) -> None:
+
+        streaming = (resp.getheader("Content-Type") or "").startswith("text/event-stream")
         self.send_response(resp.status)
         for k, v in resp.getheaders():
             if k.lower() not in HOP_HEADERS:
                 self.send_header(k, v)
+        if streaming:
+            # SSE: no content-length; flush each frame as it arrives.
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            if self.command != "HEAD":
+                while True:
+                    try:
+                        chunk = resp.read1(65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            self.close_connection = True
+            return
+
+        try:
+            data = resp.read()
+        except OSError as exc:
+            self.send_error(502, f"API unreachable: {exc}")
+            return
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         if self.command != "HEAD":

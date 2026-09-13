@@ -36,15 +36,13 @@ dependencies = [
 # feed both bge-m3 and bge-reranker-v2-m3 through their exported int8 graphs.
 # It is roughly 1.2GB of image, versus the ~19GB that sentence-transformers
 # drags in with torch, and it is faster on the CPU-only host.
-#
-# 'local-embeddings' (torch via sentence-transformers) is kept for offline
-# experiments on a machine that already has torch - never for the server image.
 [project.optional-dependencies]
 local-ml = [
     "onnxruntime>=1.20.1",
-    "transformers>=4.48.0",
+    # Pinned below 5: the exported graphs and the tokenizer loading path were
+    # validated on the 4.x line, and transformers 5 changes both.
+    "transformers>=4.48,<5",
 ]
-local-embeddings = ["sentence-transformers>=6.0.1"]
 
 [dependency-groups]
 dev = [

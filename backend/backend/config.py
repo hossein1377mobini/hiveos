@@ -50,11 +50,11 @@ class Settings(BaseSettings):
     knowledge_chunk_size_chars: int = 800
     knowledge_chunk_overlap_chars: int = 100
     # US-212 (T-S2-6 + PO decision 2026-09-12): embedding provider.
-    # 'remote' = the online provider configured in the admin panel (quality
-    # first on Persian, no torch/weights on the host - the PO's choice);
-    # 'local' = BAAI/bge-m3 via sentence-transformers for on-prem installs
-    # with no internet; 'mock' = deterministic hash vectors for dev/CI.
-    embedding_provider: str = Field(default="mock", pattern="^(local|onnx|remote|mock)$")
+    # 'onnx' = bge-m3 int8 on this host. The launch default: document text
+    # stays on the server and measured quality matches the hosted models.
+    # 'remote' = the online provider configured in the admin panel.
+    # 'mock' = deterministic hash vectors for dev/CI (offline).
+    embedding_provider: str = Field(default="mock", pattern="^(onnx|remote|mock)$")
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
     # Remote embedding model + vector width. Dim must match the column, so it

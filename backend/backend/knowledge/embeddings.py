@@ -4,39 +4,24 @@
   (providers_pricing.base_url / api_key). PO decision: quality matters more
   than running the model locally, and 1536-dim remote vectors beat a
   quantised local model on Persian. No torch, no weights on the host.
-- 'local': BAAI/bge-m3 through sentence-transformers, lazily loaded once
-  per process. Kept for on-prem deployments that cannot reach the internet.
+- 'onnx': BAAI/bge-m3 as an int8 ONNX graph, running on this host. This is
+  the default: the text of every ingested document stays on the server, and
+  only the answer prompt reaches the provider. Measured equivalent quality to
+  the hosted models and ~2x faster than the torch equivalent on CPU.
 - 'mock': deterministic sha256-based vectors (dev/CI/offline) - same text
   always yields the same vector, so acceptance tests can assert ranking.
 
-Dimensions differ per provider (remote 1536, local 1024), so the knowledge
-base records which model produced each vector and never mixes them.
+Dimensions differ per provider (remote is whatever the panel configures,
+onnx is 1024), so the knowledge base records which model produced each
+vector and never mixes them.
 """
 
-import asyncio
 import hashlib
 import logging
 import math
 
 from backend.api_errors import ApiError
 from backend.config import get_settings
-
-_model = None  # process-wide singleton
-
-
-def _load_local():
-    global _model
-    if _model is not None:
-        return _model
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise ApiError(
-            503, "EMBEDDING_UNAVAILABLE", "sentence-transformers is not installed."
-        ) from exc
-    settings = get_settings()
-    _model = SentenceTransformer(settings.embedding_model)
-    return _model
 
 
 def _mock_vector(text: str, dim: int) -> list[float]:
@@ -123,29 +108,17 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             from backend.knowledge.onnx_runtime import embed as onnx_embed
 
             return await onnx_embed(texts)
-        # sentence-transformers fallback for offline experiments.
-        return await asyncio.to_thread(_local_vectors, texts)
+        raise ApiError(
+            503,
+            "EMBEDDING_UNAVAILABLE",
+            f"Unknown embedding provider {settings.embedding_provider!r}.",
+        )
     except ApiError:
         raise
     except Exception as exc:  # noqa: BLE001 - model/runtime failures -> clear API error
         # H1 (external review): never leak host/model internals to clients;
         # the details stay in the server log only.
         logger.error("embedding model failure: %s", exc)
-        raise ApiError(503, "EMBEDDING_UNAVAILABLE", "The embedding model is unavailable.") from exc
-
-
-def _local_vectors(texts: list[str]) -> list[list[float]]:
-    """CPU-bound local encode; runs in a worker thread, never on the loop."""
-    try:
-        model = _load_local()
-        vectors = model.encode(texts, normalize_embeddings=True)
-        return [list(map(float, vector)) for vector in vectors]
-    except ApiError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - model/runtime failures -> clear API error
-        # H1 (external review): never leak host/model internals to clients;
-        # the details stay in the server log only.
-        logger.error("local embedding model failure: %s", exc)
         raise ApiError(503, "EMBEDDING_UNAVAILABLE", "The embedding model is unavailable.") from exc
 
 
