@@ -8,6 +8,7 @@ import OwnerAccount from "./pages/OwnerAccount";
 import OtpVerify from "./pages/OtpVerify";
 import Onboarding from "./pages/Onboarding";
 import Wallet from "./pages/Wallet";
+import Usage from "./pages/Usage";
 import Chat from "./pages/Chat";
 import Knowledge from "./pages/Knowledge";
 import Subscription from "./pages/Subscription";
@@ -151,13 +152,7 @@ export default function App() {
       ) : screen === "subscription" ? (
         <Subscription onNavigate={(id) => setScreen(id as Screen)} />
       ) : screen === "usage" ? (
-        <Surface className="mx-auto max-w-xl p-6">
-          <h1 className="text-lg font-bold">اعتبار و مصرف</h1>
-          <p className="mt-2 text-sm leading-[1.9] text-muted-foreground">
-            گزارش تفصیلی مصرف در نسخه‌ی بعدی اسپرینت‌ها اضافه می‌شود. موجودی و تراکنش‌ها همین حالا
-            در «کیف پول» قابل مشاهده است.
-          </p>
-        </Surface>
+        <Usage />
       ) : (
         <Surface className="mx-auto max-w-xl p-6">
           <h1 className="text-lg font-bold">خوش آمدید — راه‌اندازی کامل شد</h1>
