@@ -14,7 +14,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
@@ -77,6 +77,43 @@ def _storage_dir(organization_id) -> Path:
     return path
 
 
+async def _org_storage_bytes(session: AsyncSession, organization_id) -> int:
+    """Total bytes already stored for one organization.
+
+    Counted from the asset rows rather than by walking the directory: the
+    filesystem also holds soft-deleted and orphaned files, and a quota must
+    measure what the organization actually owns."""
+    total = (
+        await session.execute(
+            select(func.coalesce(func.sum(KnowledgeAsset.size_bytes), 0)).where(
+                KnowledgeAsset.organization_id == organization_id,
+                KnowledgeAsset.deleted_at.is_(None),
+            )
+        )
+    ).scalar()
+    return int(total or 0)
+
+
+async def _assert_quota(session: AsyncSession, organization, incoming_bytes: int) -> None:
+    """FR-011: refuse an upload that would push the organization past its cap.
+
+    Without this, one tenant can fill the shared disk and take every other
+    tenant down with it - the failure is silent until the volume is full.
+    The admin panel can raise the cap per organization; 0 means unlimited.
+    """
+    limit_mb = getattr(organization, "storage_quota_mb", None)
+    if not limit_mb:
+        return
+    used = await _org_storage_bytes(session, organization.id)
+    limit = int(limit_mb) * 1024 * 1024
+    if used + incoming_bytes > limit:
+        raise ApiError(
+            413,
+            "STORAGE_QUOTA_EXCEEDED",
+            f"Storage quota of {limit_mb}MB would be exceeded.",
+        )
+
+
 async def upload_assets(
     session: AsyncSession, organization: Organization, user_id, files
 ) -> dict:
@@ -104,6 +141,14 @@ async def upload_assets(
     per_file_max = settings.upload_max_file_mb * 1024 * 1024
     request_max = MAX_UPLOAD_REQUEST_MB * 1024 * 1024
     total_bytes = 0
+
+    # FR-011: the per-file and per-request caps bound one upload; the quota
+    # bounds the whole tenant. Checked before any body is buffered so an
+    # over-quota organization never pays for the transfer.
+    declared_total = sum(
+        int(getattr(f, "size", 0) or 0) for f in files
+    )
+    await _assert_quota(session, organization, declared_total)
 
     for upload in files:
         # US-1606: reject on the declared size BEFORE buffering the body — the

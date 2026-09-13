@@ -364,6 +364,9 @@ async def organization_detail(org_id: uuid.UUID, authorization: str = Header(def
                     "SELECT o.id, o.name, o.display_name, o.industry, o.size, o.status,"
                     " o.business_description, o.plan, o.plan_expires_at, o.pending_expires_at,"
                     " o.created_at, o.updated_at, o.owner_user_id, u.username AS owner_username,"
+                    " o.storage_quota_mb,"
+                    " (SELECT COALESCE(sum(a.size_bytes), 0) FROM hiveos.knowledge_assets a"
+                    "   WHERE a.organization_id = o.id AND a.deleted_at IS NULL) AS storage_bytes,"
                     " COALESCE(w.balance, 0) AS balance, w.updated_at AS wallet_updated_at"
                     " FROM hiveos.organizations o"
                     " LEFT JOIN hiveos.users u ON u.id = o.owner_user_id"
@@ -760,6 +763,41 @@ async def admin_credit_op(
 
 class ChargeDecisionBody(BaseModel):
     approve: bool
+
+
+class StorageQuotaBody(BaseModel):
+    # FR-011: MB cap for one organization; null clears the limit. The panel
+    # sets this per customer, so it is a plain value rather than a global.
+    storage_quota_mb: int | None = Field(default=None, ge=1, le=1_000_000)
+
+
+@router.put("/organizations/{org_id}/storage-quota", dependencies=[Depends(_rate_limit)])
+async def set_storage_quota(
+    org_id: uuid.UUID, body: StorageQuotaBody, authorization: str = Header(default="")
+) -> dict:
+    """Raise, lower or clear an organization's storage cap (FR-011)."""
+    await _authorized(authorization)
+    _, factory = _shared_engine()
+    async with factory() as session:
+        row = (
+            await session.execute(
+                text(
+                    "UPDATE hiveos.organizations SET storage_quota_mb = :q, updated_at = now()"
+                    " WHERE id = :i RETURNING id, storage_quota_mb"
+                ),
+                {"q": body.storage_quota_mb, "i": str(org_id)},
+            )
+        ).mappings().first()
+        if row is None:
+            raise ApiError(404, "NOT_FOUND", "Organization not found.")
+        await session.commit()
+    await record_audit(
+        None,
+        "organization.storage_quota_changed",
+        organization_id=org_id,
+        detail={"storage_quota_mb": body.storage_quota_mb},
+    )
+    return ok({"organization_id": str(org_id), "storage_quota_mb": body.storage_quota_mb})
 
 
 @router.get("/charge-requests", dependencies=[Depends(_rate_limit)])

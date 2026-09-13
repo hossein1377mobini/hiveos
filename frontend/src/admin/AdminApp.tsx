@@ -390,6 +390,21 @@ const STATUS_FA: Record<string, string> = {
   expired: "منقضی",
 };
 
+const faNum = (value: number): string => value.toLocaleString("fa-IR");
+
+const sizeText = (value: unknown): string => {
+  const size = Number(value ?? 0);
+  if (!Number.isFinite(size) || size <= 0) return "صفر";
+  const units = ["بایت", "کیلوبایت", "مگابایت", "گیگابایت"];
+  let scaled = size;
+  let unit = 0;
+  while (scaled >= 1024 && unit < units.length - 1) {
+    scaled /= 1024;
+    unit += 1;
+  }
+  return faNum(Math.round(scaled * 10) / 10) + " " + units[unit];
+};
+
 const faDate = (value: unknown): string => {
   if (typeof value !== "string" || !value) return "—";
   const d = new Date(value);
@@ -405,6 +420,7 @@ function OrgsTab({ token }: { token: string }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<OrgDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [quotaSaved, setQuotaSaved] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -435,6 +451,28 @@ function OrgsTab({ token }: { token: string }) {
     },
     [token],
   );
+
+  // FR-011: the storage cap is what stops one tenant filling the shared
+  // volume. Saved per organization, and the detail view reloads so the PO
+  // sees the new figure rather than the one they typed.
+  async function setQuota(orgId: string, value: number | null) {
+    setBusy(orgId);
+    setNotice(null);
+    setQuotaSaved(false);
+    try {
+      await adminApi(token, "PUT", "/organizations/" + orgId + "/storage-quota", {
+        storage_quota_mb: value,
+      });
+      setQuotaSaved(true);
+      await openDetail(orgId);
+      window.setTimeout(() => setQuotaSaved(false), 2500);
+    } catch (err) {
+      if (err instanceof AdminSessionExpired) return;
+      setNotice(err instanceof Error ? err.message : "ذخیرهٔ سقف فضا ناموفق بود.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   // PO request: every action that changes money or access states what it does
   // and asks for confirmation first (credit = irreversible for the operator).
@@ -619,6 +657,8 @@ function OrgsTab({ token }: { token: string }) {
             <OrgDetailView
               detail={detail}
               busy={busy === String(detail.organization.id)}
+              quotaSaved={quotaSaved}
+              onSetQuota={(value) => void setQuota(String(detail.organization.id), value)}
               onRemoveUser={(userId, username) =>
                 void removeUser(String(detail.organization.id), userId, username)
               }
@@ -630,17 +670,26 @@ function OrgsTab({ token }: { token: string }) {
   );
 }
 
-function OrgDetailView({
+export function OrgDetailView({
   detail,
   busy,
   onRemoveUser,
+  onSetQuota,
+  quotaSaved,
 }: {
   detail: OrgDetail;
   busy?: boolean;
   onRemoveUser?: (userId: string, username: string) => void;
+  onSetQuota?: (value: number | null) => void;
+  quotaSaved?: boolean;
 }) {
   const org = detail.organization;
   const counters = detail.assets_by_status ?? {};
+  const [quotaDraft, setQuotaDraft] = useState(
+    org.storage_quota_mb === null || org.storage_quota_mb === undefined
+      ? ""
+      : String(org.storage_quota_mb),
+  );
   return (
     <div className="mt-3 space-y-4 text-sm">
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
@@ -651,6 +700,11 @@ function OrgDetailView({
           ["موجودی", org.balance ?? 0],
           ["پلن", org.plan ?? "—"],
           ["انقضای پلن", faDate(org.plan_expires_at)],
+          [
+            "فضای مصرفی",
+            sizeText(org.storage_bytes) +
+              (org.storage_quota_mb ? " از " + faNum(Number(org.storage_quota_mb)) + " مگابایت" : " (بی‌سقف)"),
+          ],
           ["ساخت", faDate(org.created_at)],
           ["آخرین فعالیت", faDate(org.last_activity_at)],
         ] as Array<[string, React.ReactNode]>).map(([label, value]) => (
@@ -674,6 +728,41 @@ function OrgDetailView({
           {(detail.knowledge_source?.path as string) ?? "پوشه اسناد ثبت نشده است."}
         </p>
       </div>
+
+      {onSetQuota && (
+        <div>
+          <h3 className="text-xs font-bold text-muted-foreground">سقف فضای ذخیره‌سازی</h3>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            بدون سقف، یک سازمان می‌تواند کل فضای سرور را پر کند و بقیه را از کار بیندازد.
+            خالی گذاشتن یعنی بی‌سقف.
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              className="w-32"
+              aria-label="سقف فضای ذخیره‌سازی به مگابایت"
+              value={quotaDraft}
+              placeholder="بی‌سقف"
+              onChange={(e) => setQuotaDraft(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">مگابایت</span>
+            <button
+              type="button"
+              disabled={busy}
+              data-testid="save-quota"
+              onClick={() => {
+                const raw = quotaDraft.trim();
+                onSetQuota(raw === "" ? null : Number(raw));
+              }}
+              className="rounded-control border px-3 py-1.5 text-xs font-bold hover:bg-muted disabled:opacity-50"
+            >
+              ذخیرهٔ سقف
+            </button>
+            {quotaSaved && <span className="text-xs font-bold text-success">ذخیره شد</span>}
+          </div>
+        </div>
+      )}
 
       <div>
         <h3 className="text-xs font-bold text-muted-foreground">کاربران ({detail.users.length})</h3>
