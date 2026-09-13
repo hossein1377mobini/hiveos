@@ -189,18 +189,18 @@ export default function Chat() {
     <div className="flex min-h-0 flex-1" aria-label="گفتگو">
       {/* — chat-list (mockup §۲۰) — */}
       <aside
-        className="hidden w-[280px] shrink-0 flex-col border-e border-neutral-200 bg-neutral-0 md:flex"
+        className="hidden w-[280px] shrink-0 flex-col border-e border-border bg-card md:flex"
         aria-label="فهرست گفتگوها"
       >
-        <div className="flex gap-2 border-b border-neutral-200 p-3.5">
+        <div className="flex gap-2 border-b border-border p-3.5">
           <LoadingButton size="sm" className="flex-1" onClick={newChat}>
             <Plus aria-hidden />
             گفتگوی جدید
           </LoadingButton>
         </div>
-        <div className="border-b border-neutral-200 px-3.5 py-2.5">
+        <div className="border-b border-border px-3.5 py-2.5">
           <div className="relative">
-            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
+            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -213,14 +213,14 @@ export default function Chat() {
         <div className="flex-1 overflow-auto p-2" aria-label="گفتگوها">
           {grouped.length === 0 && (
             <div className="px-4 py-10 text-center">
-              <p className="text-[13px] leading-[1.9] text-neutral-600">
+              <p className="text-[13px] leading-[1.9] text-muted-foreground">
                 هنوز گفتگویی ندارید. با «گفتگوی جدید» اولین سوال خود را از هوش سازمان بپرسید.
               </p>
             </div>
           )}
           {grouped.map((group) => (
             <div key={group.label}>
-              <div className="px-2 pb-1 pt-2.5 text-[10.5px] font-extrabold tracking-[0.4px] text-neutral-400">
+              <div className="px-2 pb-1 pt-2.5 text-[10.5px] font-extrabold tracking-[0.4px] text-muted-foreground">
                 {group.label}
               </div>
               {group.items.map((s) => (
@@ -231,18 +231,18 @@ export default function Chat() {
                   aria-current={activeId === s.id ? "true" : undefined}
                   className={
                     "relative mb-0.5 block w-full cursor-pointer rounded-[10px] p-2.5 pe-16 text-start " +
-                    (activeId === s.id ? "bg-navy-50" : "hover:bg-neutral-50")
+                    (activeId === s.id ? "bg-accent" : "hover:bg-secondary")
                   }
                 >
                   <span
                     className={
                       "block truncate text-[13px] font-bold " +
-                      (activeId === s.id ? "text-navy-600" : "text-neutral-900")
+                      (activeId === s.id ? "text-primary" : "text-foreground")
                     }
                   >
                     {s.title ?? "گفتگوی بدون عنوان"}
                   </span>
-                  <span className="absolute end-2.5 top-2.5 text-[10px] text-neutral-400">
+                  <span className="absolute end-2.5 top-2.5 text-[10px] text-muted-foreground">
                     {s.created_at ? faDate(s.created_at) : ""}
                   </span>
                 </button>
@@ -253,7 +253,7 @@ export default function Chat() {
       </aside>
 
       {/* — chat-main — */}
-      <section className="flex min-w-0 flex-1 flex-col bg-neutral-50" aria-label="پیام‌ها">
+      <section className="flex min-w-0 flex-1 flex-col bg-secondary" aria-label="پیام‌ها">
         <div className="px-[8%] pt-4">
           <ZeroCreditBanner visible={blocked} />
         </div>
@@ -263,12 +263,12 @@ export default function Chat() {
             <div className="flex h-full flex-col items-center justify-center px-[30px] text-center">
               <span
                 aria-hidden
-                className="mb-[18px] flex size-16 items-center justify-center rounded-[20px] bg-navy-600 text-white shadow-[0_10px_26px_rgba(43,58,115,0.25)]"
+                className="mb-[18px] flex size-16 items-center justify-center rounded-[20px] bg-primary text-primary-foreground shadow-[0_10px_26px_rgba(43,58,115,0.25)]"
               >
                 <House className="size-[30px]" />
               </span>
-              <h2 className="text-[19px] font-extrabold text-neutral-900">هوش سازمان آماده است</h2>
-              <p className="mt-2 max-w-[440px] text-[13.5px] text-neutral-600">
+              <h2 className="text-[19px] font-extrabold text-foreground">هوش سازمان آماده است</h2>
+              <p className="mt-2 max-w-[440px] text-[13.5px] text-muted-foreground">
                 سوال خود را درباره سازمان یا اسناد آن بپرسید. پاسخ‌ها با ارجاع به منابع داده می‌شوند.
               </p>
               <div className="mt-[22px] grid max-w-[640px] grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -277,10 +277,10 @@ export default function Chat() {
                     key={s.text}
                     type="button"
                     onClick={() => setInput(s.text)}
-                    className="cursor-pointer rounded-[13px] border border-neutral-200 bg-neutral-0 p-[13px] pe-[15px] text-start text-[13px] font-semibold text-neutral-900 shadow-card transition-colors hover:bg-navy-50 hover:text-navy-600"
+                    className="cursor-pointer rounded-[13px] border p-[13px] pe-[15px] text-start text-[13px] font-semibold text-foreground shadow-card transition-colors hover:text-primary bg-primary text-primary-foreground hover:bg-primary/90"
                   >
                     {s.text}
-                    <span className="mt-[3px] block text-[11px] font-normal text-neutral-400">{s.hint}</span>
+                    <span className="mt-[3px] block text-[11px] font-normal text-muted-foreground">{s.hint}</span>
                   </button>
                 ))}
               </div>
@@ -300,36 +300,36 @@ export default function Chat() {
                   className={
                     "flex size-8 shrink-0 items-center justify-center rounded-[10px] text-[11px] font-extrabold " +
                     (isUser
-                      ? "border border-neutral-200 bg-neutral-50 text-neutral-600"
-                      : "bg-navy-600 text-white")
+                      ? "border border-border bg-secondary text-muted-foreground"
+                      : "bg-primary text-primary-foreground")
                   }
                 >
                   {isUser ? "م" : <House className="size-[17px]" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-2 text-[11.5px] font-extrabold text-neutral-400">
+                  <div className="mb-1 flex items-center gap-2 text-[11.5px] font-extrabold text-muted-foreground">
                     {isUser ? "شما" : "هوش سازمان"}
                     {m.created_at && <span className="font-normal">{faTime(m.created_at)}</span>}
                   </div>
                   <div
                     className={
                       "rounded-[14px] border px-4 py-3.5 text-sm leading-[1.9] shadow-[0_1px_2px_rgba(28,28,25,0.04)] " +
-                      (isUser ? "border-navy-200 bg-navy-50" : "border-neutral-200 bg-neutral-0")
+                      (isUser ? "border-primary/40 bg-accent" : "border-border bg-card")
                     }
                   >
                     <p className="whitespace-pre-wrap">{m.body.text}</p>
                     {m.body.citations && m.body.citations.length > 0 && (
-                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-dashed border-neutral-200 pt-2.5" aria-label="منابع">
-                        <span className="text-[11px] font-bold text-neutral-400">منابع:</span>
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-dashed border-border pt-2.5" aria-label="منابع">
+                        <span className="text-[11px] font-bold text-muted-foreground">منابع:</span>
                         {m.body.citations.map((c: Citation, i: number) => (
                           <span
                             key={i}
-                            className="flex max-w-full cursor-pointer items-start gap-2 rounded-[9px] border border-neutral-200 bg-neutral-50 px-2.5 py-[7px] text-xs transition-colors hover:bg-navy-50"
+                            className="flex max-w-full cursor-pointer items-start gap-2 rounded-[9px] border border-border bg-secondary px-2.5 py-[7px] text-xs transition-colors hover:bg-accent"
                           >
-                            <FileText aria-hidden className="mt-0.5 size-3.5 shrink-0 text-neutral-400" />
+                            <FileText aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                             <span className="min-w-0">
                               <span className="block truncate font-bold">{c.title ?? "سند"}</span>
-                              {c.locator && <span className="block text-[11px] text-neutral-400">{c.locator}</span>}
+                              {c.locator && <span className="block text-[11px] text-muted-foreground">{c.locator}</span>}
                             </span>
                           </span>
                         ))}
@@ -340,7 +340,7 @@ export default function Chat() {
                     <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
                         type="button"
-                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-[7px] border border-transparent px-2 py-[3px] text-[11.5px] font-semibold text-neutral-400 transition-colors hover:border-neutral-200 hover:bg-neutral-50 hover:text-neutral-600"
+                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-[7px] border border-transparent px-2 py-[3px] text-[11.5px] font-semibold text-muted-foreground transition-colors hover:bg-secondary bg-primary text-primary-foreground hover:bg-primary/90"
                         onClick={() => void navigator.clipboard?.writeText(m.body.text ?? "")}
                         aria-label="کپی پیام"
                       >
@@ -358,11 +358,11 @@ export default function Chat() {
             <div className="flex gap-3" data-testid="thinking">
               <span
                 aria-hidden
-                className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-navy-600 text-white"
+                className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground"
               >
                 <House className="size-[17px]" />
               </span>
-              <div className="rounded-[14px] border border-neutral-200 bg-neutral-0 px-4 py-3.5 text-sm text-neutral-600">
+              <div className="rounded-[14px] border border-border bg-card px-4 py-3.5 text-sm text-muted-foreground">
                 در حال پاسخ‌گویی…
               </div>
             </div>
@@ -408,13 +408,13 @@ export default function Chat() {
           <div ref={bottomRef} />
         </div>
 
-        <form onSubmit={send} aria-label="ارسال پیام" className="border-t border-neutral-200 bg-neutral-0 px-[8%] pb-[18px] pt-3.5">
-          <div className="flex items-end gap-2.5 rounded-[16px] border border-neutral-200 bg-neutral-0 px-3 py-2.5 transition-shadow focus-within:border-navy-600 focus-within:ring-[3px] focus-within:ring-navy-50">
+        <form onSubmit={send} aria-label="ارسال پیام" className="border-t border-border bg-card px-[8%] pb-[18px] pt-3.5">
+          <div className="flex items-end gap-2.5 rounded-[16px] border border-border bg-card px-3 py-2.5 transition-shadow focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/20">
             <textarea
               rows={1}
               placeholder={blocked ? "برای ادامه، حساب خود را شارژ کنید…" : "سوال خود را بپرسید…"}
               aria-label="متن پیام"
-              className="max-h-40 min-h-[44px] flex-1 resize-none border-none bg-transparent px-1 py-1.5 text-sm leading-[1.7] text-neutral-900 outline-none placeholder:text-neutral-400 disabled:opacity-55"
+              className="max-h-40 min-h-[44px] flex-1 resize-none border-none bg-transparent px-1 py-1.5 text-sm leading-[1.7] text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-55 border-border bg-card"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -428,14 +428,14 @@ export default function Chat() {
             <button
               type="submit"
               disabled={busy || blocked || input.trim().length === 0}
-              className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-[12px] bg-navy-600 text-white transition-colors hover:bg-navy-800 disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400"
+              className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-[12px] transition-colors disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-muted-foreground bg-primary text-primary-foreground hover:bg-primary/90"
               data-testid="send"
               aria-label="ارسال"
             >
               <Send aria-hidden className="size-[18px] rtl:-scale-x-100" />
             </button>
           </div>
-          <div className="mt-2 flex items-center gap-2.5 px-1 text-[11px] text-neutral-400">
+          <div className="mt-2 flex items-center gap-2.5 px-1 text-[11px] text-muted-foreground">
             <span>برای ارسال Enter، برای خط جدید Shift+Enter</span>
           </div>
         </form>

@@ -7,7 +7,6 @@ vector order instead of raising."""
 import asyncio
 
 import httpx
-import pytest
 
 from backend.config import get_settings
 from backend.knowledge import rerank as rerank_module
@@ -41,7 +40,11 @@ def _stub(monkeypatch, payload, status=200):
 
 
 def _configure(monkeypatch, enabled=True):
-    settings = get_settings().model_copy(update={"rerank_enabled": enabled})
+    # These cases drive the REMOTE provider; the local ONNX default has its own
+    # file (test_local_inference.py).
+    settings = get_settings().model_copy(
+        update={"rerank_enabled": enabled, "rerank_provider": "remote"}
+    )
     monkeypatch.setattr(rerank_module, "get_settings", lambda: settings)
 
     async def _read_setting(session, key):

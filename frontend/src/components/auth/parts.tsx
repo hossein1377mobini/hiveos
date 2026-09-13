@@ -66,7 +66,7 @@ export function Stepper({ current }: { current: number }) {
                   "inline-flex size-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold",
                   state === "todo" && "border-border bg-secondary text-muted-foreground",
                   state === "active" && "border-primary bg-primary text-primary-foreground",
-                  state === "done" && "border-success bg-success text-white",
+                  state === "done" && "border-success bg-success text-primary-foreground",
                 )}
               >
                 {state === "done" ? <CheckIcon className="size-3" /> : faDigit(n)}
@@ -178,8 +178,8 @@ export function StepsList({
                 "flex size-6 shrink-0 items-center justify-center rounded-full border-2 bg-card text-[13px] font-bold",
                 item.state === "todo" && "border-border text-muted-foreground",
                 item.state === "active" && "border-primary bg-info-bg text-primary",
-                item.state === "done" && "border-success bg-success text-white",
-                item.state === "error" && "border-error bg-error text-white",
+                item.state === "done" && "border-success bg-success text-primary-foreground",
+                item.state === "error" && "border-error bg-error text-primary-foreground",
               )}
             >
               {item.state === "done" ? <CheckIcon className="size-3.5" /> : (item.marker ?? "")}

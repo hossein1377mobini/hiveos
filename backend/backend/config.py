@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # first on Persian, no torch/weights on the host - the PO's choice);
     # 'local' = BAAI/bge-m3 via sentence-transformers for on-prem installs
     # with no internet; 'mock' = deterministic hash vectors for dev/CI.
-    embedding_provider: str = Field(default="mock", pattern="^(local|remote|mock)$")
+    embedding_provider: str = Field(default="mock", pattern="^(local|onnx|remote|mock)$")
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
     # Remote embedding model + vector width. Dim must match the column, so it
@@ -63,10 +63,26 @@ class Settings(BaseSettings):
     # relevant/irrelevant separation (gap 0.289) at half the storage of 3072.
     embedding_remote_model: str = "text-embedding-3-large"
     embedding_remote_dim: int = 1024
+    # ONNX (local) model locations. The server image ships the exported int8
+    # graphs under /opt/models; a dev box falls back to the HF cache.
+    embedding_onnx_dir: str = "/opt/models/bge-m3-onnx"
+    rerank_onnx_dir: str = "/opt/models/bge-reranker-v2-m3-onnx"
+    # bge-m3 was trained at 8192 tokens; a chunk is 800 characters, so 512
+    # covers it with room for the query. The reranker sees whole chunks.
+    embedding_onnx_max_tokens: int = 512
+    rerank_onnx_max_tokens: int = 512
+    local_inference_batch_size: int = 8
+    # Concurrent local inferences. Embedding/reranking are CPU-bound and the
+    # API is a single uvicorn worker (ADR-023), so this is the only thing
+    # keeping a burst of uploads from starving the event loop.
+    local_inference_concurrency: int = 2
     embedding_timeout_seconds: float = 60.0
     # PO decision 2026-09-12: reranking is the single biggest quality win -
     # vector search finds candidates, a cross-encoder orders them.
     rerank_enabled: bool = True
+    # 'onnx' = bge-reranker-v2-m3 on this server (default: no candidate text
+    # leaves the host); 'remote' = the provider's /rerank endpoint.
+    rerank_provider: str = Field(default="onnx", pattern="^(onnx|remote|off)$")
     rerank_model: str = "cohere-rerank-v4.0-fast"
     rerank_timeout_seconds: float = 30.0
     # US-227: semantic search defaults.

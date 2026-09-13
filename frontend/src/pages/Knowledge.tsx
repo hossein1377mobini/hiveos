@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DialogBody } from "../components/ui/dialog-body";
 import { Input } from "../components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { RetryNotice } from "../components/ui/retry";
 import { cn } from "../lib/utils";
 import { faNum, humanSize, norm } from "../utils/format";
@@ -196,8 +198,8 @@ export default function Knowledge() {
       {/* page-head (mockup) */}
       <div className="mb-5 flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-[19px] font-extrabold text-neutral-900">دانش سازمان</h1>
-          <p className="mt-[3px] text-[13px] text-neutral-600">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
+          <h1 className="text-[19px] font-extrabold text-foreground">دانش سازمان</h1>
+          <p className="mt-[3px] text-[13px] text-muted-foreground">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
         </div>
         <div className="ms-auto flex items-center gap-2">
           {source && (
@@ -245,8 +247,8 @@ export default function Knowledge() {
                 <FolderOpen className="size-5" />
               </span>
               <div>
-                <div className="text-[15px] font-extrabold text-neutral-900">پوشه اسناد سازمان</div>
-                <div className="mt-1 font-mono text-[13px] text-neutral-600" dir="ltr">
+                <div className="text-[15px] font-extrabold text-foreground">پوشه اسناد سازمان</div>
+                <div className="mt-1 font-mono text-[13px] text-muted-foreground" dir="ltr">
                   {source.path}
                 </div>
               </div>
@@ -255,7 +257,7 @@ export default function Knowledge() {
               <StatusBadge tone="success" className="px-3.5 py-[5px] text-xs" dot>
                 {source.status === "active" ? "فعال" : source.status}
               </StatusBadge>
-              <span className="text-[11px] text-neutral-400">پویش خودکار هر ۳۰ دقیقه</span>
+              <span className="text-[11px] text-muted-foreground">پویش خودکار هر ۳۰ دقیقه</span>
             </div>
           </div>
           <div className="mt-4">
@@ -303,7 +305,7 @@ export default function Knowledge() {
         </Tabs>
         <div className="mt-3 flex flex-wrap gap-3">
           <div className="relative min-w-[220px] flex-1">
-            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
+            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
               value={search}
@@ -313,52 +315,55 @@ export default function Knowledge() {
               className="ps-9"
             />
           </div>
-          <select
-            value={format}
-            onChange={(e) => { setFormat(e.target.value); setPage(0); }}
-            aria-label="فیلتر فرمت"
-            className="cursor-pointer rounded-control border border-neutral-200 bg-neutral-0 px-3 py-[11px] text-sm text-neutral-600 focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50"
-          >
-            <option value="all">همه فرمت‌ها</option>
-            {formats.map((f) => (
-              <option key={f} value={f}>
-                {f.toUpperCase()}
-              </option>
-            ))}
-          </select>
+          <Select value={format} onValueChange={(v) => { setFormat(v); setPage(0); }}>
+            <SelectTrigger
+              aria-label="فیلتر فرمت"
+              className="h-[42px] w-[150px] rounded-control border-border bg-card text-sm text-muted-foreground"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">همه فرمت‌ها</SelectItem>
+              {formats.map((f) => (
+                <SelectItem key={f} value={f}>
+                  {f.toUpperCase()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </Surface>
 
       {/* جدول اسناد (mockup §۸) */}
       <Surface className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200 text-[12px] text-neutral-400">
-              <th className="p-3 ps-5 text-start font-bold">نام سند</th>
-              <th className="p-3 text-start font-bold">فرمت</th>
-              <th className="p-3 text-start font-bold">حجم</th>
-              <th className="p-3 text-start font-bold">وضعیت</th>
-              <th className="p-3 pe-5 text-start font-bold"></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow className="border-border text-[12px] text-muted-foreground">
+              <TableHead className="p-3 ps-5 font-bold">نام سند</TableHead>
+              <TableHead className="p-3 font-bold">فرمت</TableHead>
+              <TableHead className="p-3 font-bold">حجم</TableHead>
+              <TableHead className="p-3 font-bold">وضعیت</TableHead>
+              <TableHead className="p-3 pe-5 font-bold"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {pageItems.map((a) => {
               const job = jobByAsset.get(a.id);
               const failedCode = a.status === "failed" ? (job?.error_code ?? "") : "";
               return (
-                <tr key={a.id} className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50/60">
-                  <td className="p-3 ps-5 font-bold text-neutral-900" data-testid="asset-name">
+                <TableRow key={a.id} className="border-border last:border-0">
+                  <TableCell className="p-3 ps-5 font-bold whitespace-normal text-foreground" data-testid="asset-name">
                     {a.name}
-                  </td>
-                  <td className="p-3">
-                    <span className="inline-block rounded-[6px] border border-neutral-200 bg-neutral-50 px-2 py-0.5 font-mono text-[11px] text-neutral-600" dir="ltr">
+                  </TableCell>
+                  <TableCell className="p-3">
+                    <span className="inline-block rounded-[6px] border border-border bg-secondary px-2 py-0.5 font-mono text-[11px] text-muted-foreground" dir="ltr">
                       {(a.extension ?? "").toUpperCase()}
                     </span>
-                  </td>
-                  <td className="p-3 font-mono text-[12px] text-neutral-600" dir="ltr">
+                  </TableCell>
+                  <TableCell className="p-3 font-mono text-[12px] text-muted-foreground" dir="ltr">
                     {humanSize(a.size_bytes)}
-                  </td>
-                  <td className="p-3" data-testid={"asset-status-" + a.status}>
+                  </TableCell>
+                  <TableCell className="p-3" data-testid={"asset-status-" + a.status}>
                     <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"} dot>
                       {STATUS_FA[a.status] ?? a.status}
                     </StatusBadge>
@@ -367,29 +372,29 @@ export default function Knowledge() {
                         {failedCode}
                       </div>
                     )}
-                  </td>
-                  <td className="p-3 pe-5 text-end">
+                  </TableCell>
+                  <TableCell className="p-3 pe-5 text-end">
                     {a.status === "queued" && (
                       <LoadingButton variant="secondary" size="xs" onClick={() => classify(a.id)} disabled={busy}>
                         دسته‌بندی
                       </LoadingButton>
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
             {pageItems.length === 0 && (
-              <tr>
-                <td colSpan={5} className="p-0">
+              <TableRow>
+                <TableCell colSpan={5} className="p-0">
                   <div className="px-5 py-12 text-center">
                     <span
                       aria-hidden
-                      className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-[16px] border border-neutral-200 bg-neutral-50 text-neutral-400"
+                      className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-[16px] border border-border bg-secondary text-muted-foreground"
                     >
                       <FileText className="size-[26px]" />
                     </span>
-                    <h3 className="text-[15px] font-extrabold text-neutral-900">هنوز سندی نیست.</h3>
-                    <p className="mx-auto mt-1.5 max-w-[380px] text-[13px] text-neutral-600">
+                    <h3 className="text-[15px] font-extrabold text-foreground">هنوز سندی نیست.</h3>
+                    <p className="mx-auto mt-1.5 max-w-[380px] text-[13px] text-muted-foreground">
                       {search || tab !== "all" || format !== "all"
                         ? "سندی مطابق جستجو یا فیلتر پیدا نشد."
                         : "با «افزودن سند» یا قرار دادن فایل در پوشه اسناد، پردازش آغاز می‌شود."}
@@ -400,13 +405,13 @@ export default function Knowledge() {
                       </LoadingButton>
                     )}
                   </div>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
-          </tbody>
-        </table>
-        <div className="flex items-center justify-between border-t border-neutral-200 px-5 py-3">
-          <span className="text-xs text-neutral-400">
+          </TableBody>
+        </Table>
+        <div className="flex items-center justify-between border-t border-border px-5 py-3">
+          <span className="text-xs text-muted-foreground">
             نمایش {faNum(pageItems.length)} از {faNum(filtered.length)} سند
           </span>
           <div className="flex gap-2">
@@ -446,34 +451,34 @@ export default function Knowledge() {
               }}
               className={cn(
                 "flex cursor-pointer flex-col items-center justify-center rounded-[14px] border-2 border-dashed px-6 py-10 text-center transition-colors",
-                dragging ? "border-navy-600 bg-navy-50" : "border-neutral-200 bg-neutral-50 hover:border-navy-200",
+                dragging ? "border-primary bg-accent" : "border-border bg-secondary hover:border-primary/40",
               )}
             >
-              <UploadCloud aria-hidden className="mb-2 size-7 text-neutral-400" />
-              <p className="text-[13px] font-bold text-neutral-900">فایل‌ها را اینجا رها کنید یا کلیک کنید</p>
-              <p className="mt-1 text-[11.5px] text-neutral-400">چند فایل در هر بار</p>
+              <UploadCloud aria-hidden className="mb-2 size-7 text-muted-foreground" />
+              <p className="text-[13px] font-bold text-foreground">فایل‌ها را اینجا رها کنید یا کلیک کنید</p>
+              <p className="mt-1 text-[11.5px] text-muted-foreground">چند فایل در هر بار</p>
             </div>
             <input
               ref={fileRef}
               type="file"
               multiple
               accept={ACCEPTED}
-              className="hidden"
+              className="hidden border-border bg-card"
               onChange={(e) => setPicked(Array.from(e.target.files ?? []))}
             />
             {picked.length > 0 && (
               <ul className="mt-3 space-y-2">
                 {picked.map((f, i) => (
-                  <li key={f.name + i} className="flex items-center gap-3 rounded-[10px] border border-neutral-200 bg-neutral-0 px-3 py-2">
-                    <FileText aria-hidden className="size-4 shrink-0 text-neutral-400" />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-neutral-900">{f.name}</span>
-                    <span className="font-mono text-[11px] text-neutral-400" dir="ltr">
+                  <li key={f.name + i} className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-2">
+                    <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{f.name}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground" dir="ltr">
                       {humanSize(f.size)}
                     </span>
                     <button
                       type="button"
                       aria-label={"حذف " + f.name}
-                      className="cursor-pointer rounded-[7px] p-1 text-neutral-400 transition-colors hover:bg-error-bg hover:text-error"
+                      className="cursor-pointer rounded-[7px] p-1 text-muted-foreground transition-colors hover:bg-error-bg hover:text-error bg-primary text-primary-foreground hover:bg-primary/90"
                       onClick={() => setPicked((p) => p.filter((_, idx) => idx !== i))}
                     >
                       <X className="size-4" />
@@ -499,7 +504,7 @@ export default function Knowledge() {
 
 function CountChip({ value }: { value: number }) {
   return (
-    <span className="me-0 rounded-full border border-neutral-200 bg-neutral-50 px-[7px] text-[10.5px] text-neutral-600">
+    <span className="me-0 rounded-full border border-border bg-secondary px-[7px] text-[10.5px] text-muted-foreground">
       {faNum(value)}
     </span>
   );
@@ -517,16 +522,16 @@ function StatCard({
   return (
     <div
       className={cn(
-        "rounded-[16px] border border-neutral-200 bg-neutral-0 p-[18px] shadow-card",
-        tone === "info" && "border-navy-200 bg-navy-50/60",
+        "rounded-[16px] border border-border bg-card p-[18px] shadow-card",
+        tone === "info" && "border-primary/40 bg-accent/60",
         tone === "danger" && "border-error bg-error-bg",
       )}
     >
-      <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-600">
+      <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
         {tone === "danger" && <CircleAlert aria-hidden className="size-[15px] text-error" />}
         {label}
       </div>
-      <div className="mt-2 text-2xl font-extrabold tracking-[-0.5px] text-neutral-900">{value}</div>
+      <div className="mt-2 text-2xl font-extrabold tracking-[-0.5px] text-foreground">{value}</div>
     </div>
   );
 }

@@ -118,7 +118,12 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     try:
         if settings.embedding_provider == "remote":
             return await _remote_vectors(texts)
-        # The local model is CPU-bound; keep it off the event loop.
+        if settings.embedding_provider == "onnx":
+            # Local ONNX (default): no document text leaves this server.
+            from backend.knowledge.onnx_runtime import embed as onnx_embed
+
+            return await onnx_embed(texts)
+        # sentence-transformers fallback for offline experiments.
         return await asyncio.to_thread(_local_vectors, texts)
     except ApiError:
         raise

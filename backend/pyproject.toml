@@ -29,10 +29,21 @@ dependencies = [
     "uvicorn[standard]>=0.52.4",
 ]
 
-# Heavy optional ML stack (torch + sentence-transformers ~19GB image). v0.1 uses the
-# deterministic mock embedding provider which never imports it, so it stays out of
-# the base image. Build with --extra local-embeddings for the real BAAI/bge-m3 provider.
+# Local inference stack (PO decision 2026-09-12: on-server embeddings and
+# reranking, only the answer generator talks to the internet).
+#
+# 'local-ml' is the ONNX path used in production: onnxruntime + transformers
+# feed both bge-m3 and bge-reranker-v2-m3 through their exported int8 graphs.
+# It is roughly 1.2GB of image, versus the ~19GB that sentence-transformers
+# drags in with torch, and it is faster on the CPU-only host.
+#
+# 'local-embeddings' (torch via sentence-transformers) is kept for offline
+# experiments on a machine that already has torch - never for the server image.
 [project.optional-dependencies]
+local-ml = [
+    "onnxruntime>=1.20.1",
+    "transformers>=4.48.0",
+]
 local-embeddings = ["sentence-transformers>=6.0.1"]
 
 [dependency-groups]

@@ -72,10 +72,15 @@ def test_concurrent_charge_decisions_credit_once(client):
         start.set()
         return await asyncio.gather(*tasks)
 
-    try:
-        outcomes = asyncio.get_event_loop().run_until_complete(_run())
-    finally:
-        asyncio.get_event_loop().run_until_complete(engine.dispose())
+    # One event loop for both steps: asyncio.run() would build a second loop,
+    # and asyncpg connections pooled on the first cannot be disposed on it.
+    async def _run_and_dispose():
+        try:
+            return await _run()
+        finally:
+            await engine.dispose()
+
+    outcomes = asyncio.run(_run_and_dispose())
 
     approved = [o for kind, o in outcomes if kind == "approved"]
     errors = [o for kind, o in outcomes if kind == "error"]

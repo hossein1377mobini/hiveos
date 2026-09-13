@@ -47,7 +47,7 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
     if (error) {
       return <RetryNotice message={error} onRetry={() => void load()} testId="subscription-retry" />;
     }
-    return <p className="text-sm text-neutral-600">در حال بارگذاری…</p>;
+    return <p className="text-sm text-muted-foreground">در حال بارگذاری…</p>;
   }
 
   const daysLeft = sub.expires_at
@@ -62,8 +62,8 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
     <section className="mx-auto max-w-3xl space-y-4" aria-label="اشتراک">
       <div className="flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-[19px] font-extrabold text-neutral-900">اشتراک</h1>
-          <p className="mt-[3px] text-[13px] text-neutral-600">
+          <h1 className="text-[19px] font-extrabold text-foreground">اشتراک</h1>
+          <p className="mt-[3px] text-[13px] text-muted-foreground">
             دسترسی به خود برنامه از طریق اشتراک دوره‌ای — مستقل از اعتبار مصرف هوش سازمان.
           </p>
         </div>
@@ -81,7 +81,7 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
       )}
 
       {/* وضعیت اشتراک — الگوی wallet-hero (mockup §۲۱) */}
-      <div className="relative overflow-hidden rounded-[20px] bg-navy-600 px-7 py-[26px] text-white shadow-[0_14px_34px_rgba(43,58,115,0.3)]">
+      <div className="relative overflow-hidden rounded-[20px] bg-primary px-7 py-[26px] text-primary-foreground shadow-[0_14px_34px_rgba(43,58,115,0.3)]">
         <span aria-hidden className="absolute -end-[30px] -top-[30px] size-40 rounded-full bg-white/[0.06]" />
         <div className="text-xs font-bold opacity-75">وضعیت اشتراک</div>
         <div className="mt-1.5 text-[22px] font-extrabold" data-testid="plan">
@@ -94,40 +94,40 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
         </div>
       </div>
 
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-muted-foreground">
         تمدید و تغییر پلن توسط مدیر سامانه در پنل مدیریت انجام می‌شود.
       </p>
 
       {/* اشتراک و اعتبار — تفاوت‌ها (setting-row, mockup) */}
       <Surface className="p-6">
-        <h2 className="mb-3 text-[15px] font-extrabold text-neutral-900">اشتراک و اعتبار — تفاوت‌ها</h2>
-        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
-          <div className="text-[13.5px] font-bold text-neutral-900">اشتراک فعال</div>
-          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+        <h2 className="mb-3 text-[15px] font-extrabold text-foreground">اشتراک و اعتبار — تفاوت‌ها</h2>
+        <div className="border-b border-border py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-foreground">اشتراک فعال</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-muted-foreground">
             دسترسی به خود برنامه را تأمین می‌کند؛ بدون آن، اجرای هوش سازمان متوقف است.
           </div>
         </div>
-        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
-          <div className="text-[13.5px] font-bold text-neutral-900">اعتبار بسته‌ی اشتراک</div>
-          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+        <div className="border-b border-border py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-foreground">اعتبار بسته‌ی اشتراک</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-muted-foreground">
             با خرید/تمدید، یک‌جا به کیف پول اضافه می‌شود و با مصرف کسر می‌شود.
           </div>
         </div>
-        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
-          <div className="text-[13.5px] font-bold text-neutral-900">اعتبار مکمل</div>
-          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+        <div className="border-b border-border py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-foreground">اعتبار مکمل</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-muted-foreground">
             در هر لحظه از دوره قابل درخواست است — از «کیف پول ← شارژ حساب».
           </div>
         </div>
-        <div className="border-b border-neutral-200 py-3.5 last:border-b-0">
-          <div className="text-[13.5px] font-bold text-neutral-900">پایان دوره</div>
-          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+        <div className="border-b border-border py-3.5 last:border-b-0">
+          <div className="text-[13.5px] font-bold text-foreground">پایان دوره</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-muted-foreground">
             اعتبار باقی‌مانده حفظ می‌شود؛ تا تمدید اشتراک، اجرای هوش سازمان متوقف می‌ماند.
           </div>
         </div>
         <div className="py-3.5 last:border-b-0">
-          <div className="text-[13.5px] font-bold text-neutral-900">دوره آزمایشی (سازمان جدید)</div>
-          <div className="mt-0.5 max-w-[520px] text-xs text-neutral-400">
+          <div className="text-[13.5px] font-bold text-foreground">دوره آزمایشی (سازمان جدید)</div>
+          <div className="mt-0.5 max-w-[520px] text-xs text-muted-foreground">
             با اعتبار خوش‌آمد — بدون نیاز به اشتراک. مدت و مقدار اعتبار از پنل ادمین تعیین می‌شود.
           </div>
         </div>

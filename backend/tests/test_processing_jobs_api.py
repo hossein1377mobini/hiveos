@@ -103,7 +103,7 @@ def test_scheduled_scan_queues_low_priority(client, tmp_path):
             await session.commit()
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_run())
+    asyncio.run(_run())
     rows = _job_rows("job_type = 'create'")
     assert rows and rows[-1].priority == 0  # background sync = low priority
 

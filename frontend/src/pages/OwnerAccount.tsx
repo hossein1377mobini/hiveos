@@ -130,7 +130,7 @@ export default function OwnerAccount({
             <div className="flex" dir="ltr">
               <span
                 aria-hidden
-                className="flex select-none items-center justify-center rounded-[10px] border border-neutral-200 border-e-0 bg-neutral-50 px-3 text-sm font-bold text-neutral-600"
+                className="flex select-none items-center justify-center rounded-[10px] border border-border border-e-0 bg-secondary px-3 text-sm font-bold text-muted-foreground"
               >
                 +۹۸
               </span>
@@ -162,7 +162,7 @@ export default function OwnerAccount({
                 type="button"
                 onClick={() => setShowPwd((v) => !v)}
                 aria-label={showPwd ? "پنهان‌کردن رمز" : "نمایش رمز"}
-                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-[6px] p-1 text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-600"
+                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {showPwd ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
               </button>
@@ -171,7 +171,7 @@ export default function OwnerAccount({
               {checks.map((c) => (
                 <span
                   key={c.label}
-                  className={cn("flex items-center gap-1.5 text-[11.5px]", c.ok ? "text-success" : "text-neutral-400")}
+                  className={cn("flex items-center gap-1.5 text-[11.5px]", c.ok ? "text-success" : "text-muted-foreground")}
                 >
                   <span aria-hidden className={cn("size-1.5 rounded-full", c.ok ? "bg-success" : "bg-neutral-300")} />
                   {c.label}
@@ -206,7 +206,7 @@ export default function OwnerAccount({
               type="button"
               onClick={onBack}
               data-testid="owner-back"
-              className="mt-3 w-full cursor-pointer text-center text-xs text-neutral-600 underline-offset-4 hover:underline"
+              className="mt-3 w-full cursor-pointer text-center text-xs underline-offset-4 hover:underline bg-primary text-primary-foreground hover:bg-primary/90"
             >
               بازگشت
             </button>

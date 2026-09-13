@@ -582,7 +582,9 @@ class ProvidersPricingSchema(BaseModel):
     # hence the fixed choice list rather than a free-text field.
     embedding_model: str = Field(default="text-embedding-3-large", max_length=100)
     embedding_dimensions: int = Field(default=1024, ge=256, le=3072)
-    # Reranking model: the cross-encoder that orders the vector candidates.
+    # Reranking: 'onnx' keeps candidate chunks on this server (default),
+    # 'remote' uses the provider's /rerank endpoint, 'off' skips the stage.
+    rerank_provider: str = Field(default="onnx", pattern="^(onnx|remote|off)$")
     rerank_model: str = Field(default="cohere-rerank-v4.0-fast", max_length=100)
 
 

@@ -81,7 +81,7 @@ def test_worker_classifies_and_extracts_text_file(client, tmp_path):
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_drain())
+    asyncio.run(_drain())
 
     status, asset_status, extracted = _job_status()
     assert status == "completed" and asset_status == "ready"
@@ -178,7 +178,7 @@ def test_worker_records_failure_for_corrupt_file(client, tmp_path):
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_drain())
+    asyncio.run(_drain())
 
     status, asset_status, _extracted = _job_status()
     assert status == "failed" and asset_status == "failed"  # US-203 scenario 4

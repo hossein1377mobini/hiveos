@@ -1,4 +1,12 @@
-﻿"""Reranker (PO decision 2026-09-12: quality is the priority).
+"""Reranker (PO decision 2026-09-12: quality is the priority).
+
+Two providers, chosen by RERANK_PROVIDER:
+- 'onnx' (default): bge-reranker-v2-m3 on this server. Higher quality than a
+  hosted fast reranker in the project's own Persian test and, more importantly,
+  the candidate chunks never leave the host - a reranker sees every search.
+- 'remote': the provider's /rerank endpoint. Faster (1.2s vs ~2.5s for 20
+  candidates on this hardware) but sends 20 chunks per search off-site.
+
 
 Vector search is a recall stage, not a precision stage: the top-20 by cosine
 distance often contains the right document at rank 7. Measured on the PO's
@@ -35,8 +43,20 @@ async def rerank(query: str, documents: list[str], top_k: int) -> list[int]:
     """
     fallback = list(range(len(documents)))
     settings = get_settings()
-    if not settings.rerank_enabled or len(documents) < 2:
+    if not settings.rerank_enabled or settings.rerank_provider == "off" or len(documents) < 2:
         return fallback[:top_k]
+
+    # Local cross-encoder (default): the candidates never leave this server.
+    if settings.rerank_provider == "onnx":
+        try:
+            from backend.knowledge.onnx_runtime import score
+
+            scores = await score(query, documents)
+        except Exception as exc:  # noqa: BLE001 - never break search on rerank
+            logger.warning("local rerank failed, using vector order: %s", exc)
+            return fallback[:top_k]
+        order = sorted(fallback, key=lambda index: -scores[index])
+        return order[:top_k]
 
     async with session_factory() as session:
         pricing = await read_setting(session, "providers_pricing")

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppShell, type NavId } from "./components/AppShell";
+import { Button } from "./components/ui/button";
 import { api, getToken } from "./api/client";
 import Login from "./pages/Login";
 import RegisterOrganization from "./pages/RegisterOrganization";
@@ -70,8 +71,8 @@ export default function App() {
 
   if (screen === null) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-neutral-50">
-        <p className="text-sm text-neutral-600">در حال بارگذاری…</p>
+      <div className="flex min-h-dvh items-center justify-center bg-secondary">
+        <p className="text-sm text-muted-foreground">در حال بارگذاری…</p>
       </div>
     );
   }
@@ -80,16 +81,16 @@ export default function App() {
   // app shell — the shell (10-app-shell.html) only appears after onboarding.
   if (screen === "login" || screen === "register" || screen === "owner" || screen === "otp") {
     return (
-      <div className="flex min-h-dvh items-start justify-center bg-neutral-50 px-4 pb-16 pt-11">
+      <div className="flex min-h-dvh items-start justify-center bg-secondary px-4 pb-16 pt-11">
         <div className="w-full max-w-[700px]">
           {screen === "login" && (
             <>
               <Login onDone={() => setScreen("onboarding")} />
-              <p className="mx-auto mt-3 max-w-md text-center text-[13px] text-neutral-600">
+              <p className="mx-auto mt-3 max-w-md text-center text-[13px] text-muted-foreground">
                 حساب سازمان ندارید؟{" "}
-                <button className="font-bold text-navy-600 no-underline hover:underline" onClick={() => setScreen("register")}>
+                <Button variant="link" size="sm" className="h-auto p-0 font-bold text-primary" onClick={() => setScreen("register")}>
                   ساخت سازمان جدید
-                </button>
+                </Button>
               </p>
             </>
           )}
@@ -124,7 +125,7 @@ export default function App() {
   // no shell) — mockups 04-workspace-init … 07-onboarding-complete.
   if (screen === "onboarding") {
     return (
-      <div className="flex min-h-dvh items-start justify-center bg-neutral-50 px-4 pb-16 pt-11">
+      <div className="flex min-h-dvh items-start justify-center bg-secondary px-4 pb-16 pt-11">
         <div className="w-full max-w-[700px]">
           <Onboarding onStatus={(status) => { if (status.next_step === "chat") setScreen("chat"); }} />
         </div>
@@ -152,7 +153,7 @@ export default function App() {
       ) : screen === "usage" ? (
         <Surface className="mx-auto max-w-xl p-6">
           <h1 className="text-lg font-bold">اعتبار و مصرف</h1>
-          <p className="mt-2 text-sm leading-[1.9] text-neutral-600">
+          <p className="mt-2 text-sm leading-[1.9] text-muted-foreground">
             گزارش تفصیلی مصرف در نسخه‌ی بعدی اسپرینت‌ها اضافه می‌شود. موجودی و تراکنش‌ها همین حالا
             در «کیف پول» قابل مشاهده است.
           </p>
@@ -160,7 +161,7 @@ export default function App() {
       ) : (
         <Surface className="mx-auto max-w-xl p-6">
           <h1 className="text-lg font-bold">خوش آمدید — راه‌اندازی کامل شد</h1>
-          <p className="mt-2 text-sm text-neutral-600">
+          <p className="mt-2 text-sm text-muted-foreground">
             گفتگو با هوش سازمان در نسخه‌ی بعدی اسپرینت‌ها اضافه می‌شود.
           </p>
         </Surface>

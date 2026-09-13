@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { persianError } from "../api/errors";
+import { Field } from "../components/auth/parts";
+import { Input } from "../components/ui/input";
 import { Surface } from "../components/ui/surface";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 
 // Admin panel UI (epic-16, zero-open): the System Admin logs in and sets
 // provider credentials, allowlist, pricing, pipeline and the prompt template;
@@ -79,7 +82,7 @@ function Retry({ message, onRetry }: { message: string; onRetry: () => void }) {
       <p className="text-[13px] font-bold text-error">{message}</p>
       <button
         type="button"
-        className="rounded-control border border-neutral-300 bg-neutral-0 px-3 py-1 text-xs font-bold"
+        className="rounded-control border px-3 py-1 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90"
         onClick={onRetry}
       >
         تلاش مجدد
@@ -190,33 +193,33 @@ export default function AdminApp() {
           aria-label="ورود مدیر سامانه"
         >
           <h1 className="text-lg font-bold">پنل مدیریت HiveOS</h1>
-          <label className="mt-4 block text-sm">
-            نام کاربری
-            <input
-              className="mt-1 w-full rounded-control border border-neutral-200 px-3 py-2 text-sm"
+          <Field label="نام کاربری" htmlFor="admin-username" className="mb-0 mt-4">
+            <Input
+              id="admin-username"
+              className="rounded-control text-sm"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               dir="ltr"
               required
             />
-          </label>
-          <label className="mt-3 block text-sm">
-            گذرواژه
-            <input
+          </Field>
+          <Field label="گذرواژه" htmlFor="admin-password" className="mb-0 mt-3">
+            <Input
+              id="admin-password"
               type="password"
-              className="mt-1 w-full rounded-control border border-neutral-200 px-3 py-2 text-sm"
+              className="rounded-control text-sm"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               dir="ltr"
               required
             />
-          </label>
+          </Field>
           {error && (
             <p role="alert" className="mt-3 text-sm text-error" data-testid="admin-error">
               {error}
             </p>
           )}
-          <button className="mt-4 w-full rounded-control bg-navy-600 px-4 py-2 text-sm font-bold text-white">
+          <button className="mt-4 w-full rounded-control px-4 py-2 text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90">
             ورود
           </button>
         </form>
@@ -233,11 +236,11 @@ export default function AdminApp() {
   ];
 
   return (
-    <div className="min-h-dvh bg-neutral-50">
-      <header className="border-b border-neutral-200 bg-neutral-0 px-4 py-2">
+    <div className="min-h-dvh bg-secondary">
+      <header className="border-b border-border bg-card px-4 py-2">
         <div className="mx-auto flex max-w-5xl items-center justify-between">
           <h1 className="text-base font-bold">پنل مدیریت HiveOS</h1>
-          <button type="button" className="text-sm text-neutral-600" onClick={logout}>
+          <button type="button" className="text-sm bg-primary text-primary-foreground hover:bg-primary/90" onClick={logout}>
             خروج
           </button>
         </div>
@@ -251,7 +254,7 @@ export default function AdminApp() {
             aria-current={tab === t.id ? "page" : undefined}
             className={
               "rounded-control px-3 py-2 text-sm " +
-              (tab === t.id ? "bg-navy-600 font-bold text-white" : "bg-neutral-0 text-neutral-600")
+              (tab === t.id ? "bg-primary font-bold text-primary-foreground" : "bg-card text-muted-foreground")
             }
           >
             {t.label}
@@ -317,13 +320,13 @@ function SettingsTab({ token }: { token: string }) {
       {SETTING_KEYS.map(({ key, title, hint }) => (
         <Surface key={key} className="p-4">
           <h2 className="text-sm font-bold">{title}</h2>
-          <p className="mt-1 text-xs text-neutral-500" dir="auto">
+          <p className="mt-1 text-xs text-muted-foreground" dir="auto">
             {hint}
           </p>
           <textarea
             dir="ltr"
             rows={5}
-            className="mt-2 w-full rounded-control border border-neutral-200 p-2 font-mono text-xs"
+            className="mt-2 w-full rounded-control border p-2 font-mono text-xs border-border bg-card"
             aria-label={title}
             value={values[key] ?? ""}
             onChange={(e) => setValues({ ...values, [key]: e.target.value })}
@@ -331,7 +334,7 @@ function SettingsTab({ token }: { token: string }) {
           <div className="mt-2 flex items-center gap-3">
             <button
               type="button"
-              className="rounded-control bg-navy-600 px-4 py-2 text-sm font-bold text-white"
+              className="rounded-control px-4 py-2 text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90"
               onClick={() => save(key, values[key] ?? "")}
             >
               ذخیره
@@ -527,7 +530,7 @@ function OrgsTab({ token }: { token: string }) {
       <Surface className="overflow-hidden p-0">
         <Table>
         <TableHeader>
-          <TableRow className="border-neutral-200 text-neutral-600">
+          <TableRow className="border-border text-muted-foreground">
             <TableHead className="p-3">سازمان</TableHead>
             <TableHead className="p-3">وضعیت</TableHead>
             <TableHead className="p-3">موجودی</TableHead>
@@ -539,75 +542,76 @@ function OrgsTab({ token }: { token: string }) {
         </TableHeader>
         <TableBody>
           {orgs.map((o) => (
-            <tr key={o.id} className="border-b border-neutral-100 align-top">
-              <td className="p-3">
+            <TableRow key={o.id} className="border-border align-top">
+              <TableCell className="p-3">
                 <button
                   type="button"
-                  className="font-bold text-navy-600 underline"
+                  className="font-bold text-primary underline bg-primary text-primary-foreground hover:bg-primary/90"
                   onClick={() => (openId === o.id ? setOpenId(null) : void openDetail(o.id))}
                 >
                   {o.name}
                 </button>
-                <span className="block text-[11px] text-neutral-400" dir="ltr">
+                <span className="block text-[11px] text-muted-foreground" dir="ltr">
                   {faDate(o.created_at)}
                 </span>
-              </td>
-              <td className="p-3">{STATUS_FA[o.status] ?? o.status}</td>
-              <td className="p-3" data-testid={"balance-" + o.id}>
+              </TableCell>
+              <TableCell className="p-3">{STATUS_FA[o.status] ?? o.status}</TableCell>
+              <TableCell className="p-3" data-testid={"balance-" + o.id}>
                 {o.balance}
-              </td>
-              <td className="p-3 text-xs">
+              </TableCell>
+              <TableCell className="p-3 text-xs">
                 {o.users ?? 0} / {o.assets ?? 0}
-              </td>
-              <td className="p-3 text-xs">
+              </TableCell>
+              <TableCell className="p-3 text-xs">
                 {o.plan ?? "trial"}
                 {o.plan_expires_at && (
-                  <span dir="ltr" className="block text-neutral-500">
+                  <span dir="ltr" className="block text-muted-foreground">
                     {faDate(o.plan_expires_at)}
                   </span>
                 )}
-              </td>
-              <td className="p-3">
+              </TableCell>
+              <TableCell className="p-3">
                 <div className="flex gap-2">
                   <input
                     type="number"
                     aria-label={"مبلغ برای " + o.name}
-                    className="w-24 rounded-control border border-neutral-200 px-2 py-1"
+                    className="w-24 rounded-control border px-2 py-1 border-border bg-card"
                     value={amounts[o.id] ?? ""}
                     onChange={(e) => setAmounts({ ...amounts, [o.id]: Number(e.target.value) })}
                   />
                   <button
                     type="button"
                     disabled={busy === o.id}
-                    className="rounded-control bg-navy-600 px-3 py-1 font-bold text-white disabled:opacity-50"
+                    className="rounded-control px-3 py-1 font-bold disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90"
                     onClick={() => void credit(o.id, o.name)}
                   >
                     اعمال
                   </button>
                 </div>
-              </td>
-              <td className="p-3">
+              </TableCell>
+              <TableCell className="p-3">
                 <button
                   type="button"
                   disabled={busy === o.id}
                   aria-label={"حذف سازمان " + o.name}
-                  className="rounded-control border border-error px-3 py-1 font-bold text-error disabled:opacity-50"
+                  className="rounded-control border border-error px-3 py-1 font-bold text-error disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90"
                   onClick={() => void removeOrg(o.id, o.name, o.users ?? 0)}
                 >
                   حذف سازمان
                 </button>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-      {orgs.length === 0 && <p className="text-sm text-neutral-600">سازمانی ثبت نشده است.</p>}
+        </TableBody>
+        </Table>
+      </Surface>
+      {orgs.length === 0 && <p className="text-sm text-muted-foreground">سازمانی ثبت نشده است.</p>}
 
       {openId && (
         <Surface className="p-4" aria-label="جزئیات سازمان">
           <h2 className="text-sm font-bold">جزئیات سازمان</h2>
           {detailError && <Retry message={detailError} onRetry={() => void openDetail(openId)} />}
-          {!detail && !detailError && <p className="mt-2 text-sm text-neutral-600">در حال بارگذاری…</p>}
+          {!detail && !detailError && <p className="mt-2 text-sm text-muted-foreground">در حال بارگذاری…</p>}
           {detail && (
             <OrgDetailView
               detail={detail}
@@ -648,14 +652,14 @@ function OrgDetailView({
           ["آخرین فعالیت", faDate(org.last_activity_at)],
         ] as Array<[string, React.ReactNode]>).map(([label, value]) => (
           <div key={String(label)}>
-            <dt className="text-[11px] text-neutral-400">{label}</dt>
+            <dt className="text-[11px] text-muted-foreground">{label}</dt>
             <dd className="font-bold">{String(value)}</dd>
           </div>
         ))}
       </dl>
 
       <div>
-        <h3 className="text-xs font-bold text-neutral-600">وضعیت اسناد</h3>
+        <h3 className="text-xs font-bold text-muted-foreground">وضعیت اسناد</h3>
         <p className="mt-1 text-xs">
           {Object.keys(counters).length === 0
             ? "سندی ثبت نشده است."
@@ -669,20 +673,20 @@ function OrgDetailView({
       </div>
 
       <div>
-        <h3 className="text-xs font-bold text-neutral-600">کاربران ({detail.users.length})</h3>
+        <h3 className="text-xs font-bold text-muted-foreground">کاربران ({detail.users.length})</h3>
         <ul className="mt-1 space-y-1 text-xs">
           {detail.users.map((u) => (
-            <li key={String(u.id)} className="flex justify-between border-b border-neutral-100 py-1">
+            <li key={String(u.id)} className="flex justify-between border-b border-border py-1">
               <span dir="ltr">{String(u.username)}</span>
               <span className="flex items-center gap-3">
-                <span className="text-neutral-500">{String(u.membership ?? u.status)}</span>
+                <span className="text-muted-foreground">{String(u.membership ?? u.status)}</span>
                 {onRemoveUser &&
                   String(u.id) !== String(detail.organization.owner_user_id ?? "") && (
                     <button
                       type="button"
                       disabled={busy}
                       aria-label={"حذف کاربر " + String(u.username)}
-                      className="text-error underline disabled:opacity-50"
+                      className="text-error underline disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90"
                       onClick={() => onRemoveUser(String(u.id), String(u.username))}
                     >
                       حذف
@@ -691,22 +695,22 @@ function OrgDetailView({
               </span>
             </li>
           ))}
-          {detail.users.length === 0 && <li className="text-neutral-500">کاربری ثبت نشده است.</li>}
+          {detail.users.length === 0 && <li className="text-muted-foreground">کاربری ثبت نشده است.</li>}
         </ul>
       </div>
 
       <div>
-        <h3 className="text-xs font-bold text-neutral-600">آخرین رویدادها</h3>
+        <h3 className="text-xs font-bold text-muted-foreground">آخرین رویدادها</h3>
         <ul className="mt-1 space-y-1 text-xs">
           {detail.recent_events.map((e) => (
-            <li key={String(e.id)} className="flex justify-between border-b border-neutral-100 py-1">
+            <li key={String(e.id)} className="flex justify-between border-b border-border py-1">
               <span dir="ltr">{String(e.event)}</span>
-              <span className="text-neutral-500" dir="ltr">
+              <span className="text-muted-foreground" dir="ltr">
                 {faDate(e.created_at)}
               </span>
             </li>
           ))}
-          {detail.recent_events.length === 0 && <li className="text-neutral-500">رویدادی ثبت نشده است.</li>}
+          {detail.recent_events.length === 0 && <li className="text-muted-foreground">رویدادی ثبت نشده است.</li>}
         </ul>
       </div>
     </div>
@@ -759,7 +763,7 @@ function RequestsTab({ token }: { token: string }) {
     <div className="space-y-3">
       {msg && <p className="text-sm text-success">{msg}</p>}
       {error && <p className="text-sm text-error">{error}</p>}
-      {items.length === 0 && <p className="text-sm text-neutral-600">درخواستی ثبت نشده است.</p>}
+      {items.length === 0 && <p className="text-sm text-muted-foreground">درخواستی ثبت نشده است.</p>}
       {items.map((r) => (
         <Surface
           key={r.id}
@@ -769,20 +773,20 @@ function RequestsTab({ token }: { token: string }) {
             <p className="font-bold" dir="ltr">
               {r.amount} — {r.status}
             </p>
-            {r.note && <p className="text-xs text-neutral-500">{r.note}</p>}
+            {r.note && <p className="text-xs text-muted-foreground">{r.note}</p>}
           </div>
           {r.status === "PENDING" && (
             <div className="flex gap-2">
               <button
                 type="button"
-                className="rounded-control bg-success px-3 py-1 text-sm font-bold text-white"
+                className="rounded-control bg-success px-3 py-1 text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={() => void decide(r.id, true)}
               >
                 تأیید
               </button>
               <button
                 type="button"
-                className="rounded-control bg-error px-3 py-1 text-sm font-bold text-white"
+                className="rounded-control bg-error px-3 py-1 text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90"
                 onClick={() => void decide(r.id, false)}
               >
                 رد
@@ -865,7 +869,7 @@ function LogsTab({ token }: { token: string }) {
             aria-current={level === l.id ? "page" : undefined}
             className={
               "rounded-control px-3 py-1.5 text-xs " +
-              (level === l.id ? "bg-navy-600 font-bold text-white" : "bg-neutral-0 text-neutral-600")
+              (level === l.id ? "bg-primary font-bold text-primary-foreground" : "bg-card text-muted-foreground")
             }
           >
             {l.label}
@@ -879,50 +883,52 @@ function LogsTab({ token }: { token: string }) {
           }}
           placeholder="جستجو در رویداد، سازمان یا کاربر…"
           aria-label="جستجوی رویداد"
-          className="ms-auto w-64 rounded-control border border-neutral-200 px-3 py-1.5 text-xs"
+          className="ms-auto w-64 rounded-control border px-3 py-1.5 text-xs border-border bg-card"
         />
       </div>
 
       {error && <p className="text-sm text-error">{error}</p>}
-      <table className="w-full rounded-card border border-neutral-200 bg-neutral-0 text-xs">
-        <thead>
-          <tr className="border-b border-neutral-200 text-neutral-600">
-            <th className="p-2 text-start">زمان</th>
-            <th className="p-2 text-start">رویداد</th>
-            <th className="p-2 text-start">سازمان</th>
-            <th className="p-2 text-start">کاربر</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Surface className="overflow-hidden p-0">
+        <Table>
+        <TableHeader>
+          <TableRow className="border-border text-muted-foreground">
+            <TableHead className="p-2">زمان</TableHead>
+            <TableHead className="p-2">رویداد</TableHead>
+            <TableHead className="p-2">سازمان</TableHead>
+            <TableHead className="p-2">کاربر</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {(payload?.logs ?? []).map((row) => (
-            <tr key={row.id} className="border-b border-neutral-100">
-              <td className="p-2 whitespace-nowrap" dir="ltr">
+            <TableRow key={row.id} className="border-border">
+              <TableCell className="p-2 whitespace-nowrap" dir="ltr">
                 {row.created_at ? new Date(row.created_at).toISOString().replace("T", " ").slice(0, 19) : "—"}
-              </td>
-              <td className="p-2" dir="ltr">
+              </TableCell>
+              <TableCell className="p-2" dir="ltr">
                 <span className={row.level === "error" ? "font-bold text-error" : ""}>{row.event}</span>
                 {row.detail && (
-                  <span className="block text-[10.5px] text-neutral-400">
+                  <span className="block text-[10.5px] text-muted-foreground">
                     {JSON.stringify(row.detail)}
                   </span>
                 )}
-              </td>
-              <td className="p-2">{row.organization_name ?? "—"}</td>
-              <td className="p-2" dir="ltr">
+              </TableCell>
+              <TableCell className="p-2">{row.organization_name ?? "—"}</TableCell>
+              <TableCell className="p-2" dir="ltr">
                 {row.actor_username ?? "سامانه"}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-      {total === 0 && <p className="text-sm text-neutral-600">رویدادی با این فیلتر ثبت نشده است.</p>}
+        </TableBody>
+        </Table>
+      </Surface>
+      {total === 0 && <p className="text-sm text-muted-foreground">رویدادی با این فیلتر ثبت نشده است.</p>}
 
       {total > limit && (
         <div className="flex items-center gap-3 text-xs">
           <button
             type="button"
             disabled={offset === 0}
-            className="rounded-control border border-neutral-200 px-3 py-1 disabled:opacity-40"
+            className="rounded-control border px-3 py-1 disabled:opacity-40 bg-primary text-primary-foreground hover:bg-primary/90"
             onClick={() => setOffset(Math.max(0, offset - limit))}
           >
             صفحهٔ قبل
@@ -933,7 +939,7 @@ function LogsTab({ token }: { token: string }) {
           <button
             type="button"
             disabled={offset + limit >= total}
-            className="rounded-control border border-neutral-200 px-3 py-1 disabled:opacity-40"
+            className="rounded-control border px-3 py-1 disabled:opacity-40 bg-primary text-primary-foreground hover:bg-primary/90"
             onClick={() => setOffset(offset + limit)}
           >
             صفحهٔ بعد
@@ -1031,9 +1037,9 @@ function StatusTab({ token }: { token: string }) {
   const { data, error, updatedAt, reload } = useLive<LiveStatus>(token, "/system-status", 10_000);
 
   if (error && !data) return <Retry message={error} onRetry={() => void reload()} />;
-  if (!data) return <p className="text-sm text-neutral-600">در حال بارگذاری…</p>;
+  if (!data) return <p className="text-sm text-muted-foreground">در حال بارگذاری…</p>;
 
-  const health = HEALTH_FA[data.health] ?? { label: data.health, tone: "text-neutral-600" };
+  const health = HEALTH_FA[data.health] ?? { label: data.health, tone: "text-muted-foreground" };
   const jobRows = Object.entries(data.jobs.by_status ?? {});
 
   return (
@@ -1043,13 +1049,13 @@ function StatusTab({ token }: { token: string }) {
           <p className="text-sm">
             وضعیت کلی: <span className={`font-bold ${health.tone}`} data-testid="overall">{health.label}</span>
           </p>
-          <p className="mt-1 text-xs text-neutral-500">
+          <p className="mt-1 text-xs text-muted-foreground">
             آخرین به‌روزرسانی: {updatedAt ? updatedAt.toLocaleTimeString("fa-IR") : "—"} · به‌روزرسانی خودکار هر ۱۰ ثانیه
           </p>
         </div>
         <button
           type="button"
-          className="rounded-control border border-neutral-200 px-3 py-1.5 text-xs font-bold"
+          className="rounded-control border px-3 py-1.5 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90"
           onClick={() => void reload()}
         >
           به‌روزرسانی
@@ -1060,7 +1066,7 @@ function StatusTab({ token }: { token: string }) {
 
       <div className="grid gap-3 md:grid-cols-3">
         <Surface className="p-4 text-sm">
-          <h2 className="text-xs font-bold text-neutral-600">سرور برنامه</h2>
+          <h2 className="text-xs font-bold text-muted-foreground">سرور برنامه</h2>
           <ul className="mt-2 space-y-1">
             <li>محیط اجرا: {data.environment ?? "—"}</li>
             <li>مدت کارکرد: {duration(data.uptime_seconds)}</li>
@@ -1078,7 +1084,7 @@ function StatusTab({ token }: { token: string }) {
         </Surface>
 
         <Surface className="p-4 text-sm">
-          <h2 className="text-xs font-bold text-neutral-600">پایگاه داده</h2>
+          <h2 className="text-xs font-bold text-muted-foreground">پایگاه داده</h2>
           <ul className="mt-2 space-y-1">
             <li>وضعیت: {data.db.state === "up" ? "در دسترس" : "قطع"}</li>
             <li>تأخیر پاسخ: {data.db.latency_ms} میلی‌ثانیه</li>
@@ -1092,7 +1098,7 @@ function StatusTab({ token }: { token: string }) {
         </Surface>
 
         <Surface className="p-4 text-sm">
-          <h2 className="text-xs font-bold text-neutral-600">فضای ذخیره‌سازی</h2>
+          <h2 className="text-xs font-bold text-muted-foreground">فضای ذخیره‌سازی</h2>
           <ul className="mt-2 space-y-1">
             <li>مسیر: <span dir="ltr">{data.host?.disk?.root ?? "—"}</span></li>
             <li>فضای کل: {bytes(data.host?.disk?.total_bytes)}</li>
@@ -1103,32 +1109,32 @@ function StatusTab({ token }: { token: string }) {
       </div>
 
       <Surface className="p-4 text-sm">
-        <h2 className="text-xs font-bold text-neutral-600">صف پردازش</h2>
+        <h2 className="text-xs font-bold text-muted-foreground">صف پردازش</h2>
         <p className="mt-2">
           کارهای در جریان: <span className="font-bold" data-testid="jobs-open">{data.jobs.open}</span>
         </p>
-        <p className="mt-1 text-xs text-neutral-500" dir="ltr">
+        <p className="mt-1 text-xs text-muted-foreground" dir="ltr">
           {jobRows.length === 0 ? "—" : jobRows.map(([k, v]) => `${k}: ${v}`).join(" · ")}
         </p>
       </Surface>
 
       <Surface className="p-4 text-sm">
-        <h2 className="text-xs font-bold text-neutral-600">شمارنده‌ها</h2>
+        <h2 className="text-xs font-bold text-muted-foreground">شمارنده‌ها</h2>
         <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
           {Object.entries(data.counters ?? {}).map(([key, value]) => (
             <div key={key}>
-              <dt className="text-[11px] text-neutral-400">{COUNTER_FA[key] ?? key}</dt>
+              <dt className="text-[11px] text-muted-foreground">{COUNTER_FA[key] ?? key}</dt>
               <dd className="font-bold">{value}</dd>
             </div>
           ))}
         </dl>
-        <p className="mt-2 text-xs text-neutral-500">
+        <p className="mt-2 text-xs text-muted-foreground">
           آخرین رویداد ثبت‌شده: {data.last_audit_at ? new Date(data.last_audit_at).toLocaleString("fa-IR") : "—"}
         </p>
       </Surface>
 
       <Surface className="p-4 text-sm">
-        <h2 className="text-xs font-bold text-neutral-600">سرویس‌های وابسته</h2>
+        <h2 className="text-xs font-bold text-muted-foreground">سرویس‌های وابسته</h2>
         <ul className="mt-2 space-y-1">
           <li>مدل زبانی: <span dir="ltr">{data.llm_provider}</span></li>
           <li>پیامک: <span dir="ltr">{data.sms_provider}</span></li>

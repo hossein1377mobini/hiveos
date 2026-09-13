@@ -214,7 +214,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step === "expired" && (
         <Surface className="p-7">
           <PanelHead icon={FolderOpen} tone="error" title="ثبت‌نام این سازمان منقضی شد" />
-          <p className="text-[13px] text-neutral-600">سازمان در بازه‌ی مجاز تکمیل نشد. از ابتدا ثبت‌نام کنید.</p>
+          <p className="text-[13px] text-muted-foreground">سازمان در بازه‌ی مجاز تکمیل نشد. از ابتدا ثبت‌نام کنید.</p>
           <LoadingButton variant="secondary" className="mt-4" onClick={() => { stopAutoSync(); clearToken(); location.reload(); }}>
             بازگشت به ورود
           </LoadingButton>
@@ -224,7 +224,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step !== "expired" && stage === "workspace" && (
         <Surface className="p-7">
           <PanelHead icon={Server} tone="violet" title="در حال آماده‌سازی فضای کار" hint="گام ۴ از ۶" />
-          <p className="mb-2 text-[13px] text-neutral-600">این مرحله خودکار انجام می‌شود؛ چند لحظه صبر کنید.</p>
+          <p className="mb-2 text-[13px] text-muted-foreground">این مرحله خودکار انجام می‌شود؛ چند لحظه صبر کنید.</p>
           <StepsList
             items={[
               { name: "ایجاد فضای کار", state: busy ? "active" : "done", marker: "۱" },
@@ -247,7 +247,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step !== "expired" && stage === "brain" && (
         <Surface className="p-7">
           <PanelHead icon={Sparkles} tone="teal" title="در حال ساخت هوش سازمان" hint="گام ۵ از ۶" />
-          <p className="mb-2 text-[13px] text-neutral-600">
+          <p className="mb-2 text-[13px] text-muted-foreground">
             مخزن دانش ساخته می‌شود؛ تا پایان این مرحله، توصیف کسب‌وکار شما پاسخ‌گوی اولیه است.
           </p>
           <StepsList
@@ -272,7 +272,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step !== "expired" && stage === "folder" && (
         <Surface className="p-7">
           <PanelHead icon={FolderSearch} tone="amber" title="تعیین پوشه اسناد" hint="گام ۶ از ۶" />
-          <p className="mb-4 text-[13px] text-neutral-600">
+          <p className="mb-4 text-[13px] text-muted-foreground">
             {desktop
               ? "پوشه‌ای روی همین کامپیوتر انتخاب کنید؛ اسناد آن به دانش سازمان اضافه می‌شود و هر ۳۰ دقیقه به‌روز می‌شود."
               : "مسیر یک پوشه روی همین سرور را وارد کنید؛ اسناد آن به دانش سازمان اضافه می‌شود."}
@@ -284,7 +284,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
             required
             hint={desktop ? "با دکمهٔ انتخاب پوشه، مسیر به‌طور خودکار پر می‌شود" : "مثلاً /srv/hive-docs"}
           >
-            <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-neutral-200 bg-neutral-0 p-2.5 ps-3">
+            <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-border bg-card p-2.5 ps-3">
               <span
                 aria-hidden
                 className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-amber-soft text-amber"

@@ -75,7 +75,7 @@ def test_manual_credit_op_and_system_status(client):
             await engine.dispose()
             return wallet.organization_id, wallet.balance
 
-    org_id, balance = asyncio.get_event_loop().run_until_complete(_org_and_balance())
+    org_id, balance = asyncio.run(_org_and_balance())
 
     admin = _login(client)
     credited = client.post(

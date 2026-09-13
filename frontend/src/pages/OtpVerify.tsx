@@ -163,7 +163,7 @@ export default function OtpVerify({
           </div>
         )}
         <PanelHead icon={KeyRound} tone="amber" title="کد تأیید" center />
-        <p className="mt-2 text-center text-[13px] text-neutral-600">کد تأیید پیامک‌شده به شماره موبایل سازمان را وارد کنید.</p>
+        <p className="mt-2 text-center text-[13px] text-muted-foreground">کد تأیید پیامک‌شده به شماره موبایل سازمان را وارد کنید.</p>
 
         <div className="mt-7 flex justify-center gap-2.5" dir="rtl">
           {digits.map((d, i) => (
@@ -181,11 +181,11 @@ export default function OtpVerify({
               aria-label={`رقم ${faDigit(i + 1)}`}
               disabled={busy}
               className={cn(
-                "size-[52px] rounded-[12px] border bg-neutral-0 p-0 text-center text-2xl font-bold text-neutral-900 transition-[border-color,box-shadow]",
-                "focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50",
-                d && "border-navy-600 bg-navy-50",
+                "size-[52px] rounded-[12px] border bg-card p-0 text-center text-2xl font-bold text-foreground transition-[border-color,box-shadow]",
+                "focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-ring/20",
+                d && "border-primary bg-accent",
                 error && "border-error focus:ring-error-bg",
-                busy && "cursor-not-allowed bg-neutral-50 text-neutral-400",
+                busy && "cursor-not-allowed bg-secondary text-muted-foreground",
               )}
             />
           ))}
@@ -198,9 +198,9 @@ export default function OtpVerify({
               {error}
             </span>
           ) : timer > 0 && sent ? (
-            <span className="flex items-center gap-1.5 text-neutral-400">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
               کد تا
-              <span className="inline-block min-w-[44px] font-bold text-neutral-600" dir="ltr">
+              <span className="inline-block min-w-[44px] font-bold text-muted-foreground" dir="ltr">
                 {faDigit(mm)}:{faDigit(ss)}
               </span>
               معتبر است.
@@ -229,7 +229,7 @@ export default function OtpVerify({
                 type="button"
                 onClick={onBack}
                 data-testid="otp-back"
-                className="cursor-pointer text-xs text-neutral-600 underline-offset-4 hover:underline"
+                className="cursor-pointer text-xs underline-offset-4 hover:underline bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 بازگشت
               </button>
@@ -240,7 +240,7 @@ export default function OtpVerify({
                 clearToken();
                 location.reload();
               }}
-              className="cursor-pointer text-xs text-neutral-600 underline-offset-4 hover:underline"
+              className="cursor-pointer text-xs underline-offset-4 hover:underline bg-primary text-primary-foreground hover:bg-primary/90"
             >
               خروج از این حساب
             </button>
