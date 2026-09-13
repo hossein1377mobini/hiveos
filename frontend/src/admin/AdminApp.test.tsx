@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AdminApp from "./AdminApp";
 
@@ -139,14 +139,29 @@ describe("Monitoring tab", () => {
     covered_models: ["deepseek-v4.1-flash", "glm-5.3"],
   };
 
-  function stub(payloads: { host?: unknown; ai?: unknown; check?: unknown }) {
+  // The tab loads a backup state alongside the host and AI snapshots, so the
+  // stub answers that route too rather than falling through to the check slot.
+  const backupPayload = {
+    state: "ok",
+    files: 7,
+    latest: {
+      name: "hiveos-20260913-033001.dump",
+      size_bytes: 82_534,
+      age_hours: 13.4,
+      created_at: "2026-09-13T03:30:01Z",
+    },
+  };
+
+  function stub(payloads: { host?: unknown; ai?: unknown; check?: unknown; backup?: unknown }) {
     const fn = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       const body = url.includes("/monitoring/host")
         ? payloads.host
         : url.includes("/monitoring/ai")
           ? payloads.ai
-          : payloads.check;
+          : url.includes("/system-status/backup")
+            ? (payloads.backup ?? backupPayload)
+            : payloads.check;
       return new Response(JSON.stringify({ success: true, data: body }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -184,6 +199,33 @@ describe("Monitoring tab", () => {
     render(<AdminApp />);
     fireEvent.click(await screen.findByRole("button", { name: "پایش سرور و هوش مصنوعی" }));
     expect(await screen.findByText(/امکان گزارش اعتبار را ارائه نمی‌دهد/)).toBeInTheDocument();
+  });
+
+  it("warns when the nightly backup has gone stale", async () => {
+    // A cron that silently stopped is the failure the panel exists to catch:
+    // otherwise the PO only learns there was no backup during a restore.
+    sessionStorage.setItem("hiveos.admin", "adm-token");
+    stub({
+      host: hostPayload,
+      ai: aiPayload,
+      backup: {
+        state: "stale",
+        files: 1,
+        latest: {
+          name: "hiveos-20260910-033001.dump",
+          size_bytes: 80_000,
+          age_hours: 74.2,
+          created_at: "2026-09-10T03:30:01Z",
+        },
+      },
+    });
+    render(<AdminApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "پایش سرور و هوش مصنوعی" }));
+    const card = await screen.findByTestId("backup-card");
+    expect(card).toHaveTextContent("قدیمی");
+    expect(within(card).getByTestId("backup-state")).toHaveTextContent("بررسی کنید");
+    // The dump name is an internal identifier, not something to hide.
+    expect(card).toHaveTextContent("hiveos-20260910-033001.dump");
   });
 
   it("surfaces a failing model check in Persian", async () => {

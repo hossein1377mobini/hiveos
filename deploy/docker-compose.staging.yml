@@ -58,6 +58,11 @@ services:
       # rather than baked in: they are 1.3GB each and would otherwise be
       # rebuilt into every image layer.
       - /opt/models:/opt/models:ro
+      # Read-only view of the backup directory so the admin panel can report
+      # whether last night's dump actually ran and how big it was. Without the
+      # mount the endpoint could only claim a backup exists, which is exactly
+      # the kind of lie an operator discovers during a restore.
+      - /opt/hiveos/backups:/backups:ro
     expose:
       - "8000"
 

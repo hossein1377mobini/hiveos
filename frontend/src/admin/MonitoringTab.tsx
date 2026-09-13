@@ -172,10 +172,28 @@ function useGaugeHistory(value: number | null): number[] {
   return history;
 }
 
+interface BackupState {
+  state: "ok" | "stale" | "missing" | "unavailable";
+  detail?: string;
+  files: number;
+  latest: { name: string; size_bytes: number; age_hours: number; created_at: string } | null;
+}
+
+// A backup the PO believes in but that does not exist is worse than none at
+// all - the gap is discovered during a restore. So the state is spelled out,
+// including the age, rather than shown as a green tick.
+const BACKUP_FA: Record<BackupState["state"], string> = {
+  ok: "پشتیبان‌گیری منظم انجام می‌شود.",
+  stale: "آخرین نسخهٔ پشتیبان قدیمی است؛ زمان‌بندی پشتیبان‌گیری را بررسی کنید.",
+  missing: "هیچ فایل پشتیبانی پیدا نشد.",
+  unavailable: "پوشهٔ پشتیبان روی سرور در دسترس برنامه نیست.",
+};
+
 export function MonitoringTab({ token }: { token: string }) {
   const [host, setHost] = useState<HostState | null>(null);
   const [ai, setAi] = useState<AiState | null>(null);
   const [check, setCheck] = useState<ModelCheck | null>(null);
+  const [backup, setBackup] = useState<BackupState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -184,12 +202,14 @@ export function MonitoringTab({ token }: { token: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [hostData, aiData] = await Promise.all([
+      const [hostData, aiData, backupData] = await Promise.all([
         adminApi<HostState>(token, "GET", "/monitoring/host"),
         adminApi<AiState>(token, "GET", "/monitoring/ai"),
+        adminApi<BackupState>(token, "GET", "/system-status/backup"),
       ]);
       setHost(hostData);
       setAi(aiData);
+      setBackup(backupData);
       setError(null);
       setUpdatedAt(new Date());
     } catch (err) {
@@ -564,6 +584,59 @@ export function MonitoringTab({ token }: { token: string }) {
               </Card>
             </div>
           </>
+        )}
+
+        {backup && (
+          <Card data-testid="backup-card">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-bold">
+                <HardDrive className="size-4" /> پشتیبان‌گیری پایگاه داده
+              </CardTitle>
+              <CardDescription className="text-xs">
+                پشتیبان شبانه با pg_dump روی همین سرور گرفته می‌شود.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div
+                className="flex items-start gap-2 text-[13px]"
+                data-testid="backup-state"
+              >
+                {backup.state === "ok" ? (
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+                ) : (
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+                )}
+                <span className={backup.state === "ok" ? "text-success" : "font-bold text-warning"}>
+                  {BACKUP_FA[backup.state]}
+                </span>
+              </div>
+              {backup.latest && (
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3">
+                  <div>
+                    <dt className="text-[11px] text-muted-foreground">آخرین نسخه</dt>
+                    <dd className="font-bold">{new Date(backup.latest.created_at).toLocaleString("fa-IR", { dateStyle: "short", timeStyle: "short" })}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] text-muted-foreground">قدمت</dt>
+                    <dd className="font-bold">{faNum(backup.latest.age_hours, 1)} ساعت</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] text-muted-foreground">حجم</dt>
+                    <dd className="font-bold">{bytes(backup.latest.size_bytes)}</dd>
+                  </div>
+                  <div className="col-span-2 sm:col-span-3">
+                    <dt className="text-[11px] text-muted-foreground">نام فایل</dt>
+                    <dd className="truncate font-mono text-[11px]" dir="ltr">
+                      {backup.latest.name}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                {faNum(backup.files)} نسخه روی سرور نگه داشته می‌شود.
+              </p>
+            </CardContent>
+          </Card>
         )}
       </section>
     </div>

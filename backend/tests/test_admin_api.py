@@ -97,5 +97,8 @@ def test_manual_credit_op_and_system_status(client):
     assert status["health"] == "green"
     assert status["db"]["state"] == "up" and status["db"]["migration_head"]
 
-    backup = client.post(f"{ADMIN}/system-status/backup", headers=admin)
+    # The backup endpoint reports what is on disk rather than claiming a dump
+    # happened: the nightly pg_dump runs from host cron, outside this process.
+    backup = client.get(f"{ADMIN}/system-status/backup", headers=admin)
     assert backup.status_code == 200
+    assert backup.json()["data"]["state"] in {"ok", "missing", "stale", "unavailable"}

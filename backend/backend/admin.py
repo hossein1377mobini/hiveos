@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend import ai_monitor, host_monitor, wallet
+from backend import ai_monitor, backup_status, host_monitor, wallet
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
@@ -1091,17 +1091,24 @@ async def system_status(authorization: str = Header(default="")) -> dict:
             "services": {
                 "api": "up",
                 "scheduler": "up",  # in-process scheduler (ADR-023)
-                "backup": "manual",  # US-216/v0.1: manual only
+                "backup": backup_status.backup_status()["state"],  # nightly cron dump, read from disk
             },
         }
     )
 
 
-@router.post("/system-status/backup", dependencies=[Depends(_rate_limit)])
-async def manual_backup(authorization: str = Header(default="")) -> dict:
-    """US-1610: manual backup trigger (v0.1: audit-only stub, pg_dump in prod)."""
+@router.get("/system-status/backup", dependencies=[Depends(_rate_limit)])
+async def backup_overview(authorization: str = Header(default="")) -> dict:
+    """US-1610: what is actually on disk, not a claim that a backup exists.
+
+    The nightly pg_dump is run by root cron on the host, outside this
+    container, so the API cannot trigger it. It can read the backup directory
+    and report the newest dump, its age and its size - which is the fact the
+    operator needs. The old version returned "accepted: true" while doing
+    nothing, so a silently dead cron looked healthy until a restore failed.
+    """
     await _authorized(authorization)
-    return ok({"accepted": True, "detail": "backup stubbed in v0.1 — pg_dump lands with T-S5"})
+    return ok(backup_status.backup_status())
 
 @router.get("/monitoring/host", dependencies=[Depends(_rate_limit)])
 async def monitoring_host(authorization: str = Header(default="")) -> dict:
