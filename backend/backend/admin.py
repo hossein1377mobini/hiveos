@@ -26,7 +26,7 @@ from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.envelope import ok
-from backend.llm import provider_error, read_setting
+from backend.llm import aroute_model, provider_error, read_setting
 from backend.models import AdminSession, Wallet, WalletTransaction
 from backend.rate_limit import SlidingWindowLimiter, rate_limit_dependency
 
@@ -590,6 +590,11 @@ class ProvidersPricingSchema(BaseModel):
     # 'remote' uses the provider's /rerank endpoint, 'off' skips the stage.
     rerank_provider: str = Field(default="onnx", pattern="^(onnx|remote|off)$")
     rerank_model: str = Field(default="cohere-rerank-v4.0-fast", max_length=100)
+    # The model that writes the answer. Without this the chat fell back to
+    # llm_default_model ("gpt-5-mini"), a model this account has no credit for
+    # - every question failed with LLM_PROVIDER_CREDIT while a funded model sat
+    # right there in the panel. Empty means "use the env default".
+    answer_model: str = Field(default="", max_length=100)
 
 
 class ProviderTestBody(BaseModel):
@@ -1162,8 +1167,11 @@ async def monitoring_model_check(authorization: str = Header(default="")) -> dic
     _, factory = _shared_engine()
     async with factory() as session:
         config = await read_setting(session, "providers_pricing")
+        # Test the model that actually answers, not the chunking model. Those
+        # were different models, so this button reported "ok" while every real
+        # question failed with LLM_PROVIDER_CREDIT.
+        model = await aroute_model(session, None)
     provider = config.get("provider")
-    model = config.get("chunk_model")
     base_url = config.get("base_url")
     api_key = config.get("api_key")
     if provider != "openai-compatible" or not base_url or not api_key:

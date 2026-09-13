@@ -93,14 +93,26 @@ def provider_error(status_code: int, raw: str) -> tuple[int, str, str]:
 
 
 async def aroute_model(session: AsyncSession, requested_model: str | None) -> str:
-    """Allowlist enforcement (US-1601): a model outside the admin allowlist
-    falls back to the allowlist default instead of hard-failing the chat."""
-    model = route_model(requested_model)
+    """Pick the model that writes the answer.
+
+    Order of precedence: an explicit request, the panel's answer_model, the
+    allowlist, then the environment default. The panel wins over the env
+    default because the System Admin is the only one who knows which model the
+    account is actually funded for.
+    """
+    pricing = await read_setting(session, "providers_pricing")
+    answer_model = (pricing.get("answer_model") or "").strip()
+    # A chat session with no settings carries the placeholder "hive-mind-default"
+    # (see chat/service.py DEFAULT_SETTINGS). Sending that string to the provider
+    # is meaningless, so treat it as "no preference".
+    requested = (requested_model or "").strip()
+    if requested == "hive-mind-default":
+        requested = ""
+    model = route_model(requested or answer_model or None)
     allowlist = await read_setting(session, "models_allowlist")
     models = [m for m in (allowlist.get("models") or []) if isinstance(m, str)]
-    if models:
-        if model not in models:
-            model = allowlist.get("default") or models[0]
+    if models and model not in models:
+        model = allowlist.get("default") or models[0]
     return model
 
 

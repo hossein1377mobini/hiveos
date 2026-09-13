@@ -275,6 +275,90 @@ export default function AdminApp() {
   );
 }
 
+/**
+ * The model that writes answers, as its own control.
+ *
+ * This lived only inside the raw providers_pricing JSON, so switching it was
+ * error-prone and nobody noticed it was unset. The chat then answered with the
+ * environment default while the paid, in-credit model sat unused in the panel.
+ */
+function AnswerModelCard({
+  token,
+  onError,
+}: {
+  token: string;
+  onError: (message: string) => void;
+}) {
+  const [pricing, setPricing] = useState<Record<string, unknown> | null>(null);
+  const [model, setModel] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await adminApi<Record<string, unknown>>(
+          token,
+          "GET",
+          "/settings/providers_pricing",
+        );
+        setPricing(data);
+        setModel(String(data.answer_model ?? ""));
+      } catch (err) {
+        if (err instanceof AdminSessionExpired) return;
+        onError(err instanceof Error ? err.message : "دریافت مدل پاسخ‌دهی ناموفق بود.");
+      }
+    })();
+  }, [token, onError]);
+
+  async function saveModel() {
+    if (pricing === null) return;
+    setBusy(true);
+    setSaved(false);
+    try {
+      // Merge, never replace: these settings hold the provider key too.
+      await adminApi(token, "PUT", "/settings/providers_pricing", {
+        value: { ...pricing, answer_model: model.trim() },
+      });
+      setSaved(true);
+    } catch (err) {
+      if (err instanceof AdminSessionExpired) return;
+      onError(err instanceof Error ? err.message : "ذخیرهٔ مدل پاسخ‌دهی ناموفق بود.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Surface className="p-4">
+      <h2 className="text-sm font-bold">مدل پاسخ‌دهی</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        مدلی که به پرسش‌های کاربران پاسخ می‌دهد. باید مدلی باشد که حساب شما برای آن اعتبار
+        دارد. خالی بماند، از مقدار پیش‌فرض سرور استفاده می‌شود.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <input
+          dir="ltr"
+          className="min-w-[260px] flex-1 rounded-control border p-2 font-mono text-xs border-border bg-card"
+          aria-label="مدل پاسخ‌دهی"
+          placeholder="deepseek-v4.1-flash"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+        />
+        <button
+          type="button"
+          disabled={busy || pricing === null}
+          className="rounded-control px-4 py-2 text-sm font-bold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-55"
+          onClick={() => void saveModel()}
+        >
+          ذخیره
+        </button>
+        {saved && <span className="text-sm text-success">ذخیره شد ✓</span>}
+      </div>
+    </Surface>
+  );
+}
+
 function SettingsTab({ token }: { token: string }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<string | null>(null);
@@ -320,6 +404,7 @@ function SettingsTab({ token }: { token: string }) {
 
   return (
     <div className="space-y-4">
+      <AnswerModelCard token={token} onError={setError} />
       {SETTING_KEYS.map(({ key, title, hint }) => (
         <Surface key={key} className="p-4">
           <h2 className="text-sm font-bold">{title}</h2>
