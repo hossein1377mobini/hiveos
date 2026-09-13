@@ -1,7 +1,30 @@
 # AGENT WORKING STATE — hiveos code repo
 
 > حافظه کاری عامل توسعه. هر سشن ابتدا این فایل + `hive/agent.md` + `hive/documentation/development-workflow.md` را بخوان.
-> آخرین به‌روزرسانی: 2026-09-11 (رفع نظارات بازبینی نهایی R1..R5 + NB-1/NB-2 — شاخه `task/review-final-remediation`؛ 206 تست backend + 13 vitest + tsc/build سبز؛ مهاجرت‌ها تا 0023)
+> آخرین به‌روزرسانی: 2026-09-12 (پاس دیباگ E: پنل ادمین زنده/رویدادها/سازمان‌ها + خطاهای فارسی و تلاش مجدد در فرانت + سخت‌سازی اسکنر/صف؛ 217 تست backend + 16 vitest + tsc/build سبز؛ مهاجرت‌ها تا 0023)
+
+## پاس دیباگ 2026-09-12 (درخواست PO)
+
+**دستور PO (ترجمه):** ۱) فایل خارج از فهرست قالب‌ها در پویش رد شود ۲) `frontend/dist.tar.gz` فایل من نیست (حذف شد) ۳) بعد از آماده‌شدن نسخهٔ ایمن، برو سراغ سرور؛ سرور باید تمیز و مرتب باشد ۴) در پنل ادمین وضعیت لحظه‌ای سرور در پارامترهای کلیدی ۵) لاگ‌ها به پنل ادمین اضافه شود ۶) سازمان‌های ثبت‌نام‌کرده + عملیات مرتبط با آن‌ها ۷) در فرانت خطاها نمایش داده نمی‌شدند یا انگلیسی/نامناسب بودند — خطا با متن توضیحی فارسی ۸) دکمه‌های بازگشت/تلاش مجدد در فرایندهایی که لازم است.
+
+**زیرساخت/سرور — مهم:** استیجینگ ساعتی حساب می‌شود؛ تا وقتی PO صریحاً نگوید «برو سرور» هیچ کانتینری را بالا نیاور، دیپلوی/rollback نزن و فایل روی سرور را تغییر نده. دیدن وضعیت (read-only از طریق SSH) مجاز است.
+
+1. **پویش پوشه = همان جدول قالب US-205** (`knowledge/service.py`): فایل با پسوند خارج از فهرست (مثل `.bin`/`.zip`/`.html`) در پویش نادیده گرفته می‌شود؛ تست‌های مربوطه به‌روزرسانی شدند.
+2. **پنل ادمین — وضعیت لحظه‌ای** (`GET /admin/system-status`): `health` سه‌حالته، شمارنده‌های زندهٔ DB در یک کوئری، صف پردازش به‌تفکیک وضعیت، حجم/اتصال DB، تأخیر، head مایگریشن + مقایسه با هد فایل‌ها، uptime/pid/thread، دیسک و بار میزبان، آخرین رویداد. UI هر ۱۰ ثانیه خودکار refresh می‌کند.
+3. **پنل ادمین — رویدادها** (`GET /admin/logs`): `audit_logs` + نام سازمان/کاربر، فیلتر all/activity/error، جستجو، صفحه‌بندی، و بازهٔ اختیاری دنبالهٔ فایل لاگ سرور (`LOG_FILE`).
+4. **پنل ادمین — سازمان‌ها + عملیات مرتبط** (`GET /admin/organizations/{id}`): فهرست سازمان‌ها با کاربران/اسناد/گفتگو/اجرا/آخرین فعالیت؛ جزئیات شامل اعضا، تراکنش‌های کیف پول، درخواست‌های شارژ، رخدادهای اخیر، وضعیت اسناد و پوشهٔ دانش. عمل «افزودن اعتبار» با تأیید صریح (`window.confirm`).
+5. **فارسی‌سازی خطاها** (`frontend/src/api/errors.ts`): نقشهٔ کد خطا → جملهٔ توضیحی فارسی + fallback بر اساس HTTP status؛ `api/client.ts` همهٔ خطاها (شبکه، timeout، پاسخ نامعتبر) را از همین مسیر می‌فرستد. پیام توسعه‌دهندهٔ انگلیسی سرور هرگز در UI دیده نمی‌شود (تست رگرسیون در `Chat.test.tsx`).
+6. **تلاش مجدد/بازگشت**: کامپوننت `RetryNotice` + دکمهٔ «تلاش مجدد» در Chat/Knowledge/Wallet/Subscription و تب‌های پنل ادمین؛ «بازگشت» در مراحل ثبت‌نام (سازمان ← حساب مدیر ← کد تأیید).
+7. **رفع باگ‌های واقعی ضمن پاس**: طوفان NUL از فایل متنی آلوده به DB (`_extract_text_file`)، نشت handle در `os.walk` اسکنر، نام‌گذاری`updated_at` منقضی در retry صف، لیستِ بدون سقف حافظهٔ بافر SSE، 429 سرریز از تست‌های قبلی روی لیمیتر ادمین.
+8. **گیت‌ها (2026-09-12)**: `pytest` **217 passed**؛ `ruff check .` سبز؛ `npm run build` (tsc+vite) سبز؛ `vitest` **16 passed**. تست‌های جدید: `tests/test_admin_ops_api.py` (۳) + `tests/test_hardening_fixes.py` (۸). UI محلی: `http://127.0.0.1:8080` (پنل: `/admin`).
+9. **استقرار روی استیجینگ انجام شد (2026-09-12)** — سرور `hiveos-staging` (193.93.169.136):
+   - تصویر `hiveos/api:secure-20260912` از درخت فعلی ساخته، منتقل و بالا آمد؛ SPA جدید (`index-CVcC8xVa.js`) هم در `/var/www/hiveos/dist` نصب شد.
+   - مهاجرت‌ها تأیید شد: `alembic_version=0023` و ۲۷ جدول در اسکیمای `hiveos`. خطای قبلی `UndefinedTableError` مربوط به یک کانتینر موقت روی دیتابیس نادرست بود، نه اسکیمای خراب.
+   - **سموم e2e با مسیر واقعی کاربر:** ساخت سازمان → ثبت مالک → `workspaces/initialize` → `brain/initialize` → کیف پول ۵۰ اعتبار خوش‌آمد؛ سپس خواندن همان داده در پنل ادمین (فهرست سازمان‌ها، جزئیات سازمان، رویدادها، `system-status`، `logs`). پاسخ ۴۰۴ برای UUID ناشناس هم درست بود. پس از تست همهٔ ردیف‌های آزمون از DB پاک شدند (orgs=0, users=0, wallets=0, audit=0).
+   - **تمیزکاری سرور:** `dist_old`، `hiveos-api.tgz`/`hiveos-deploy.tgz` در `/home/ubuntu/deploy`، سه تصویر قدیمی docker (از جمله `staging-0e01c84` سه‌گیگابایتی)، کش apt و ژورنال قدیمی حذف شدند. دیسک از ۴۸٪ به **۳۱٪** (7.2G/24G) رسید. تصویر فعلی + یک تصویر rollback نگه داشته شدند.
+   - **نصب‌کنندهٔ ویندوز** با آدرس `https://hivesystem.ir/` بازساخته و در `/var/www/hiveos/downloads/HiveOS-Setup-0.1.0.exe` جایگزین شد.
+   - **دامنه/تی‌ال‌اس:** `hivesystem.ir` اکنون از طریق Cloudflare به همین سرور می‌رسد؛ `https://hivesystem.ir/api/health` و `/` و `/admin` همه ۲۰۰ و گواهی Let's Encrypt معتبر است (اجرای certbot روی سرور لازم نشد).
+   - امنیت: ufw فعال، `passwordauthentication no`، root فقط با کلید، `unattended-upgrades` فعال، `secrets/` و `.env` با مجوز ۶۰۰ و مالک root. **پورت ۸۰۸۰ هنوز در ufw باز است ولی سرویسی روی آن گوش نمی‌دهد — بستن آن منتظر تأیید PO است.**
 
 ## وضعیت فعلی (دستور PO: «هیچ چیز بازی نماند؛ من فقط در پنل ادمین ست می‌کنم»)
 
@@ -80,6 +103,21 @@
 - Deploy path: push main → CI (backend job) → build image `hiveos/api:ci-<sha>` → save/scp/load → `remote-deploy.sh` (env از secret سرور، alembic، healthcheck :8100+:80، rollback خودکار). تنها workflow: `ci-deploy.yml`.
 - Secrets ریپو (ست شده): `STAGING_HOST`، `STAGING_SSH_KEY`.
 - GitHub: push/PR/secrets با credential manager سیستم کار می‌کند. rerun-failed-jobs و workflow-file push با PAT فعلی محدودیت دارد → trigger deploy با push به main.
+
+## تله‌ی عملیاتی ثبت‌شده (2026-09-13) — دو فایل compose با نام یکسان
+
+هنگام افزودن mount پشتیبان، فایل `deploy/docker-compose.staging.yml` روی سرور کپی شد،
+در حالی که استک واقعی staging با `infrastructure/docker-compose.staging.yml` بالا می‌آید:
+
+- `infrastructure/docker-compose.staging.yml` → **فایل واقعی روی سرور** (project `hiveos-app`،
+  پورت `127.0.0.1:8100:8100`، external network `hiveos_default`، mount های
+  `/opt/hiveos/storage` و `/opt/hiveos/ingestion` و `/opt/models`، env از `/opt/hiveos/app/.env`).
+- `deploy/docker-compose.staging.yml` → استک کامل با سرویس داخلی `db` و nginx کانتینری؛
+  **روی سرور استفاده نمی‌شود** و کپی‌کردنش mount ها و پورت را از بین می‌برد.
+
+فایل اشتباه روی سرور کپی شده بود؛ بلافاصله از `infrastructure/` بازگردانی شد و استک بدون
+قطعی سرویس سالم ماند (هر دو health داخلی و عمومی 200). درس: قبل از هر `cp` روی فایل
+کانفیگ سرور، اول محتوای فعلی همان فایل خوانده شود.
 
 ## بازهای غیرفنی (PO)
 
