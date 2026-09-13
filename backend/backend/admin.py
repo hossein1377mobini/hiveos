@@ -21,12 +21,12 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend import wallet
+from backend import ai_monitor, host_monitor, wallet
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.envelope import ok
-from backend.llm import provider_error
+from backend.llm import provider_error, read_setting
 from backend.models import AdminSession, Wallet, WalletTransaction
 from backend.rate_limit import SlidingWindowLimiter, rate_limit_dependency
 
@@ -1064,3 +1064,79 @@ async def manual_backup(authorization: str = Header(default="")) -> dict:
     """US-1610: manual backup trigger (v0.1: audit-only stub, pg_dump in prod)."""
     await _authorized(authorization)
     return ok({"accepted": True, "detail": "backup stubbed in v0.1 — pg_dump lands with T-S5"})
+
+@router.get("/monitoring/host", dependencies=[Depends(_rate_limit)])
+async def monitoring_host(authorization: str = Header(default="")) -> dict:
+    """Host CPU/memory/disk/network for the panel (PO request 2026-09-13).
+
+    Polled by the panel, so it stays read-only and does no database work: the
+    PO wants "is the machine healthy" answered without opening a terminal.
+    """
+    await _authorized(authorization)
+    return ok(host_monitor.host_snapshot(disk_paths=["/", str(get_settings().storage_root)]))
+
+
+@router.get("/monitoring/ai", dependencies=[Depends(_rate_limit)])
+async def monitoring_ai(
+    hours: int = Query(default=24, ge=1, le=720), authorization: str = Header(default="")
+) -> dict:
+    """AI provider account: remaining credit and consumption by model.
+
+    AvalAI scopes credit to model packages, so this reports both the account
+    balance and which models a live package still covers - the difference
+    between "the key is broken" and "this model is not in the package".
+    """
+    await _authorized(authorization)
+    _, factory = _shared_engine()
+    async with factory() as session:
+        snapshot = await ai_monitor.read_account(session, hours=hours)
+    return ok(snapshot)
+
+
+@router.post("/monitoring/ai/refresh", dependencies=[Depends(_rate_limit)])
+async def monitoring_ai_refresh(authorization: str = Header(default="")) -> dict:
+    """Bypass the one-minute cache so the PO can re-check after a purchase."""
+    await _authorized(authorization)
+    ai_monitor.clear_cache()
+    _, factory = _shared_engine()
+    async with factory() as session:
+        snapshot = await ai_monitor.read_account(session)
+    return ok(snapshot)
+
+
+@router.get("/monitoring/model-check", dependencies=[Depends(_rate_limit)])
+async def monitoring_model_check(authorization: str = Header(default="")) -> dict:
+    """Send a one-token prompt to the configured chat model.
+
+    A wrong model name or an exhausted package otherwise surfaces as a broken
+    first question from a customer; here the PO sees it while still in the panel.
+    """
+    await _authorized(authorization)
+    _, factory = _shared_engine()
+    async with factory() as session:
+        config = await read_setting(session, "providers_pricing")
+    provider = config.get("provider")
+    model = config.get("chunk_model")
+    base_url = config.get("base_url")
+    api_key = config.get("api_key")
+    if provider != "openai-compatible" or not base_url or not api_key:
+        return ok({"ok": False, "state": "unsupported", "model": model})
+    started = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                str(base_url).rstrip("/") + "/chat/completions",
+                json={"model": model, "messages": [{"role": "user", "content": "سلام"}]},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.HTTPError as error:
+        return ok({"ok": False, "state": "unreachable", "model": model, "detail": str(error)[:200]})
+    latency_ms = round((time.time() - started) * 1000)
+    if response.status_code == 200:
+        return ok({"ok": True, "state": "ok", "model": model, "latency_ms": latency_ms})
+    # Reuse the shared translation so the panel shows the same reason the chat
+    # itself would: out of credit, wrong key, missing model, rate limit.
+    status_code, code, message = provider_error(response.status_code, response.text)
+    return ok(
+        {"ok": False, "state": "failed", "model": model, "code": code, "detail": message}
+    )

@@ -111,3 +111,94 @@ describe("Admin panel", () => {
     expect(await screen.findByText("شرکت نمونه")).toBeInTheDocument();
   });
 });
+
+describe("Monitoring tab", () => {
+  const hostPayload = {
+    cpu: { percent: 23.5, cores: 6, model: "AMD EPYC", load: { "1m": 0.4, "5m": 0.3, "15m": 0.2 }, per_core: [20, 25] },
+    memory: { total_bytes: 12 * 1024 ** 3, used_bytes: 4 * 1024 ** 3, available_bytes: 8 * 1024 ** 3, percent: 33.3, swap_total_bytes: 2 * 1024 ** 3, swap_used_bytes: 0 },
+    disk: { mounts: [{ path: "/", total_bytes: 72 * 1024 ** 3, used_bytes: 11 * 1024 ** 3, free_bytes: 61 * 1024 ** 3, percent: 15.2 }], io: [] },
+    network: { interfaces: [{ name: "eth0", rx: 1024, tx: 512 }] },
+    uptime: { uptime_seconds: 90000 },
+    top_processes: [{ pid: 10, name: "uvicorn backend.main:app", rss_bytes: 90 * 1024 ** 2 }],
+  };
+  const aiPayload = {
+    state: "ok",
+    api_key_masked: "...25SV",
+    configured_models: { chat: "deepseek-v4.1-flash", embedding: "text-embedding-3-large", rerank: "cohere-rerank-v4.0-fast" },
+    credit: { remaining_irt: 1926851.85, remaining_unit: 0, account_tier: 3, exchange_rate: 228650 },
+    usage: { transactions: 939, tokens_total: 120612078, tokens_cached: 93699748, cost_unit: 4.54, cost_irt: 2601.64 },
+    usage_by_model: [{ model: "deepseek-v4.1-flash", transactions: 920, tokens: 120609165, cost_unit: 4.53 }],
+    packages: [
+      {
+        name: "وایب کُدر روزانه حرفه‌ای",
+        remaining_irt: 1913040.57,
+        days_left: 0.86,
+        models: ["deepseek-v4.1-flash", "glm-5.3"],
+      },
+    ],
+    covered_models: ["deepseek-v4.1-flash", "glm-5.3"],
+  };
+
+  function stub(payloads: { host?: unknown; ai?: unknown; check?: unknown }) {
+    const fn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = url.includes("/monitoring/host")
+        ? payloads.host
+        : url.includes("/monitoring/ai")
+          ? payloads.ai
+          : payloads.check;
+      return new Response(JSON.stringify({ success: true, data: body }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fn);
+    return fn;
+  }
+
+  it("shows server resources as Persian gauges", async () => {
+    sessionStorage.setItem("hiveos.admin", "adm-token");
+    stub({ host: hostPayload, ai: aiPayload });
+    render(<AdminApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "پایش سرور و هوش مصنوعی" }));
+    expect(await screen.findByTestId("gauge-value-پردازنده")).toHaveTextContent("۲۳٫۵٪");
+    expect(screen.getByTestId("gauge-value-حافظه")).toHaveTextContent("۳۳٫۳٪");
+    expect(screen.getByTestId("gauge-value-فضای دیسک")).toHaveTextContent("۱۵٫۲٪");
+  });
+
+  it("shows the AI balance in Toman and flags an expiring package", async () => {
+    sessionStorage.setItem("hiveos.admin", "adm-token");
+    stub({ host: hostPayload, ai: aiPayload });
+    render(<AdminApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "پایش سرور و هوش مصنوعی" }));
+    expect(await screen.findByTestId("ai-balance")).toHaveTextContent("۱٬۹۲۶٬۸۵۲");
+    // days_left 0.86 is inside the three-day window, so the PO gets a warning
+    // rather than having to notice a small number on a card.
+    expect(screen.getByTestId("ai-credit-warning")).toBeInTheDocument();
+    expect(screen.getByText(/در این بسته هست/)).toBeInTheDocument();
+  });
+
+  it("explains a provider with no account API instead of showing an error", async () => {
+    sessionStorage.setItem("hiveos.admin", "adm-token");
+    stub({ host: hostPayload, ai: { state: "unsupported", reason: "NO_ACCOUNT_API", credit: null, usage: null, usage_by_model: [], packages: [], covered_models: [] } });
+    render(<AdminApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "پایش سرور و هوش مصنوعی" }));
+    expect(await screen.findByText(/امکان گزارش اعتبار را ارائه نمی‌دهد/)).toBeInTheDocument();
+  });
+
+  it("surfaces a failing model check in Persian", async () => {
+    sessionStorage.setItem("hiveos.admin", "adm-token");
+    stub({
+      host: hostPayload,
+      ai: aiPayload,
+      check: { ok: false, state: "failed", model: "gpt-5-mini", code: "LLM_PROVIDER_CREDIT", detail: "The provider account is out of credit." },
+    });
+    render(<AdminApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "پایش سرور و هوش مصنوعی" }));
+    fireEvent.click(await screen.findByTestId("model-check-button"));
+    const result = await screen.findByTestId("model-check-result");
+    expect(result).toHaveTextContent("مدل پاسخ نداد");
+    // the developer's English string must never reach the PO
+    expect(result).not.toHaveTextContent("out of credit");
+  });
+});

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MonitoringTab } from "./MonitoringTab";
 import { persianError } from "../api/errors";
 import { Field } from "../components/auth/parts";
 import { Input } from "../components/ui/input";
@@ -28,7 +29,7 @@ export function setAdminSessionExpiredHandler(handler: (() => void) | null): voi
   sessionExpiredHandler = handler;
 }
 
-async function adminApi<T>(
+export async function adminApi<T>(
   token: string,
   method: "GET" | "PUT" | "POST" | "DELETE",
   path: string,
@@ -63,7 +64,7 @@ async function adminApi<T>(
   return payload.data as T;
 }
 
-type Tab = "settings" | "orgs" | "requests" | "logs" | "status";
+type Tab = "monitoring" | "settings" | "orgs" | "requests" | "logs" | "status";
 
 const SETTING_KEYS = [
   { key: "providers_pricing", title: "درگاه مدل و قیمت", hint: "provider: mock | online-mock | openai-compatible" },
@@ -73,7 +74,7 @@ const SETTING_KEYS = [
 ] as const;
 
 /** Shared retry affordance: a failed panel view offers «تلاش مجدد». */
-function Retry({ message, onRetry }: { message: string; onRetry: () => void }) {
+export function Retry({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div
       data-testid="admin-retry"
@@ -228,6 +229,7 @@ export default function AdminApp() {
   }
 
   const tabs: ReadonlyArray<{ id: Tab; label: string }> = [
+    { id: "monitoring", label: "پایش سرور و هوش مصنوعی" },
     { id: "status", label: "وضعیت سامانه" },
     { id: "logs", label: "رویدادها" },
     { id: "orgs", label: "سازمان‌ها" },
@@ -238,7 +240,7 @@ export default function AdminApp() {
   return (
     <div className="min-h-dvh bg-secondary">
       <header className="border-b border-border bg-card px-4 py-2">
-        <div className="mx-auto flex max-w-5xl items-center justify-between">
+        <div className="mx-auto flex max-w-6xl items-center justify-between">
           <h1 className="text-base font-bold">پنل مدیریت HiveOS</h1>
           <button type="button" className="text-sm bg-primary text-primary-foreground hover:bg-primary/90" onClick={logout}>
             خروج
@@ -262,6 +264,7 @@ export default function AdminApp() {
         ))}
       </nav>
       <main className="mx-auto max-w-5xl px-4 py-4">
+        {tab === "monitoring" && <MonitoringTab token={token} />}
         {tab === "settings" && <SettingsTab token={token} />}
         {tab === "orgs" && <OrgsTab token={token} />}
         {tab === "requests" && <RequestsTab token={token} />}
