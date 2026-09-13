@@ -65,13 +65,20 @@ def _load(model_dir: str):
         return _models[model_dir]
 
 
-def _infer(model_dir: str, texts: list[str], pairs: bool, max_length: int, batch_size: int):
-    """Run the graph over texts (or query/document pairs); returns a flat array."""
+def _infer_batches(model_dir: str, texts: list[str], pairs: bool, max_length: int, batch_size: int):
+    """Run the graph batch by batch; yields one raw output per batch.
+
+    Batches are yielded separately rather than concatenated here. Padding is
+    per batch, so a short batch yields (n, 233, h) and the next (n, 248, h):
+    stacking those along axis 0 raises "all the input array dimensions except
+    for the concatenation axis must match exactly". Callers reduce each batch
+    to a fixed-width result (CLS vector or a scalar score) and concatenate
+    that instead, which is safe.
+    """
     import numpy as np
 
     session, tokenizer = _load(model_dir)
     accepted = {item.name for item in session.get_inputs()}
-    rows = []
     for start in range(0, len(texts), batch_size):
         chunk = texts[start : start + batch_size]
         if pairs:
@@ -98,25 +105,32 @@ def _infer(model_dir: str, texts: list[str], pairs: bool, max_length: int, batch
             for name, value in encoded.items()
             if name in accepted and name != "token_type_ids"
         }
-        rows.append(np.asarray(session.run(None, feed)[0]))
-    return np.concatenate(rows, axis=0)
+        yield np.asarray(session.run(None, feed)[0])
 
 
 def _embed_sync(model_dir: str, texts: list[str], max_length: int, batch_size: int):
     """Return unit vectors. bge-m3 uses CLS pooling, not mean pooling."""
     import numpy as np
 
-    hidden = _infer(model_dir, texts, False, max_length, batch_size)
-    pooled = hidden[:, 0] if hidden.ndim == 3 else hidden
-    pooled = pooled.astype(np.float32)
+    # CLS pooling per batch, then concatenate: the pooled width is constant
+    # even when the padded sequence lengths differ between batches.
+    pooled_batches = []
+    for batch in _infer_batches(model_dir, texts, False, max_length, batch_size):
+        pooled = batch[:, 0] if batch.ndim == 3 else batch
+        pooled_batches.append(pooled.astype(np.float32))
+    if not pooled_batches:
+        return []
+    pooled = np.concatenate(pooled_batches, axis=0)
     norms = np.linalg.norm(pooled, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return [[float(value) for value in row] for row in (pooled / norms)]
 
 
 def _score_sync(model_dir: str, pairs: list[list[str]], max_length: int, batch_size: int):
-    raw = _infer(model_dir, pairs, True, max_length, batch_size)
-    return [float(value) for value in raw.reshape(-1)]
+    scores: list[float] = []
+    for batch in _infer_batches(model_dir, pairs, True, max_length, batch_size):
+        scores.extend(float(value) for value in batch.reshape(-1))
+    return scores
 
 
 async def embed(texts: list[str]) -> list[list[float]]:

@@ -138,20 +138,32 @@ export default function Chat() {
     // The retry button passes the failed text explicitly: reading 'input' here
     // would see the already-cleared state and the retry would silently no-op.
     const text = (override ?? input).trim();
-    if (!text || !activeId || busy) return;
+    // A brand-new organization has no sessions, so activeId is null on the
+    // first screen. This used to return here with no message and no error,
+    // which made the send button look broken. Create the session on demand
+    // instead - typing a question should never require a separate click.
+    if (!text || busy) return;
     lastSentRef.current = text;
     setInput("");
     setBusy(true);
     setError(null);
     try {
-      await api("POST", "/chat/sessions/" + activeId + "/messages", { text });
+      let sessionId = activeId;
+      if (!sessionId) {
+        const createdSession = await api<{ id: string }>("POST", "/chat/sessions", {});
+        sessionId = createdSession.id;
+        activeIdRef.current = sessionId;
+        setActiveId(sessionId);
+        await loadSessions();
+      }
+      await api("POST", "/chat/sessions/" + sessionId + "/messages", { text });
       setMessages((m) => [
         ...m,
         { id: "local-" + Date.now(), role: "USER", body: { text }, created_at: "" },
       ]);
       const created = await api<{ id: string }>("POST", "/executions", {
         input: { text },
-        chat_session_id: activeId,
+        chat_session_id: sessionId,
       });
       const done = await api<{ status: string; output: { text: string } | null; error: { message: string } | null }>(
         "POST",
@@ -160,7 +172,7 @@ export default function Chat() {
       if (done.status !== "COMPLETED") {
         setError(done.error?.message ?? "اجرای پاسخ ناموفق بود.");
       }
-      await openSession(activeId);
+      await openSession(sessionId);
       const w = await api<WalletMini>("GET", "/wallet");
       setWallet({ balance: w.balance, blocked: w.blocked });
     } catch (e) {
