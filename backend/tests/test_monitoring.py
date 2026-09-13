@@ -177,8 +177,12 @@ def test_cpu_idle_is_not_counted_as_busy(tmp_path, monkeypatch):
     clock = iter([100.0, 101.0])
     monkeypatch.setattr(host_monitor.time, "monotonic", lambda: next(clock))
 
+    # The first sample has no baseline to diff against, so it reports the
+    # since-boot average rather than leaving the gauge blank on every deploy:
+    # 200 busy of 1000 total = 20%.
     first = host_monitor.cpu_snapshot()
-    assert first["percent"] is None  # first sample has no baseline
+    assert first["percent"] == 20.0, first["percent"]
+    assert first["source"] == "since_boot"
 
     # user +20, nice 0, system +20, idle +80 => 40 busy of 120 total = 33.3%.
     # With the old bug idle was counted as busy and this read as 66.7%.

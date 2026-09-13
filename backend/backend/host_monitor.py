@@ -121,8 +121,20 @@ def cpu_snapshot() -> dict:
     idle_delta = rates.get("cpu_idle")
     if busy_delta is not None and idle_delta is not None and (busy_delta + idle_delta) > 0:
         sample["percent"] = round(100.0 * busy_delta / (busy_delta + idle_delta), 1)
+        sample["source"] = "instant"
     else:
-        sample["percent"] = None
+        # First call after a restart has no previous sample to diff against.
+        # Reporting null would paint the panel with a blank gauge on every
+        # deploy, so fall back to the since-boot average and label it as such;
+        # the next poll 15 seconds later replaces it with a live figure.
+        busy = counters.get("cpu_busy")
+        idle = counters.get("cpu_idle")
+        if busy is not None and idle is not None and (busy + idle) > 0:
+            sample["percent"] = round(100.0 * busy / (busy + idle), 1)
+            sample["source"] = "since_boot"
+        else:
+            sample["percent"] = None
+            sample["source"] = "unavailable"
 
     for index in range(len(cores)):
         b = rates.get(f"cpu{index}_busy")

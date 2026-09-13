@@ -790,13 +790,15 @@ async def set_storage_quota(
         ).mappings().first()
         if row is None:
             raise ApiError(404, "NOT_FOUND", "Organization not found.")
+        # The audit row must join the same session as the change, or a failure
+        # between the two leaves a quota change nobody can trace.
+        await record_audit(
+            session,
+            "organization.storage_quota_changed",
+            organization_id=org_id,
+            detail={"storage_quota_mb": body.storage_quota_mb},
+        )
         await session.commit()
-    await record_audit(
-        None,
-        "organization.storage_quota_changed",
-        organization_id=org_id,
-        detail={"storage_quota_mb": body.storage_quota_mb},
-    )
     return ok({"organization_id": str(org_id), "storage_quota_mb": body.storage_quota_mb})
 
 
