@@ -34,6 +34,7 @@ const MESSAGES: Record<string, string> = {
   OTP_COOLDOWN: "کد تأیید تازه فرستاده شده است؛ کمی بعد دوباره درخواست کنید.",
   SMS_DELIVERY_FAILED: "ارسال پیامک ناموفق بود؛ کمی بعد دوباره تلاش کنید.",
   USERNAME_TAKEN: "این نام کاربری قبلاً انتخاب شده است.",
+  EMAIL_ALREADY_EXISTS: "این ایمیل قبلاً ثبت شده است؛ ایمیل دیگری وارد کنید.",
   USERNAME_AVAILABLE: "این نام کاربری در دسترس است.",
 
   // --- onboarding / workspace / brain ---------------------------------------

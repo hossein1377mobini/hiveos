@@ -1,5 +1,5 @@
 import { KeyRound, RefreshCw, ShieldAlert } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, clearToken } from "../api/client";
 import { AuthBrand, faDigit, PanelHead, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
@@ -79,26 +79,38 @@ export default function OtpVerify({
 
   const code = digits.join("");
 
-  // Auto-verify once the last box is filled (mockup: no explicit submit).
-  useEffect(() => {
-    if (sent && code.length === BOXES && !code.includes("") && !busy) void verify(code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]);
+  const verify = useCallback(
+    async (value: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await api("POST", "/auth/verify-otp", { code: value });
+        onVerified();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "کد واردشده درست نیست.");
+        setDigits(Array(BOXES).fill(""));
+        inputsRef.current[0]?.focus();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onVerified],
+  );
 
-  async function verify(value: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api("POST", "/auth/verify-otp", { code: value });
-      onVerified();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "کد واردشده درست نیست.");
-      setDigits(Array(BOXES).fill(""));
-      inputsRef.current[0]?.focus();
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Auto-verify once the last box is filled (mockup: no explicit submit).
+  // `verified` latches so a re-render (or a StrictMode double-invoke) cannot
+  // submit the same six digits twice.
+  const submitted = useRef<string | null>(null);
+  useEffect(() => {
+    // `digits.some((d) => !d)`, not `code.includes("")`. Every string contains
+    // the empty string, so that guard was always true and the auto-submit the
+    // mockup depends on never ran — the page silently required the extra button
+    // press it was designed to avoid.
+    if (!sent || code.length !== BOXES || digits.some((digit) => !digit)) return;
+    if (submitted.current === code) return;
+    submitted.current = code;
+    void verify(code);
+  }, [code, digits, sent, verify]);
 
   function setDigit(index: number, raw: string) {
     const clean = normDigits(raw).replace(/\D/g, "");
@@ -163,9 +175,11 @@ export default function OtpVerify({
           </div>
         )}
         <PanelHead icon={KeyRound} tone="amber" title="کد تأیید" center />
-        <p className="mt-2 text-center text-[13px] text-muted-foreground">کد تأیید پیامک‌شده به شماره موبایل سازمان را وارد کنید.</p>
+        <p className="mt-2 text-center text-caption text-muted-foreground">کد تأیید پیامک‌شده به شماره موبایل سازمان را وارد کنید.</p>
 
         <div className="mt-7 flex justify-center gap-2.5" dir="rtl">
+          {/* The digit boxes are a fixed-length positional row: index 3 is always
+              the fourth box, so the position is the identity here. */}
           {digits.map((d, i) => (
             <input
               key={i}
@@ -193,7 +207,10 @@ export default function OtpVerify({
 
         <div className="mt-3.5 flex min-h-6 items-center justify-center gap-1.5 text-xs">
           {error ? (
-            <span className="flex items-center gap-1.5 text-error">
+            // role="alert" so a rejected code is announced: the digits are read
+            // back to the user and the boxes clear, and without this a screen
+            // reader user gets no signal that the attempt failed.
+            <span role="alert" className="flex items-center gap-1.5 text-error">
               <ShieldAlert aria-hidden className="size-3.5" />
               {error}
             </span>
@@ -229,7 +246,7 @@ export default function OtpVerify({
                 type="button"
                 onClick={onBack}
                 data-testid="otp-back"
-                className="cursor-pointer text-xs underline-offset-4 hover:underline bg-primary text-primary-foreground hover:bg-primary/90"
+                className="cursor-pointer text-caption text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
                 بازگشت
               </button>
@@ -240,7 +257,7 @@ export default function OtpVerify({
                 clearToken();
                 location.reload();
               }}
-              className="cursor-pointer text-xs underline-offset-4 hover:underline bg-primary text-primary-foreground hover:bg-primary/90"
+              className="cursor-pointer text-caption text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               خروج از این حساب
             </button>

@@ -208,9 +208,11 @@ function FieldError({
 
     return (
       <ul className="ms-4 flex list-disc flex-col gap-1">
+        {/* Messages are the natural key and the list is deduplicated above, so
+            two fields failing with the same text produce one row. */}
         {uniqueErrors.map(
-          (error, index) =>
-            error?.message && <li key={index}>{error.message}</li>
+          (error) =>
+            error?.message && <li key={error.message}>{error.message}</li>
         )}
       </ul>
     )

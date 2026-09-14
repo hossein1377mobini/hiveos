@@ -60,6 +60,14 @@ export default function RegisterOrganization({
         size,
         business_description: businessDescription || null,
       });
+      // Persist the id so the owner-account step survives a refresh or a Back
+      // navigation. Without it a reload mid-signup loses the organization the
+      // user just created. [A4-adjacent]
+      try {
+        sessionStorage.setItem("hiveos.pending_organization", data.organization_id);
+      } catch {
+        /* private mode — the flow still works, it just cannot resume after a reload */
+      }
       onCreated(data.organization_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "خطا");
@@ -97,9 +105,11 @@ export default function RegisterOrganization({
                     <SelectValue placeholder="انتخاب کنید" />
                   </SelectTrigger>
                   <SelectContent>
-                    {INDUSTRIES.map((i) => (
-                      <SelectItem key={i} value={i}>
-                        {i}
+                    {/* The industry name is the key: it is unique within the
+                        list and stable, unlike the array position. */}
+                    {INDUSTRIES.map((industry) => (
+                      <SelectItem key={industry} value={industry}>
+                        {industry}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -188,7 +198,7 @@ export default function RegisterOrganization({
                   </div>
                 </div>
                 <div className="relative min-w-[140px] flex-1 rounded-[13px] border border-border bg-card p-3.5 opacity-55">
-                  <span className="absolute end-2 top-2 rounded-full border border-warning bg-warning-bg px-2 py-px text-[10px] font-bold text-warning">
+                  <span className="absolute end-2 top-2 rounded-full border border-warning bg-warning-bg px-2 py-px text-micro font-bold text-warning">
                     به‌زودی (نسخه ۰.۳)
                   </span>
                   <div className="text-sm font-bold text-foreground">محلی</div>
@@ -213,7 +223,7 @@ export default function RegisterOrganization({
             <button
               type="button"
               onClick={onBack}
-              className="mt-3 w-full cursor-pointer text-center text-xs underline-offset-4 hover:underline bg-primary text-primary-foreground hover:bg-primary/90"
+              className="mt-3 w-full cursor-pointer text-center text-caption text-primary underline-offset-4 hover:underline"
             >
               بازگشت به ورود
             </button>

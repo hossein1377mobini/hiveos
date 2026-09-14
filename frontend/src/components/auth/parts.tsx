@@ -1,3 +1,4 @@
+import { Children, cloneElement, isValidElement, useId } from "react"
 import { CheckIcon, type LucideIcon } from "lucide-react"
 
 
@@ -22,8 +23,8 @@ export function AuthBrand({ title, subtitle }: { title: string; subtitle: string
         <HouseLogo className="size-[26px]" />
       </span>
       <div className="flex flex-col gap-1">
-        <h1 className="text-[21px] font-extrabold text-foreground">{title}</h1>
-        <p className="text-[13px] text-muted-foreground">{subtitle}</p>
+        <h1 className="text-title font-extrabold text-foreground">{title}</h1>
+        <p className="text-caption text-muted-foreground">{subtitle}</p>
       </div>
     </div>
   )
@@ -73,7 +74,7 @@ export function Stepper({ current }: { current: number }) {
               </span>
               <span
                 className={cn(
-                  "whitespace-nowrap text-[11.5px]",
+                  "whitespace-nowrap text-micro",
                   state === "active" ? "font-bold text-primary" : state === "done" ? "text-muted-foreground" : "text-muted-foreground/70",
                 )}
               >
@@ -116,8 +117,8 @@ export function PanelHead({
       <span aria-hidden className={cn("inline-flex size-[38px] shrink-0 items-center justify-center rounded-lg", TONE_CLASS[tone])}>
         <Icon className="size-[19px]" />
       </span>
-      <h2 className="text-[17px] font-extrabold text-foreground">{title}</h2>
-      {hint && <span className="ms-auto whitespace-nowrap text-[11px] text-muted-foreground">{hint}</span>}
+      <h2 className="text-heading font-extrabold text-foreground">{title}</h2>
+      {hint && <span className="ms-auto whitespace-nowrap text-micro text-muted-foreground">{hint}</span>}
     </div>
   )
 }
@@ -143,20 +144,94 @@ export function Field({
   error?: React.ReactNode
   children: React.ReactNode
   className?: string
+  /** Filled in automatically; pass it only to point at a control Field cannot see. */
   htmlFor?: string
 }) {
+  // The label used to be rendered with htmlFor={undefined} because no caller
+  // ever passed one, so none of the signup fields were named for a screen
+  // reader — the label was decoration. The first real control among the children
+  // now receives a generated id and the label points at it. [E]
+  const generatedId = useId()
+  const controlId = htmlFor ?? generatedId
+  // Children is an array whenever a field has more than one child (the input plus
+  // a helper row), and isValidElement is false for an array, so the whole tree
+  // used to be skipped in exactly those cases.
+  const labelled = Array.isArray(children)
+    ? Children.toArray(children).map((child) => withControlId(child, controlId))
+    : withControlId(children, controlId)
+
   return (
     <FieldPrimitive data-invalid={error ? true : undefined} className={cn("mb-[18px] gap-1.5 last:mb-0", className)}>
-      <FieldLabel htmlFor={htmlFor} className="w-auto gap-1 text-[13px] font-bold text-foreground">
+      <FieldLabel htmlFor={controlId} className="w-auto gap-1 text-caption font-bold text-foreground">
         {label}
         {required && <span className="text-error">*</span>}
-        {optional && <span className="text-[11.5px] font-normal text-muted-foreground">(اختیاری)</span>}
+        {optional && <span className="text-micro font-normal text-muted-foreground">(اختیاری)</span>}
       </FieldLabel>
-      {children}
+      {labelled}
       {hint && <FieldDescription className="text-xs">{hint}</FieldDescription>}
       {error && <FieldDescription className="text-xs text-error">{error}</FieldDescription>}
     </FieldPrimitive>
   )
+}
+
+/** Native elements a <label for> may legally point at. */
+const LABELLABLE_TAGS = new Set(["input", "textarea", "select", "button"])
+
+/**
+ * Give the field's first real control the field's id, so the label resolves to
+ * something a browser and a screen reader both accept.
+ *
+ * The control is not always the first child: the mobile field wraps its input in
+ * an input-group with a +98 prefix, and the password field wraps it with the eye
+ * toggle. Pointing the label at those wrappers is invalid — a browser ignores a
+ * label aimed at a <div> and the field ends up unnamed. So the tree is walked
+ * until something labellable is found, and only that element is rebuilt.
+ */
+function withControlId(node: React.ReactNode, id: string): React.ReactNode {
+  if (!isValidElement(node)) return node
+
+  const props = node.props as {
+    id?: string
+    "data-slot"?: string
+    children?: React.ReactNode
+  }
+  // An explicit id is the caller's decision and is left alone.
+  if (props.id) return node
+  const source = node as React.ReactElement<{ id?: string }>
+
+  const tag = typeof node.type === "string" ? node.type : ""
+
+  // A plain HTML element is either the control or a layout wrapper. A wrapper
+  // (the +98 input-group, the password eye) is recursed into; a labellable tag
+  // is the control.
+  if (tag) {
+    if (tag !== "button" && LABELLABLE_TAGS.has(tag)) return cloneElement(source, { id })
+    const nested = descend(props.children, id)
+    return nested ? cloneElement(node as React.ReactElement<{ children?: React.ReactNode }>, { children: nested }) : node
+  }
+
+  // A component. Input/Textarea render their id straight onto the control, but a
+  // Radix Root (Select) renders no element at all — its id would go nowhere. So
+  // the children are searched first, and the component is only given the id when
+  // nothing inside it could take one. [E]
+  const nested = descend(props.children, id)
+  if (nested) {
+    return cloneElement(node as React.ReactElement<{ children?: React.ReactNode }>, { children: nested })
+  }
+  return cloneElement(source, { id })
+}
+
+/** Rebuild the children list with the id placed, or return null if nothing took it. */
+function descend(children: React.ReactNode, id: string): React.ReactNode | null {
+  const items = Children.toArray(children)
+  let patched = false
+  const next = items.map((child) => {
+    if (patched) return child
+    const candidate = withControlId(child, id)
+    if (candidate !== child) patched = true
+    return candidate
+  })
+  return patched ? next : null
 }
 
 export function StepsList({
@@ -175,7 +250,7 @@ export function StepsList({
             <ItemMedia
               data-state={item.state}
               className={cn(
-                "flex size-6 shrink-0 items-center justify-center rounded-full border-2 bg-card text-[13px] font-bold",
+                "flex size-6 shrink-0 items-center justify-center rounded-full border-2 bg-card text-caption font-bold",
                 item.state === "todo" && "border-border text-muted-foreground",
                 item.state === "active" && "border-primary bg-info-bg text-primary",
                 item.state === "done" && "border-success bg-success text-primary-foreground",

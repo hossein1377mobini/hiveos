@@ -70,21 +70,21 @@ export default function Login({ onDone }: { onDone: () => void }) {
         <span className="logo-box inline-flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-primary text-primary-foreground shadow-[0_8px_20px_rgba(43,58,115,0.25)] [&>svg]:h-[26px] [&>svg]:w-[26px]">
           {HOUSE_SVG}
         </span>
-        <h1 className="mt-3.5 text-[21px] font-extrabold">ورود به HiveOS</h1>
-        <p className="mt-1 text-[13px] text-muted-foreground">با نام کاربری و رمز عبور حساب خود وارد شوید.</p>
+        <h1 className="mt-3.5 text-title font-extrabold">ورود به HiveOS</h1>
+        <p className="mt-1 text-caption text-muted-foreground">با نام کاربری و رمز عبور حساب خود وارد شوید.</p>
       </div>
 
       <Surface className="p-7">
         <form onSubmit={submit} noValidate={false}>
           <div className="mb-[18px]">
-            <Label htmlFor="login-username" className="mb-1.5 text-[13px] font-bold">
+            <Label htmlFor="login-username" className="mb-1.5 text-caption font-bold">
               نام کاربری <span className="text-error">*</span>
             </Label>
             <Input
               id="login-username"
               type="text"
               dir="ltr"
-              className="mono h-[42px] rounded-control text-left text-[14px]"
+              className="mono h-[42px] rounded-control text-left text-body"
               placeholder="manager.ar"
               autoComplete="username"
               value={username}
@@ -94,12 +94,12 @@ export default function Login({ onDone }: { onDone: () => void }) {
               required
             />
             {username.length > 0 && usernameError(username) && (
-              <p className="mt-1.5 text-[12px] text-error">{usernameError(username)}</p>
+              <p className="mt-1.5 text-caption text-error">{usernameError(username)}</p>
             )}
           </div>
 
           <div className="mb-[18px]">
-            <Label htmlFor="login-password" className="mb-1.5 text-[13px] font-bold">
+            <Label htmlFor="login-password" className="mb-1.5 text-caption font-bold">
               رمز عبور <span className="text-error">*</span>
             </Label>
             <div className="relative" dir="ltr">
@@ -107,7 +107,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
                 id="login-password"
                 type={showPw ? "text" : "password"}
                 dir="ltr"
-                className="h-[42px] rounded-control pe-12 text-left text-[14px]"
+                className="h-[42px] rounded-control pe-12 text-left text-body"
                 placeholder="••••••••"
                 autoComplete="current-password"
                 value={password}
@@ -118,7 +118,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
                 type="button"
                 aria-label="نمایش رمز"
                 onClick={() => setShowPw((v) => !v)}
-                className="absolute end-3 top-1/2 -translate-y-1/2 rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary bg-primary text-primary-foreground hover:bg-primary/90"
+                className="absolute end-3 top-1/2 -translate-y-1/2 rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 <span className="block h-5 w-5 [&>svg]:h-5 [&>svg]:w-5">{EYE_SVG}</span>
               </button>
@@ -127,18 +127,20 @@ export default function Login({ onDone }: { onDone: () => void }) {
 
           {error && (
             <div
-              className="mb-4 flex items-start gap-2.5 rounded-[10px] border border-error bg-error-bg p-3 text-[13px] text-error"
+              className="mb-4 flex items-start gap-2.5 rounded-[10px] border border-error bg-error-bg p-3 text-caption text-error"
               role="alert"
             >
               <span className="mt-0.5 block h-[18px] w-[18px] shrink-0 [&>svg]:h-[18px] [&>svg]:w-[18px]">{ALERT_SVG}</span>
               <div>
-                <div className="font-extrabold">
-                  {locked ? "ورود موقتاً قفل شد." : "نام کاربری یا رمز عبور درست نیست."}
-                </div>
+                {/* The server's mapped Persian reason, not a canned line. The
+                    `error` state was computed but never rendered, so a rate
+                    limit or a downed API was reported as "wrong password" —
+                    exactly the substitution the PO asked to avoid. */}
+                <div className="font-extrabold">{error}</div>
                 <div className="mt-1 text-muted-foreground">
                   {locked
                     ? "۱۵ دقیقه بعد دوباره تلاش کنید."
-                    : "دوباره تلاش کنید. پس از ۵ تلاش ناموفق، ورود ۱۵ دقیقه قفل می‌شود."}
+                    : "پس از ۵ تلاش ناموفق، ورود ۱۵ دقیقه قفل می‌شود."}
                 </div>
               </div>
             </div>
@@ -147,7 +149,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-[10px] px-5 py-3 text-[14px] font-bold shadow-[0_3px_12px_rgba(43,58,115,0.28)] transition-all hover:shadow-[0_6px_18px_rgba(43,58,115,0.34)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none bg-primary text-primary-foreground hover:bg-primary/90"
+            className="w-full rounded-[10px] px-5 py-3 text-body font-bold shadow-[0_3px_12px_rgba(43,58,115,0.28)] transition-all hover:shadow-[0_6px_18px_rgba(43,58,115,0.34)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {busy ? "در حال ورود…" : "ورود"}
           </button>

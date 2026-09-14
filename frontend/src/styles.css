@@ -1,67 +1,160 @@
-/* Design tokens — hive/design/design-system.md v0.4.0 §2 + ui-mockups/v0.1/assets/hiveos.css.
-   Light mode only in v0.1 (PO decision 2026-08-17). Base spacing unit = 4px (Tailwind default). */
-/* Dev/preview font delivery via CDN so the UI matches the mockups without the
-   self-hosted IranYekanX license step; air-gapped fallback (Tahoma) is intact. */
-@import url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css");
+/* ============================================================================
+   HiveOS Design Tokens — v0.5.0
+   ----------------------------------------------------------------------------
+   Light mode only (PO decision 2026-08-17, re-affirmed 2026-09-13).
+   Base spacing unit = 4px (Tailwind default).
+
+   Layering, in order:
+     1. @font-face  — self-hosted IRANYekanX (no CDN; air-gapped safe)  [G1/G2]
+     2. @theme      — primitive palette + type scale + geometry          [B1]
+     3. :root       — shadcn semantic mapping
+     4. base layer  — element defaults
+   Every value a component needs must be reachable from a token here. If a
+   component needs a new value, it is added here first, never inline.  [B4]
+   ========================================================================= */
+
+/* --- 1. Self-hosted Persian typeface -----------------------------------------
+   IRANYekanX (FaNum variable build) ships with the product under the project
+   licence held by the PO. Files live in frontend/public/fonts/ and are served
+   from the app origin, so an air-gapped install renders identically to staging.
+   The wght axis runs 100..1000; three working weights (400/500/700) are exposed
+   as named tokens in @theme below, and the raw axis stays available for the few
+   places that need DemiBold (600) as a true intermediate step.                */
+@font-face {
+  font-family: "IRANYekanX";
+  src: url("/fonts/IRANYekanXFaNumVF.woff2") format("woff2-variations"),
+       url("/fonts/IRANYekanXFaNumVF.woff") format("woff-variations");
+  font-weight: 100 1000;
+  font-style: normal;
+  font-display: swap;
+  /* Persian needs kerning + contextual alternates for correct letter joining. */
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+}
+
 @import "tailwindcss";
-/* Preset webfonts (Roboto Slab / DM Sans). Both are Latin-only — no Arabic
-   subset exists — so Persian glyphs always fall through to the Vazirmatn stack. */
-@import "@fontsource-variable/roboto-slab";
-@import "@fontsource-variable/dm-sans";
 
-@custom-variant dark (&:is(.dark *));
-
+/* --- 2. Primitive tokens ---------------------------------------------------- */
 @theme {
-  /* Neutral palette (design-system §2.1) */
+  /* Neutral ramp — HiveOS keeps a warm-neutral base, now with the two steps
+     the previous ramp was missing (100 for zebra rows, 800 for icon strokes).
+     The old 5-step ramp forced components to round to 50/200/600 and drift. */
   --color-neutral-0: #ffffff;
+  --color-neutral-25: #fcfcfb;
   --color-neutral-50: #f7f7f5;
+  --color-neutral-100: #f0f0ed;
   --color-neutral-200: #e4e4e1;
+  --color-neutral-300: #d2d2ce;
   --color-neutral-400: #a8a79e;
+  --color-neutral-500: #86857c;
   --color-neutral-600: #57564f;
+  --color-neutral-700: #3d3c37;
+  --color-neutral-800: #2a2a26;
   --color-neutral-900: #1c1c19;
-  /* Accent — HiveOS Navy */
+
+  /* Accent — HiveOS Navy. Extended so focus rings, selected rows and the
+     dark hero surface all have a real step instead of improvisation. */
   --color-navy-50: #eef1fb;
+  --color-navy-100: #e0e5f7;
   --color-navy-200: #c4cdf0;
+  --color-navy-300: #9aa8e2;
+  --color-navy-400: #6b7ecb;
+  --color-navy-500: #4557a4;
   --color-navy-600: #2b3a73;
+  --color-navy-700: #232f5e;
   --color-navy-800: #1b264d;
-  /* Semantic status colors (reserved roles; destructive = delete/error only) */
-  --color-success: #1b7f4b;
+  --color-navy-900: #131b38;
+
+  /* Status roles — each has text / surface / border / strong so a status
+     surface never needs a literal colour. [B7] */
+  --color-success: #14683c;
+  --color-success-strong: #1b7f4b;
   --color-success-bg: #e8f5ee;
-  --color-warning: #b7791f;
+  --color-success-border: #bfe3ce;
+  --color-warning: #8a5a12;
+  --color-warning-strong: #b7791f;
   --color-warning-bg: #fbf1e3;
-  --color-error: #b42318;
+  --color-warning-border: #eed9b6;
+  --color-error: #9f1d12;
+  --color-error-strong: #b42318;
   --color-error-bg: #fdecec;
-  /* Step/accent colors for non-CTA markers (mockup assets/hiveos.css §1) */
+  --color-error-border: #f3c2be;
+  --color-info: #2b3a73;
+  --color-info-strong: #2b3a73;
+  --color-info-bg: #eef1fb;
+  --color-info-border: #c4cdf0;
+
+  /* Categorical hues for charts and step markers. Distinct from the status
+     roles on purpose: a teal chart series is not a "success". */
   --color-teal: #0e7c6b;
   --color-teal-soft: #e3f4f0;
   --color-amber: #c97b1f;
   --color-amber-soft: #fbf1e3;
   --color-violet: #6b4ab0;
   --color-violet-soft: #f0ebfa;
-  /* Geometry — single radius source, components derive (design-system §2.4) */
-  --radius-card: 18px;
-  --radius-control: 10px;
-  --radius-xs: 8px;
-  /* Elevation — level 1 (cards) + level 2/3 (popover, modal); max 3, subtle */
-  --shadow-card: 0 1px 2px rgba(28, 28, 25, 0.05), 0 12px 28px rgba(43, 58, 115, 0.07);
-  --shadow-pop: 0 14px 40px rgba(28, 28, 25, 0.18);
+  --color-rose: #b5416b;
+  --color-rose-soft: #fbeaf1;
+  --color-sky: #1f6fa8;
+  --color-sky-soft: #e6f2fa;
+
+  /* --- Type scale [B1] ------------------------------------------------------
+     Seven named steps replace the 16 ad-hoc pixel values found across the UI.
+     Sizes are the *Latin* reference: Persian sits optically larger at the same
+     px, so the body step stays at 14px and headings step down from 30px. */
+  --text-display: 1.875rem;      /* 30px — page hero, admin KPI value */
+  --text-display--line-height: 1.35;
+  --text-display--letter-spacing: -0.01em;
+  --text-display--font-weight: 800;
+
+  --text-title: 1.25rem;         /* 20px — page title */
+  --text-title--line-height: 1.45;
+  --text-title--font-weight: 800;
+
+  --text-heading: 1rem;          /* 16px — section / card title */
+  --text-heading--line-height: 1.5;
+  --text-heading--font-weight: 700;
+
+  --text-subheading: 0.875rem;   /* 14px — subsection, table head */
+  --text-subheading--line-height: 1.55;
+  --text-subheading--font-weight: 700;
+
+  --text-body: 0.875rem;         /* 14px — default copy */
+  --text-body--line-height: 1.75;   /* Persian needs the extra leading */
+  --text-body--font-weight: 400;
+
+  --text-caption: 0.8125rem;     /* 13px — helper text, secondary rows */
+  --text-caption--line-height: 1.65;
+  --text-caption--font-weight: 400;
+
+  --text-micro: 0.6875rem;       /* 11px — badges, metadata, table chrome */
+  --text-micro--line-height: 1.5;
+  --text-micro--font-weight: 600;
+
+  /* Weight tokens — three active weights; IRANYekanX Mid is the workhorse. */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-demibold: 600;
+  --font-weight-bold: 700;
+
+  /* --- Geometry -------------------------------------------------------------
+     A single radius source, tightened for a denser enterprise surface. The
+     18px card radius of v0.1 read consumer-ish next to the new data tables. */
+  --radius-card: 14px;
+  --radius-control: 9px;
+  --radius-xs: 6px;
+
+  /* Elevation — three levels, all subtle. v0.1 had a 28px navy bloom on every
+     card, which flattened the hierarchy because everything floated equally. */
+  --shadow-card: 0 1px 2px rgba(28, 28, 25, 0.04), 0 1px 3px rgba(28, 28, 25, 0.03);
+  --shadow-raised: 0 2px 4px rgba(28, 28, 25, 0.05), 0 8px 20px rgba(27, 38, 77, 0.06);
+  --shadow-pop: 0 12px 32px rgba(28, 28, 25, 0.14), 0 2px 6px rgba(28, 28, 25, 0.06);
+
+  /* Motion — one duration pair for the whole product. [design-system §2.5] */
+  --ease-out-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 140ms;
+  --duration-base: 240ms;
 }
 
-/* Status tones (design-system §2.3). Tailwind emits bg-success, text-success,
-   border-success, bg-success-bg, ... from these four roles, so every status
-   surface stays one token away from its meaning instead of a literal colour. */
-@theme {
-  --color-info: var(--color-navy-600);
-  --color-info-bg: var(--color-navy-50);
-  --color-info-border: var(--color-navy-200);
-  --color-success-border: #bfe3ce;
-  --color-warning-border: #eed9b6;
-  --color-error-border: #f3c2be;
-}
-
-/* shadcn/ui semantic tokens (design-system §2.1). Every official shadcn
-   component reads these, so the HiveOS palette is expressed once here instead
-   of being re-applied per component. Light mode only (PO decision 2026-08-17). */
+/* --- 3. Semantic tokens (shadcn contract) ----------------------------------- */
 :root {
   --background: var(--color-neutral-50);
   --foreground: var(--color-neutral-900);
@@ -69,104 +162,51 @@
   --card-foreground: var(--color-neutral-900);
   --popover: var(--color-neutral-0);
   --popover-foreground: var(--color-neutral-900);
-  /* Navy is the single CTA colour (design-system §2.3) */
   --primary: var(--color-navy-600);
   --primary-foreground: #ffffff;
-  --secondary: var(--color-neutral-50);
+  --primary-hover: var(--color-navy-700);
+  --secondary: var(--color-neutral-100);
   --secondary-foreground: var(--color-neutral-900);
-  /* Hover/selected surface inside menus, ghost buttons, table rows */
   --accent: var(--color-navy-50);
-  --accent-foreground: var(--color-navy-600);
-  --muted: var(--color-neutral-50);
+  --accent-foreground: var(--color-navy-700);
+  --muted: var(--color-neutral-100);
   --muted-foreground: var(--color-neutral-600);
-  --destructive: var(--color-error);
+  --destructive: var(--color-error-strong);
+  --destructive-foreground: #ffffff;
   --border: var(--color-neutral-200);
-  --input: var(--color-neutral-200);
-  --ring: var(--color-navy-600);
+  --border-strong: var(--color-neutral-300);
+  --input: var(--color-neutral-300);
+  --ring: var(--color-navy-500);
+
   --chart-1: var(--color-navy-600);
   --chart-2: var(--color-teal);
   --chart-3: var(--color-amber);
   --chart-4: var(--color-violet);
-  --chart-5: var(--color-success);
+  --chart-5: var(--color-sky);
+
   --sidebar: var(--color-neutral-0);
   --sidebar-foreground: var(--color-neutral-900);
   --sidebar-primary: var(--color-navy-600);
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: var(--color-navy-50);
-  --sidebar-accent-foreground: var(--color-navy-600);
+  --sidebar-accent-foreground: var(--color-navy-700);
   --sidebar-border: var(--color-neutral-200);
-  --sidebar-ring: var(--color-navy-600);
-  /* Geometry — single radius source (design-system §2.4). shadcn sizes are
-     derived from --radius in @theme inline, so 18px cascades to every part. */
-  --radius: 18px;
+  --sidebar-ring: var(--color-navy-500);
+
+  --radius: var(--radius-card);
+
+  /* Data-surface density. The admin tables and the knowledge grid read the
+     same tokens, so a single switch tightens every data view. [D13] */
+  --density-row: 44px;
+  --density-cell-x: 12px;
+  --density-cell-y: 10px;
 }
 
-body {
-  /* Font decision: IranYekanXFaNum (PO, design-system §2.2). Files are self-hosted
-     once the On-Prem distribution license check (design-system §8 Q1) closes;
-     fallback stack keeps Air-gapped safe meanwhile. */
-  font-family: "IranYekanXFaNum", "Vazirmatn", Tahoma, sans-serif;
-  background: var(--color-neutral-50);
-  color: var(--color-neutral-900);
-  line-height: 1.7;
-  font-size: 14px;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* Technical/ID fields — mockup assets/hiveos.css §۲ (.mono) */
-.mono {
-  font-family: Consolas, "Courier New", monospace;
-  unicode-bidi: embed;
-}
-
-/* Visible focus ring on every interactive element (design-system §2.7). */
-:focus-visible {
-  outline: 2px solid var(--color-navy-600);
-  outline-offset: 2px;
-  border-radius: var(--radius-control);
-}
-
-.dark {
-  --background: oklch(0.141 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.424 0.199 265.638);
-  --primary-foreground: oklch(0.97 0.014 254.604);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
-  --chart-1: oklch(0.828 0.111 230.318);
-  --chart-2: oklch(0.685 0.169 237.323);
-  --chart-3: oklch(0.588 0.158 241.966);
-  --chart-4: oklch(0.5 0.134 242.749);
-  --chart-5: oklch(0.443 0.11 240.79);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.623 0.214 259.815);
-  --sidebar-primary-foreground: oklch(0.97 0.014 254.604);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.552 0.016 285.938);
-}
-
+/* --- 4. Base layer ---------------------------------------------------------- */
 @theme inline {
-  /* Persian first (IranYekanXFaNum → Vazirmatn → Tahoma for air-gapped hosts);
-     Roboto Slab / DM Sans only render the Latin/technical glyphs Vazirmatn lacks. */
-  --font-sans: "IranYekanXFaNum", "Vazirmatn", Tahoma, sans-serif;
-  --font-serif: "IranYekanXFaNum", "Vazirmatn", "Roboto Slab Variable", Tahoma, serif;
-  --font-heading: "IranYekanXFaNum", "Vazirmatn", "DM Sans Variable", Tahoma, sans-serif;
-  --font-mono: Consolas, "Courier New", monospace;
+  --font-sans: "IRANYekanX", Tahoma, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -182,7 +222,9 @@ body {
   --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
+  --color-border-strong: var(--border-strong);
   --color-border: var(--border);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -190,6 +232,7 @@ body {
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
   --color-popover-foreground: var(--popover-foreground);
@@ -198,24 +241,83 @@ body {
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+
+  --radius-sm: calc(var(--radius) * 0.55);
+  --radius-md: calc(var(--radius) * 0.75);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: calc(var(--radius) * 1.25);
+  --radius-2xl: calc(var(--radius) * 1.6);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-raised: var(--shadow-raised);
+  --shadow-pop: var(--shadow-pop);
+
+  --ease-standard: var(--ease-out-standard);
 }
 
-/* RTL/Persian baseline: the preset themes <html> with the Latin serif; keep the
-   Persian stack instead so every inherited surface stays Vazirmatn. */
 @layer base {
   html {
     font-family: var(--font-sans);
+    /* Persian glyphs render a touch heavier; keep text from bleeding on
+       non-retina Windows hosts. */
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  /* Technical identifiers stay LTR even inside RTL copy (mockup §۲ .mono). */
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-size: var(--text-body);
+    line-height: 1.75;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  }
+
+  /* Persian numerals are tabular by default in IRANYekanX; force tabular
+     figures in data surfaces so columns align. */
+  table,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Technical identifiers stay LTR even inside RTL copy. */
   .mono {
     font-family: var(--font-mono);
     unicode-bidi: embed;
+    font-variant-ligatures: none;
   }
+
+  /* Visible focus ring on every interactive element (design-system §2.7). */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
+
+  /* Motion is feedback, never decoration. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* --- 5. Utilities ----------------------------------------------------------- */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral-300) transparent;
+}
+
+/* Indeterminate progress sweep used by the streaming and job surfaces. */
+@utility animate-sweep {
+  animation: hive-sweep 1.4s var(--ease-out-standard) infinite;
+}
+
+@keyframes hive-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }

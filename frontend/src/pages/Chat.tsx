@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
-import { ZeroCreditBanner } from "./Wallet";
+import { ZeroCreditBanner } from "../components/ZeroCreditBanner";
 import { faDate, faTime, norm } from "../utils/format";
 
 // 09-conversation mockups (01/02/03) at mockup fidelity: chat-list rail with
@@ -33,6 +33,8 @@ interface WalletMini {
 interface Citation {
   title?: string;
   locator?: string;
+  /** Present when the backend cites a specific stored document. */
+  document_id?: string;
 }
 
 const SUGGESTS: ReadonlyArray<{ text: string; hint: string }> = [
@@ -66,27 +68,38 @@ export default function Chat() {
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The last text that failed to send, so «تلاش مجدد» can resend it.
+   *
+   * State, not a ref: the retry affordance is rendered from this value, and a
+   * ref read during render is invisible to React — the button would not appear
+   * until some unrelated state change happened to re-render the tree.
+   */
+  const [lastSent, setLastSent] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
-  const lastSentRef = useRef<string>("");
   const activeIdRef = useRef<string | null>(null);
 
+  // The chat list endpoint is paginated: it answers {items, total_count, page,
+  // page_size, has_more}, not {sessions}. Reading the wrong key yielded [] every
+  // time, so the rail was permanently empty and history unreachable.
   const loadSessions = useCallback(async () => {
-    const data = await api<{ sessions: SessionItem[] }>("GET", "/chat/sessions");
-    setSessions(data.sessions ?? []);
-    return data.sessions ?? [];
+    const data = await api<{ items: SessionItem[] }>("GET", "/chat/sessions");
+    setSessions(data.items ?? []);
+    return data.items ?? [];
   }, []);
 
   const openSession = useCallback(async (id: string) => {
     activeIdRef.current = id;
     setActiveId(id);
     try {
-      const data = await api<{ messages: ChatMessage[] }>(
+      // Same paginated envelope as the session list: the transcript is "items".
+      const data = await api<{ items: ChatMessage[] }>(
         "GET",
         "/chat/sessions/" + id + "/messages",
       );
       // Two fast rail clicks can land out of order: keep only the newest answer.
       if (activeIdRef.current !== id) return;
-      setMessages(data.messages ?? []);
+      setMessages(data.items ?? []);
       setError(null);
     } catch (e) {
       if (activeIdRef.current !== id) return;
@@ -143,7 +156,7 @@ export default function Chat() {
     // which made the send button look broken. Create the session on demand
     // instead - typing a question should never require a separate click.
     if (!text || busy) return;
-    lastSentRef.current = text;
+    setLastSent(text);
     setInput("");
     setBusy(true);
     setError(null);
@@ -218,21 +231,21 @@ export default function Chat() {
               onChange={(e) => setFilter(e.target.value)}
               placeholder="جستجو در گفتگوها…"
               aria-label="جستجوی گفتگو"
-              className="rounded-[9px] py-2 ps-9 pe-[11px] text-[13px]"
+              className="rounded-[9px] py-2 ps-9 pe-[11px] text-caption"
             />
           </div>
         </div>
         <div className="flex-1 overflow-auto p-2" aria-label="گفتگوها">
           {grouped.length === 0 && (
             <div className="px-4 py-10 text-center">
-              <p className="text-[13px] leading-[1.9] text-muted-foreground">
+              <p className="text-caption leading-[1.9] text-muted-foreground">
                 هنوز گفتگویی ندارید. با «گفتگوی جدید» اولین سوال خود را از هوش سازمان بپرسید.
               </p>
             </div>
           )}
           {grouped.map((group) => (
             <div key={group.label}>
-              <div className="px-2 pb-1 pt-2.5 text-[10.5px] font-extrabold tracking-[0.4px] text-muted-foreground">
+              <div className="px-2 pb-1 pt-2.5 text-micro font-extrabold tracking-[0.4px] text-muted-foreground">
                 {group.label}
               </div>
               {group.items.map((s) => (
@@ -248,13 +261,13 @@ export default function Chat() {
                 >
                   <span
                     className={
-                      "block truncate text-[13px] font-bold " +
+                      "block truncate text-caption font-bold " +
                       (activeId === s.id ? "text-primary" : "text-foreground")
                     }
                   >
                     {s.title ?? "گفتگوی بدون عنوان"}
                   </span>
-                  <span className="absolute end-2.5 top-2.5 text-[10px] text-muted-foreground">
+                  <span className="absolute end-2.5 top-2.5 text-micro text-muted-foreground">
                     {s.created_at ? faDate(s.created_at) : ""}
                   </span>
                 </button>
@@ -270,7 +283,18 @@ export default function Chat() {
           <ZeroCreditBanner visible={blocked} />
         </div>
 
-        <div className="min-h-0 flex-1 space-y-[18px] overflow-y-auto px-[8%] py-[26px]">
+        {/*
+          The answer arrives as one block, not a token stream, so the whole
+          transcript is a polite live region: a screen-reader user hears the new
+          answer when it lands without being interrupted mid-sentence. The busy
+          indicator below carries its own status role so «در حال پاسخ‌گویی…» is
+          announced while the request is in flight. [E5]
+        */}
+        <div
+          aria-live="polite"
+          aria-busy={busy}
+          className="min-h-0 flex-1 space-y-[18px] overflow-y-auto px-[8%] py-[26px]"
+        >
           {messages.length === 0 && !busy && (
             <div className="flex h-full flex-col items-center justify-center px-[30px] text-center">
               <span
@@ -279,8 +303,8 @@ export default function Chat() {
               >
                 <House className="size-[30px]" />
               </span>
-              <h2 className="text-[19px] font-extrabold text-foreground">هوش سازمان آماده است</h2>
-              <p className="mt-2 max-w-[440px] text-[13.5px] text-muted-foreground">
+              <h2 className="text-heading font-extrabold text-foreground">هوش سازمان آماده است</h2>
+              <p className="mt-2 max-w-[440px] text-caption text-muted-foreground">
                 سوال خود را درباره سازمان یا اسناد آن بپرسید. پاسخ‌ها با ارجاع به منابع داده می‌شوند.
               </p>
               <div className="mt-[22px] grid max-w-[640px] grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -289,10 +313,10 @@ export default function Chat() {
                     key={s.text}
                     type="button"
                     onClick={() => setInput(s.text)}
-                    className="cursor-pointer rounded-[13px] border p-[13px] pe-[15px] text-start text-[13px] font-semibold text-foreground shadow-card transition-colors hover:text-primary bg-primary text-primary-foreground hover:bg-primary/90"
+                    className="cursor-pointer rounded-[13px] border border-border bg-card p-[13px] pe-[15px] text-start text-caption font-semibold text-foreground shadow-card transition-colors hover:border-primary/40 hover:text-primary"
                   >
                     {s.text}
-                    <span className="mt-[3px] block text-[11px] font-normal text-muted-foreground">{s.hint}</span>
+                    <span className="mt-[3px] block text-micro font-normal text-muted-foreground">{s.hint}</span>
                   </button>
                 ))}
               </div>
@@ -310,7 +334,7 @@ export default function Chat() {
                 <span
                   aria-hidden
                   className={
-                    "flex size-8 shrink-0 items-center justify-center rounded-[10px] text-[11px] font-extrabold " +
+                    "flex size-8 shrink-0 items-center justify-center rounded-[10px] text-micro font-extrabold " +
                     (isUser
                       ? "border border-border bg-secondary text-muted-foreground"
                       : "bg-primary text-primary-foreground")
@@ -319,7 +343,7 @@ export default function Chat() {
                   {isUser ? "م" : <House className="size-[17px]" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-2 text-[11.5px] font-extrabold text-muted-foreground">
+                  <div className="mb-1 flex items-center gap-2 text-micro font-extrabold text-muted-foreground">
                     {isUser ? "شما" : "هوش سازمان"}
                     {m.created_at && <span className="font-normal">{faTime(m.created_at)}</span>}
                   </div>
@@ -332,16 +356,19 @@ export default function Chat() {
                     <p className="whitespace-pre-wrap">{m.body.text}</p>
                     {m.body.citations && m.body.citations.length > 0 && (
                       <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-dashed border-border pt-2.5" aria-label="منابع">
-                        <span className="text-[11px] font-bold text-muted-foreground">منابع:</span>
-                        {m.body.citations.map((c: Citation, i: number) => (
+                        <span className="text-micro font-bold text-muted-foreground">منابع:</span>
+                        {m.body.citations.map((c: Citation) => (
                           <span
-                            key={i}
+                            // Two citations can point at the same locator in the
+                            // same document, so the pair is the identity — the
+                            // list index is not.
+                            key={(c.document_id ?? "") + ":" + (c.locator ?? c.title ?? "")}
                             className="flex max-w-full cursor-pointer items-start gap-2 rounded-[9px] border border-border bg-secondary px-2.5 py-[7px] text-xs transition-colors hover:bg-accent"
                           >
                             <FileText aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                             <span className="min-w-0">
                               <span className="block truncate font-bold">{c.title ?? "سند"}</span>
-                              {c.locator && <span className="block text-[11px] text-muted-foreground">{c.locator}</span>}
+                              {c.locator && <span className="block text-micro text-muted-foreground">{c.locator}</span>}
                             </span>
                           </span>
                         ))}
@@ -352,7 +379,7 @@ export default function Chat() {
                     <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
                         type="button"
-                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-[7px] border border-transparent px-2 py-[3px] text-[11.5px] font-semibold text-muted-foreground transition-colors hover:bg-secondary bg-primary text-primary-foreground hover:bg-primary/90"
+                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-[7px] border border-transparent px-2 py-[3px] text-micro font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                         onClick={() => void navigator.clipboard?.writeText(m.body.text ?? "")}
                         aria-label="کپی پیام"
                       >
@@ -367,7 +394,7 @@ export default function Chat() {
           })}
 
           {busy && (
-            <div className="flex gap-3" data-testid="thinking">
+            <div role="status" aria-live="polite" className="flex gap-3" data-testid="thinking">
               <span
                 aria-hidden
                 className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground"
@@ -384,18 +411,18 @@ export default function Chat() {
             <div
               role="alert"
               data-testid="chat-error"
-              className="flex max-w-[820px] items-start gap-2.5 rounded-[14px] border border-error bg-error-bg px-4 py-3 text-[13px] text-error"
+              className="flex max-w-[820px] items-start gap-2.5 rounded-card border border-error-border bg-error-bg px-4 py-3 text-caption text-error"
             >
               <AlertCircle aria-hidden className="mt-0.5 size-[17px] shrink-0" />
               <div>
                 {error}
-                {lastSentRef.current && !busy ? (
+                {lastSent && !busy ? (
                   <div className="mt-2">
                     <LoadingButton
                       variant="secondary"
                       size="xs"
                       data-testid="chat-retry"
-                      onClick={() => void send(undefined, lastSentRef.current)}
+                      onClick={() => void send(undefined, lastSent)}
                     >
                       تلاش مجدد
                     </LoadingButton>
@@ -447,7 +474,7 @@ export default function Chat() {
               <Send aria-hidden className="size-[18px] rtl:-scale-x-100" />
             </button>
           </div>
-          <div className="mt-2 flex items-center gap-2.5 px-1 text-[11px] text-muted-foreground">
+          <div className="mt-2 flex items-center gap-2.5 px-1 text-micro text-muted-foreground">
             <span>برای ارسال Enter، برای خط جدید Shift+Enter</span>
           </div>
         </form>

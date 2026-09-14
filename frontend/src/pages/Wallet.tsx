@@ -1,6 +1,7 @@
 import { ArrowDownLeft, ArrowUpRight, CircleAlert, Search, Wallet as WalletIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { ZeroCreditBanner } from "../components/ZeroCreditBanner";
 import { RetryNotice } from "../components/ui/retry";
 import { Banner } from "../components/ui/banner";
 import { LoadingButton } from "../components/ui/button-loading";
@@ -27,15 +28,6 @@ interface WalletState {
     balance_after: number;
     created_at: string;
   }>;
-}
-
-export function ZeroCreditBanner({ visible }: { visible: boolean }) {
-  if (!visible) return null;
-  return (
-    <Banner tone="error" title="اعتبار شما به پایان رسیده است." data-testid="zero-credit-banner">
-      برای ادامه گفتگو، حساب خود را شارژ کنید.
-    </Banner>
-  );
 }
 
 const AMOUNTS = [100, 250, 500];
@@ -117,8 +109,8 @@ export default function Wallet() {
     <section className="mx-auto max-w-3xl space-y-4" aria-label="کیف پول">
       <div className="flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-[19px] font-extrabold text-foreground">کیف پول</h1>
-          <p className="mt-[3px] text-[13px] text-muted-foreground">اعتبار هوش سازمان و تراکنش‌های شارژ.</p>
+          <h1 className="text-heading font-extrabold text-foreground">کیف پول</h1>
+          <p className="mt-[3px] text-caption text-muted-foreground">اعتبار هوش سازمان و تراکنش‌های شارژ.</p>
         </div>
         <div className="ms-auto flex items-center gap-2">
           <LoadingButton
@@ -130,17 +122,13 @@ export default function Wallet() {
         </div>
       </div>
 
-      {blocked && (
-        <Banner tone="error" title="اعتبار شما به پایان رسیده است." data-testid="zero-credit-banner">
-          برای ادامه گفتگو، حساب خود را شارژ کنید.
-        </Banner>
-      )}
+      <ZeroCreditBanner visible={blocked} />
 
       {/* wallet-hero (mockup §۲۱) */}
       <div className="relative overflow-hidden rounded-[20px] bg-primary px-7 py-[26px] text-primary-foreground shadow-[0_14px_34px_rgba(43,58,115,0.3)]">
         <span aria-hidden className="absolute -end-[30px] -top-[30px] size-40 rounded-full bg-white/[0.06]" />
         <div className="text-xs font-bold opacity-75">اعتبار فعلی</div>
-        <div className="mt-1.5 text-[34px] font-extrabold tracking-[-1px]" data-testid="balance">
+        <div className="mt-1.5 text-display font-extrabold tracking-[-1px]" data-testid="balance">
           {faNum(state.balance)} <small className="text-sm font-semibold opacity-80">اعتبار</small>
         </div>
         <div className="mt-3.5 flex flex-wrap items-center gap-3.5 text-xs opacity-85">
@@ -172,8 +160,8 @@ export default function Wallet() {
         className="rounded-card border border-border bg-card p-6 shadow-card"
         aria-label="درخواست شارژ"
       >
-        <h2 className="text-[15px] font-extrabold text-foreground">شارژ حساب</h2>
-        <p className="mt-1 text-[12.5px] text-muted-foreground">
+        <h2 className="text-body font-extrabold text-foreground">شارژ حساب</h2>
+        <p className="mt-1 text-caption text-muted-foreground">
           مبلغ را انتخاب کنید؛ پس از تأیید مدیر سامانه، اعتبار به کیف پول اضافه می‌شود.
         </p>
         <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
@@ -191,7 +179,7 @@ export default function Wallet() {
               )}
             >
               <b className="block text-sm font-extrabold">{faNum(a)}</b>
-              <small className="mt-0.5 block text-[11px] text-muted-foreground">اعتبار</small>
+              <small className="mt-0.5 block text-micro text-muted-foreground">اعتبار</small>
             </button>
           ))}
           <button
@@ -206,12 +194,12 @@ export default function Wallet() {
             )}
           >
             <b className="block text-sm font-extrabold">مبلغ دلخواه</b>
-            <small className="mt-0.5 block text-[11px] text-muted-foreground">تعداد اعتبار</small>
+            <small className="mt-0.5 block text-micro text-muted-foreground">تعداد اعتبار</small>
           </button>
         </div>
         {amount === "custom" && (
           <div className="mt-3">
-            <Label className="mb-1.5 text-[13px] font-bold text-foreground" htmlFor="custom-amount">
+            <Label className="mb-1.5 text-caption font-bold text-foreground" htmlFor="custom-amount">
               تعداد اعتبار
             </Label>
             <Input
@@ -227,7 +215,7 @@ export default function Wallet() {
           </div>
         )}
         <div className="mt-3">
-          <Label className="mb-1.5 text-[13px] font-bold text-foreground" htmlFor="charge-note">
+          <Label className="mb-1.5 text-caption font-bold text-foreground" htmlFor="charge-note">
             توضیح (اختیاری)
           </Label>
           <Input
@@ -246,7 +234,7 @@ export default function Wallet() {
 
       {/* تراکنش‌ها (mockup §۲۱ .txn) */}
       <Surface className="p-6">
-        <h2 className="mb-3 text-[15px] font-extrabold text-foreground">تراکنش‌ها</h2>
+        <h2 className="mb-3 text-body font-extrabold text-foreground">تراکنش‌ها</h2>
         <div className="relative mb-3">
           <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -276,12 +264,12 @@ export default function Wallet() {
                   {isCharge ? <ArrowDownLeft className="size-4" /> : <ArrowUpRight className="size-4" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-bold text-foreground">
+                  <div className="text-caption font-bold text-foreground">
                     {isCharge ? "شارژ حساب" : "مصرف گفتگو"}
                   </div>
-                  <div className="text-[11.5px] text-muted-foreground">{faDateTime(t.created_at)}</div>
+                  <div className="text-micro text-muted-foreground">{faDateTime(t.created_at)}</div>
                 </div>
-                <div className={cn("whitespace-nowrap text-[13.5px] font-extrabold", isCharge ? "text-success" : "text-muted-foreground")}>
+                <div className={cn("whitespace-nowrap text-caption font-extrabold", isCharge ? "text-success" : "text-muted-foreground")}>
                   {isCharge ? "+" : "−"}
                   {faNum(t.amount)}
                 </div>
@@ -296,8 +284,8 @@ export default function Wallet() {
               >
                 <WalletIcon className="size-[26px]" />
               </span>
-              <h3 className="text-[15px] font-extrabold text-foreground">تراکنشی ثبت نشده است</h3>
-              <p className="mt-1.5 text-[13px] text-muted-foreground">
+              <h3 className="text-body font-extrabold text-foreground">تراکنشی ثبت نشده است</h3>
+              <p className="mt-1.5 text-caption text-muted-foreground">
                 {search ? "تراکنشی مطابق جستجو پیدا نشد." : "با اولین گفتگو یا شارژ، تراکنش‌ها اینجا نمایش داده می‌شوند."}
               </p>
             </div>
@@ -323,7 +311,7 @@ export default function Wallet() {
         </div>
       </Surface>
 
-      <p className="flex items-start gap-2 text-[11px] text-muted-foreground">
+      <p className="flex items-start gap-2 text-micro text-muted-foreground">
         <CircleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
         ثبت درخواست شارژ هزینه‌ای ندارد و پس از تأیید مدیر سامانه اعمال می‌شود.
       </p>

@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import {
   CircleCheckIcon,
@@ -6,16 +6,25 @@ import {
   Loader2Icon,
   OctagonXIcon,
   TriangleAlertIcon,
-} from "lucide-react"
-import { useTheme } from "next-themes"
-import { Toaster as Sonner, type ToasterProps } from "sonner"
+} from "lucide-react";
+import { Toaster as Sonner, type ToasterProps } from "sonner";
 
+/**
+ * HiveOS toast surface.
+ *
+ * Light mode only (PO decision), so the theme is pinned instead of read from a
+ * provider — the previous version pulled next-themes for a value that was
+ * always "system" and had no provider to supply it anyway. [B2/C15]
+ *
+ * Positioned bottom-inline-start so it clears the sidebar on the right and
+ * never covers the composer in the chat column.
+ */
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
-
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme="light"
+      dir="rtl"
+      position="bottom-left"
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
@@ -29,12 +38,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
+          "--border-radius": "var(--radius-control)",
         } as React.CSSProperties
       }
       {...props}
     />
-  )
-}
+  );
+};
 
-export { Toaster }
+export { Toaster };

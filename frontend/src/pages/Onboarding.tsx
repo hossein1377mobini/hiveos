@@ -1,5 +1,5 @@
 import { FolderOpen, FolderSearch, House, RefreshCw, Server, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, clearToken } from "../api/client";
 import { AuthBrand, Field, PanelHead, StepsList, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
@@ -46,13 +46,24 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
   // field so an admin on a laptop is not blocked.
   const desktop = isDesktop();
 
+  // `onStatus` is an inline callback from the parent, so it changes identity on
+  // every parent render. Including it as a dependency would re-run the whole
+  // bootstrap — three round trips and two POSTs — on each one. The callback is
+  // held in a ref instead, so the effect can depend on nothing and still call
+  // the current version.
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
+
   async function refresh(): Promise<Status> {
     const next = await api<Status>("GET", "/auth/onboarding-status");
     setStatus(next);
-    onStatus(next);
+    onStatusRef.current(next);
     return next;
   }
 
+  // Runs exactly once per mount: the automatic steps below create the workspace
+  // and the brain, so re-running them is not merely wasteful, it re-issues the
+  // POSTs.
   useEffect(() => {
     (async () => {
       try {
@@ -69,7 +80,6 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
         setBusy(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // PO request: the client keeps the folder in sync on its own. The loop asks
@@ -214,7 +224,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step === "expired" && (
         <Surface className="p-7">
           <PanelHead icon={FolderOpen} tone="error" title="ثبت‌نام این سازمان منقضی شد" />
-          <p className="text-[13px] text-muted-foreground">سازمان در بازه‌ی مجاز تکمیل نشد. از ابتدا ثبت‌نام کنید.</p>
+          <p className="text-caption text-muted-foreground">سازمان در بازه‌ی مجاز تکمیل نشد. از ابتدا ثبت‌نام کنید.</p>
           <LoadingButton variant="secondary" className="mt-4" onClick={() => { stopAutoSync(); clearToken(); location.reload(); }}>
             بازگشت به ورود
           </LoadingButton>
@@ -224,7 +234,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step !== "expired" && stage === "workspace" && (
         <Surface className="p-7">
           <PanelHead icon={Server} tone="violet" title="در حال آماده‌سازی فضای کار" hint="گام ۴ از ۶" />
-          <p className="mb-2 text-[13px] text-muted-foreground">این مرحله خودکار انجام می‌شود؛ چند لحظه صبر کنید.</p>
+          <p className="mb-2 text-caption text-muted-foreground">این مرحله خودکار انجام می‌شود؛ چند لحظه صبر کنید.</p>
           <StepsList
             items={[
               { name: "ایجاد فضای کار", state: busy ? "active" : "done", marker: "۱" },
@@ -247,7 +257,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step !== "expired" && stage === "brain" && (
         <Surface className="p-7">
           <PanelHead icon={Sparkles} tone="teal" title="در حال ساخت هوش سازمان" hint="گام ۵ از ۶" />
-          <p className="mb-2 text-[13px] text-muted-foreground">
+          <p className="mb-2 text-caption text-muted-foreground">
             مخزن دانش ساخته می‌شود؛ تا پایان این مرحله، توصیف کسب‌وکار شما پاسخ‌گوی اولیه است.
           </p>
           <StepsList
@@ -272,7 +282,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
       {status?.next_step !== "expired" && stage === "folder" && (
         <Surface className="p-7">
           <PanelHead icon={FolderSearch} tone="amber" title="تعیین پوشه اسناد" hint="گام ۶ از ۶" />
-          <p className="mb-4 text-[13px] text-muted-foreground">
+          <p className="mb-4 text-caption text-muted-foreground">
             {desktop
               ? "پوشه‌ای روی همین کامپیوتر انتخاب کنید؛ اسناد آن به دانش سازمان اضافه می‌شود و هر ۳۰ دقیقه به‌روز می‌شود."
               : "مسیر یک پوشه روی همین سرور را وارد کنید؛ اسناد آن به دانش سازمان اضافه می‌شود."}
@@ -297,7 +307,7 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
                 onChange={(e) => setFolder(e.target.value)}
                 placeholder={desktop ? "ابتدا پوشه را انتخاب کنید" : "/srv/hive-docs"}
                 readOnly={desktop}
-                className="min-w-40 flex-1 border-0 font-mono text-[13px] shadow-none focus:ring-0"
+                className="min-w-40 flex-1 border-0 font-mono text-caption shadow-none focus:ring-0"
                 aria-label="مسیر پوشه اسناد"
               />
               {desktop && (

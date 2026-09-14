@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { clearToken } from "../api/client";
+import { renderWithRouter } from "../test/render";
 
 // US-007 (PO decision 2026-09-14) regression: the folder step must offer a real
 // picker in the Windows client and must NOT send the owner's own folder path to
@@ -92,7 +93,7 @@ describe("US-007 client folder step", () => {
       },
       "POST /knowledge-sources/client-folder/files/asset-1": { asset_id: "asset-1" },
     });
-    render(<App />);
+    renderWithRouter(<App />);
 
     const browse = await screen.findByRole("button", { name: /انتخاب پوشه/ });
     fireEvent.click(browse);
@@ -115,7 +116,7 @@ describe("US-007 client folder step", () => {
       "GET /auth/onboarding-status": READY_STATUS,
       "POST /knowledge-sources/client-folder": { id: "src-1", file_state: 0 },
     });
-    render(<App />);
+    renderWithRouter(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: /انتخاب پوشه/ }));
 
@@ -129,7 +130,7 @@ describe("US-007 client folder step", () => {
   it("keeps the manual server-path field in the browser build (on-prem)", async () => {
     localStorage.setItem("hiveos.session", "tok");
     mockApi({ "GET /auth/onboarding-status": READY_STATUS });
-    render(<App />);
+    renderWithRouter(<App />);
 
     expect(await screen.findByRole("button", { name: "بررسی و ثبت" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /انتخاب پوشه/ })).not.toBeInTheDocument();

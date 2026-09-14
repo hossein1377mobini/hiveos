@@ -1,7 +1,8 @@
 import { CircleAlert, FileText, FolderOpen, RefreshCw, Search, UploadCloud, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
-import { StatusBadge } from "../components/ui/status-badge";
+import { persianError } from "../api/errors";
+import { DomainStatus } from "../components/ui/domain-status";
 import { Banner } from "../components/ui/banner";
 import { LoadingButton } from "../components/ui/button-loading";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -28,39 +29,86 @@ interface Asset {
   size_bytes: number;
   extension: string;
   origin: string;
+  // H2: the pipeline stage, so "queued" is no longer one undifferentiated state.
+  asset_type?: string | null;
+  pipeline?: string | null;
+  text_length?: number;
+  chunks?: number;
 }
 
 interface Job {
   id: string;
   asset_id: string | null;
   status: string;
-  stage: string | null;
-  error_code: string | null;
+  job_type: string;
+  // The job payload has never carried "error_code" or "stage": the worker writes
+  // "CODE: developer message" into error_detail (knowledge/worker.py:112) and the
+  // API returns exactly that. The page read two fields that do not exist, so a
+  // failed document showed no reason at all.
+  error_detail: string | null;
 }
-
-const STATUS_FA: Record<string, string> = {
-  queued: "در صف",
-  processing: "در حال پردازش",
-  ready: "تکمیل شد",
-  failed: "ناموفق",
-  deleted: "حذف‌شده",
-};
-
-const STATUS_TONE: Record<string, "success" | "error" | "info" | "warning" | "neutral"> = {
-  ready: "success",
-  failed: "error",
-  deleted: "neutral",
-  queued: "info",
-  processing: "info",
-};
 
 // Must stay identical to the server's US-205 table (backend/knowledge/assets.py):
 // an extension the picker offers but the server refuses is a broken promise.
 const ACCEPTED =
   ".txt,.md,.pdf,.docx,.pptx,.xlsx,.csv,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp";
 
+/**
+ * The machine code at the head of a job's error_detail, e.g.
+ * "PARSE_FAILED: no text could be extracted" -> "PARSE_FAILED".
+ *
+ * The worker stores one free-text column, so the code has to be split back out
+ * before it can be translated. An entry with no separator is treated as the
+ * code itself; anything else degrades to the generic Persian sentence rather
+ * than showing the developer's English.
+ */
+function jobFailureCode(detail: string | null | undefined): string {
+  if (!detail) return "EXTRACTION_FAILED";
+  const code = detail.split(":", 1)[0].trim().toUpperCase();
+  return /^[A-Z][A-Z0-9_]{2,}$/.test(code) ? code : "EXTRACTION_FAILED";
+}
+
 type TabKey = "all" | "ready" | "processing" | "queued" | "failed";
 const PAGE_SIZE = 8;
+
+/**
+ * What a document is doing inside the pipeline (H2).
+ *
+ * The document table used to show only a coarse status, so a file waiting its
+ * turn and one that had already been read but not split into knowledge units
+ * looked identical — an operator could not tell whether a stuck queue was
+ * moving. The API reports the stage it actually reached, and this renders it.
+ *
+ * Deliberately not a percentage: the server knows how far it got, not how much
+ * remains, and a progress bar invented from an unknown denominator is a lie that
+ * looks like information.
+ */
+function AssetProgress({ asset }: { asset: Asset }) {
+  if (asset.status === "failed") {
+    return <span className="text-micro text-muted-foreground">متوقف — به خطا رسید</span>;
+  }
+  if (asset.status === "ready") {
+    const chunks = asset.chunks ?? 0;
+    return (
+      <span data-numeric className="text-micro text-muted-foreground">
+        {chunks > 0 ? faNum(chunks) + " واحد دانش" : "بدون واحد دانش"}
+      </span>
+    );
+  }
+  // Still in the queue or being worked on: report the furthest stage reached.
+  const textLength = asset.text_length ?? 0;
+  const stage = textLength > 0 ? (asset.pipeline ? "متن استخراج شد" : "در حال پردازش") : "در صف پردازش";
+  return (
+    <span className="text-micro text-muted-foreground">
+      {stage}
+      {textLength > 0 && (
+        <span data-numeric className="ms-1 opacity-75">
+          · {faNum(textLength)} نویسه
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function Knowledge() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -82,9 +130,13 @@ export default function Knowledge() {
 
   const reload = useCallback(async () => {
     const [a, j, s] = await Promise.all([
-      api<{ assets: Asset[] }>("GET", "/knowledge/assets"),
+      // The asset router moved off "/knowledge" to "/knowledge-assets" when the
+      // source router was split out, and this page was left calling the old
+      // prefix - so every one of these four calls 404'd. The unit suite stubbed
+      // the same wrong string, which is exactly why it stayed green.
+      api<{ assets: Asset[] }>("GET", "/knowledge-assets"),
       api<{ jobs: Job[] }>("GET", "/processing/jobs"),
-      api<Record<string, unknown>>("GET", "/knowledge"),
+      api<Record<string, unknown>>("GET", "/knowledge-sources"),
     ]);
     setAssets(a.assets ?? []);
     setJobs(j.jobs ?? []);
@@ -119,7 +171,7 @@ export default function Knowledge() {
     try {
       const form = new FormData();
       for (const f of picked) form.append("files", f);
-      await api("POST", "/knowledge/upload", form);
+      await api("POST", "/knowledge-assets/upload", form);
       setNotice("فایل‌ها در صف پردازش قرار گرفتند.");
       setPicked([]);
       setDialogOpen(false);
@@ -139,7 +191,7 @@ export default function Knowledge() {
     setError(null);
     setNotice(null);
     try {
-      await api("POST", "/knowledge/" + source.id + "/scan");
+      await api("POST", "/knowledge-sources/" + source.id + "/scan");
       setNotice("پویش دستی اجرا شد.");
       await reload();
     } catch (e) {
@@ -154,7 +206,7 @@ export default function Knowledge() {
     setError(null);
     setNotice(null);
     try {
-      await api("POST", "/knowledge/assets/" + assetId + "/classify");
+      await api("POST", "/knowledge-assets/" + assetId + "/classify");
       setNotice("دسته‌بندی سند اجرا شد.");
       await reload();
     } catch (e) {
@@ -198,8 +250,8 @@ export default function Knowledge() {
       {/* page-head (mockup) */}
       <div className="mb-5 flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-[19px] font-extrabold text-foreground">دانش سازمان</h1>
-          <p className="mt-[3px] text-[13px] text-muted-foreground">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
+          <h1 className="text-heading font-extrabold text-foreground">دانش سازمان</h1>
+          <p className="mt-[3px] text-caption text-muted-foreground">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
         </div>
         <div className="ms-auto flex items-center gap-2">
           {source && (
@@ -247,17 +299,21 @@ export default function Knowledge() {
                 <FolderOpen className="size-5" />
               </span>
               <div>
-                <div className="text-[15px] font-extrabold text-foreground">پوشه اسناد سازمان</div>
-                <div className="mt-1 font-mono text-[13px] text-muted-foreground" dir="ltr">
+                <div className="text-body font-extrabold text-foreground">پوشه اسناد سازمان</div>
+                <div className="mt-1 font-mono text-caption text-muted-foreground" dir="ltr">
                   {source.path}
                 </div>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <StatusBadge tone="success" className="px-3.5 py-[5px] text-xs" dot>
-                {source.status === "active" ? "فعال" : source.status}
-              </StatusBadge>
-              <span className="text-[11px] text-muted-foreground">پویش خودکار هر ۳۰ دقیقه</span>
+              {/* The watch state is a health signal, not a knowledge status:
+                  "active" here means the scheduled scan is running. */}
+              {/* The source status is "active" | "disabled" - the watch state,
+                  not a health probe. Rendering it through the health registry
+                  fell through to the raw value, so the badge read "active" in
+                  English. It has its own registry now. */}
+              <DomainStatus domain="source" value={source.status} dot />
+              <span className="text-micro text-muted-foreground">پویش خودکار هر ۳۰ دقیقه</span>
             </div>
           </div>
           <div className="mt-4">
@@ -338,40 +394,46 @@ export default function Knowledge() {
       <Surface className="overflow-x-auto">
         <Table>
           <TableHeader>
-            <TableRow className="border-border text-[12px] text-muted-foreground">
+            <TableRow className="border-border text-caption text-muted-foreground">
               <TableHead className="p-3 ps-5 font-bold">نام سند</TableHead>
               <TableHead className="p-3 font-bold">فرمت</TableHead>
               <TableHead className="p-3 font-bold">حجم</TableHead>
               <TableHead className="p-3 font-bold">وضعیت</TableHead>
+              <TableHead className="p-3 font-bold">پیشرفت</TableHead>
               <TableHead className="p-3 pe-5 font-bold"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {pageItems.map((a) => {
               const job = jobByAsset.get(a.id);
-              const failedCode = a.status === "failed" ? (job?.error_code ?? "") : "";
+              const failedReason =
+                a.status === "failed" ? persianError(jobFailureCode(job?.error_detail)) : "";
               return (
                 <TableRow key={a.id} className="border-border last:border-0">
                   <TableCell className="p-3 ps-5 font-bold whitespace-normal text-foreground" data-testid="asset-name">
                     {a.name}
                   </TableCell>
                   <TableCell className="p-3">
-                    <span className="inline-block rounded-[6px] border border-border bg-secondary px-2 py-0.5 font-mono text-[11px] text-muted-foreground" dir="ltr">
+                    <span className="inline-block rounded-[6px] border border-border bg-secondary px-2 py-0.5 font-mono text-micro text-muted-foreground" dir="ltr">
                       {(a.extension ?? "").toUpperCase()}
                     </span>
                   </TableCell>
-                  <TableCell className="p-3 font-mono text-[12px] text-muted-foreground" dir="ltr">
+                  <TableCell className="p-3 font-mono text-caption text-muted-foreground" dir="ltr">
                     {humanSize(a.size_bytes)}
                   </TableCell>
                   <TableCell className="p-3" data-testid={"asset-status-" + a.status}>
-                    <StatusBadge tone={STATUS_TONE[a.status] ?? "neutral"} dot>
-                      {STATUS_FA[a.status] ?? a.status}
-                    </StatusBadge>
-                    {failedCode && (
-                      <div className="mt-1 font-mono text-[10.5px] text-error" dir="ltr">
-                        {failedCode}
-                      </div>
+                    <DomainStatus domain="asset" value={a.status} dot />
+                    {failedReason && (
+                      <div className="mt-1 text-micro leading-relaxed text-error">{failedReason}</div>
                     )}
+                  </TableCell>
+                  {/* H2: what the document is actually doing. A file that has
+                      been extracted but not chunked reads differently from one that
+                      has not been touched, and the operator can tell whether a
+                      stuck queue is moving. Stage names, never a made-up
+                      percentage. */}
+                  <TableCell className="p-3" data-testid={"asset-progress-" + a.id}>
+                    <AssetProgress asset={a} />
                   </TableCell>
                   <TableCell className="p-3 pe-5 text-end">
                     {a.status === "queued" && (
@@ -385,7 +447,7 @@ export default function Knowledge() {
             })}
             {pageItems.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="p-0">
+                <TableCell colSpan={6} className="p-0">
                   <div className="px-5 py-12 text-center">
                     <span
                       aria-hidden
@@ -393,8 +455,8 @@ export default function Knowledge() {
                     >
                       <FileText className="size-[26px]" />
                     </span>
-                    <h3 className="text-[15px] font-extrabold text-foreground">هنوز سندی نیست.</h3>
-                    <p className="mx-auto mt-1.5 max-w-[380px] text-[13px] text-muted-foreground">
+                    <h3 className="text-body font-extrabold text-foreground">هنوز سندی نیست.</h3>
+                    <p className="mx-auto mt-1.5 max-w-[380px] text-caption text-muted-foreground">
                       {search || tab !== "all" || format !== "all"
                         ? "سندی مطابق جستجو یا فیلتر پیدا نشد."
                         : "با «افزودن سند» یا قرار دادن فایل در پوشه اسناد، پردازش آغاز می‌شود."}
@@ -435,29 +497,39 @@ export default function Knowledge() {
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <div
-              role="button"
-              tabIndex={0}
-              aria-label="انتخاب فایل"
+            {/* A real <button>, not a div with role="button". The div version
+                announced itself as a button but kept none of the behaviour: no
+                native Enter/Space activation, no disabled state, and the drag
+                handlers on the clickable region swallowed text selection.
+                Letting the button itself be the drop target keeps one element
+                doing one thing. [E4] */}
+            <button
+              type="button"
+              aria-describedby="dropzone-hint"
               data-testid="dropzone"
               onClick={() => fileRef.current?.click()}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileRef.current?.click(); }}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                setDragging(true)
+              }}
               onDragLeave={() => setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragging(false);
-                setPicked(Array.from(e.dataTransfer.files));
+              onDrop={(event) => {
+                event.preventDefault()
+                setDragging(false)
+                setPicked(Array.from(event.dataTransfer.files))
               }}
               className={cn(
-                "flex cursor-pointer flex-col items-center justify-center rounded-[14px] border-2 border-dashed px-6 py-10 text-center transition-colors",
+                "flex w-full cursor-pointer flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-10 text-center transition-colors",
+                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                 dragging ? "border-primary bg-accent" : "border-border bg-secondary hover:border-primary/40",
               )}
             >
               <UploadCloud aria-hidden className="mb-2 size-7 text-muted-foreground" />
-              <p className="text-[13px] font-bold text-foreground">فایل‌ها را اینجا رها کنید یا کلیک کنید</p>
-              <p className="mt-1 text-[11.5px] text-muted-foreground">چند فایل در هر بار</p>
-            </div>
+              <span className="text-caption font-bold text-foreground">فایل‌ها را اینجا رها کنید یا کلیک کنید</span>
+              <span id="dropzone-hint" className="mt-1 text-micro text-muted-foreground">
+                چند فایل در هر بار · حداکثر ۵۰ مگابایت برای هر فایل
+              </span>
+            </button>
             <input
               ref={fileRef}
               type="file"
@@ -471,14 +543,14 @@ export default function Knowledge() {
                 {picked.map((f, i) => (
                   <li key={f.name + i} className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-2">
                     <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{f.name}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground" dir="ltr">
+                    <span className="min-w-0 flex-1 truncate text-caption font-semibold text-foreground">{f.name}</span>
+                    <span className="font-mono text-micro text-muted-foreground" dir="ltr">
                       {humanSize(f.size)}
                     </span>
                     <button
                       type="button"
                       aria-label={"حذف " + f.name}
-                      className="cursor-pointer rounded-[7px] p-1 text-muted-foreground transition-colors hover:bg-error-bg hover:text-error bg-primary text-primary-foreground hover:bg-primary/90"
+                      className="cursor-pointer rounded-[7px] p-1 text-muted-foreground transition-colors hover:bg-error-bg hover:text-error"
                       onClick={() => setPicked((p) => p.filter((_, idx) => idx !== i))}
                     >
                       <X className="size-4" />
@@ -504,7 +576,7 @@ export default function Knowledge() {
 
 function CountChip({ value }: { value: number }) {
   return (
-    <span className="me-0 rounded-full border border-border bg-secondary px-[7px] text-[10.5px] text-muted-foreground">
+    <span className="me-0 rounded-full border border-border bg-secondary px-[7px] text-micro text-muted-foreground">
       {faNum(value)}
     </span>
   );

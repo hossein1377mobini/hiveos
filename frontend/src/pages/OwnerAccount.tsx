@@ -26,6 +26,7 @@ export default function OwnerAccount({
   const [username, setUsername] = useState("");
   const [available, setAvailable] = useState<boolean | null>(null);
   const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -72,11 +73,17 @@ export default function OwnerAccount({
       ? "0" + mobileDigits
       : mobileDigits;
   const mobileInvalid = mobileDigits.length > 0 && !/^09\d{9}$/.test(normalizedMobile);
+  // The API has accepted and validated an owner email all along
+  // (RegisterOwnerRequest.email, unique case-insensitively) and the server
+  // rejects a duplicate with EMAIL_ALREADY_EXISTS — but the form never sent one,
+  // so the field was unreachable. Optional, because the API defaults it to null.
+  // [H3]
+  const emailInvalid = email.trim().length > 0 && !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email.trim());
   const pwdMismatch = confirmPassword.length > 0 && confirmPassword !== password;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (mobileInvalid || pwdMismatch) return;
+    if (mobileInvalid || pwdMismatch || emailInvalid) return;
     setBusy(true);
     setError(null);
     try {
@@ -84,6 +91,7 @@ export default function OwnerAccount({
         organization_id: organizationId,
         username,
         mobile: normalizedMobile,
+        email: email.trim() || null,
         password,
         confirm_password: confirmPassword,
       });
@@ -147,6 +155,23 @@ export default function OwnerAccount({
             </div>
           </Field>
 
+          <Field
+            label="ایمیل"
+            optional
+            error={emailInvalid ? "ایمیل معتبر نیست." : undefined}
+            hint="برای بازیابی حساب و اطلاع‌رسانی‌های سامانه استفاده می‌شود."
+          >
+            <Input
+              type="email"
+              dir="ltr"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="text-left"
+              placeholder="manager@example.com"
+              autoComplete="email"
+            />
+          </Field>
+
           <Field label="رمز عبور" required error={pwdMismatch ? undefined : undefined}>
             <div className="relative">
               <Input
@@ -162,7 +187,7 @@ export default function OwnerAccount({
                 type="button"
                 onClick={() => setShowPwd((v) => !v)}
                 aria-label={showPwd ? "پنهان‌کردن رمز" : "نمایش رمز"}
-                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary bg-primary text-primary-foreground hover:bg-primary/90"
+                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 {showPwd ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
               </button>
@@ -171,7 +196,7 @@ export default function OwnerAccount({
               {checks.map((c) => (
                 <span
                   key={c.label}
-                  className={cn("flex items-center gap-1.5 text-[11.5px]", c.ok ? "text-success" : "text-muted-foreground")}
+                  className={cn("flex items-center gap-1.5 text-micro", c.ok ? "text-success" : "text-muted-foreground")}
                 >
                   <span aria-hidden className={cn("size-1.5 rounded-full", c.ok ? "bg-success" : "bg-neutral-300")} />
                   {c.label}
@@ -206,7 +231,7 @@ export default function OwnerAccount({
               type="button"
               onClick={onBack}
               data-testid="owner-back"
-              className="mt-3 w-full cursor-pointer text-center text-xs underline-offset-4 hover:underline bg-primary text-primary-foreground hover:bg-primary/90"
+              className="mt-3 w-full cursor-pointer text-center text-caption text-primary underline-offset-4 hover:underline"
             >
               بازگشت
             </button>

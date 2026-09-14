@@ -93,8 +93,8 @@ export default function Usage() {
   return (
     <section className="mx-auto max-w-3xl space-y-4" aria-label="اعتبار و مصرف">
       <div>
-        <h1 className="text-[19px] font-extrabold text-foreground">اعتبار و مصرف</h1>
-        <p className="mt-[3px] text-[13px] text-muted-foreground">
+        <h1 className="text-heading font-extrabold text-foreground">اعتبار و مصرف</h1>
+        <p className="mt-[3px] text-caption text-muted-foreground">
           موجودی، مصرف و درخواست‌های شارژ سازمان شما.
         </p>
       </div>

@@ -53,7 +53,7 @@ export function Banner({
       data-slot="banner"
       data-tone={tone}
       role={tone === "error" ? "alert" : "status"}
-      className={cn("gap-x-2.5 gap-y-1 rounded-lg px-3 py-3 text-[13px]", TONE_CLASS[tone], className)}
+      className={cn("gap-x-2.5 gap-y-1 rounded-lg px-3 py-3 text-caption", TONE_CLASS[tone], className)}
       {...props}
     >
       {Icon ? <Icon /> : null}

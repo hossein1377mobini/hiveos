@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { clearToken } from "./api/client";
+import { renderWithRouter } from "./test/render";
 
 // Envelope-level fetch stub: each entry is "METHOD /path" -> data or ApiError.
 function mockApi(routes: Record<string, unknown>) {
@@ -38,13 +39,13 @@ afterEach(() => {
 describe("bootstrap flow (T-S1-9)", () => {
   it("shows login when there is no session", async () => {
     mockApi({});
-    render(<App />);
+    renderWithRouter(<App />);
     expect(await screen.findByText("ورود به HiveOS")).toBeInTheDocument();
   });
 
   it("shows the generic Persian failure message on login 401 (no field disclosure)", async () => {
     mockApi({ "POST /auth/login": apiError(401, "AUTH_INVALID_CREDENTIALS", "Invalid username or password.") });
-    render(<App />);
+    renderWithRouter(<App />);
     const username = await screen.findByText("نام کاربری");
     expect(username).toBeInTheDocument();
     const buttons = screen.getAllByRole("button");
@@ -63,7 +64,7 @@ describe("bootstrap flow (T-S1-9)", () => {
         next_step: "knowledge_source",
       },
     });
-    render(<App />);
+    renderWithRouter(<App />);
     expect(await screen.findByText("تعیین پوشه اسناد")).toBeInTheDocument();
   });
 
@@ -80,7 +81,7 @@ describe("bootstrap flow (T-S1-9)", () => {
       "GET /chat/sessions": { sessions: [] },
       "GET /wallet": { balance: 50, blocked: false },
     });
-    render(<App />);
+    renderWithRouter(<App />, { route: "/onboarding" });
     expect(
       await screen.findByText("سوال خود را درباره سازمان یا اسناد آن بپرسید. پاسخ‌ها با ارجاع به منابع داده می‌شوند."),
     ).toBeInTheDocument();
@@ -97,7 +98,51 @@ describe("bootstrap flow (T-S1-9)", () => {
         next_step: "expired",
       },
     });
-    render(<App />);
+    renderWithRouter(<App />, { route: "/onboarding" });
     expect(await screen.findByText("ثبت‌نام این سازمان منقضی شد")).toBeInTheDocument();
+  });
+
+  /**
+   * Regression: /admin must render its own login form, not redirect away.
+   *
+   * The shell probes /auth/onboarding-status on every route. An anonymous
+   * visitor to the admin panel got a 401 from that probe and the shared API
+   * client treated it as a signed-out organization user, so it sent the browser
+   * to /login before the panel could paint. The panel was unreachable by URL.
+   */
+  it("renders the admin panel login on /admin without a session", async () => {
+    mockApi({
+      "GET /auth/onboarding-status": apiError(401, "AUTH_REQUIRED", "authentication required"),
+    });
+    renderWithRouter(<App />, { route: "/admin" });
+    expect(await screen.findByText("پنل مدیریت HiveOS")).toBeInTheDocument();
+  });
+
+  /**
+   * Regression: signup must not bounce to /login between its two steps.
+   *
+   * POST /auth/register-organization returns before any token exists — the
+   * owner account created in step 2 is what issues one. Sending the browser to
+   * "/" after step 1 hit RequireSession with no token and ejected the user.
+   */
+  it("keeps the signup flow on the owner step after the organization is created", async () => {
+    mockApi({});
+    renderWithRouter(<App />, { route: "/owner" });
+    // No pending id in sessionStorage: the guard screen, not a redirect to login.
+    expect(await screen.findByText("ادامهٔ ثبت‌نام از این مرورگر ممکن نیست")).toBeInTheDocument();
+    expect(screen.queryByText("ورود به HiveOS")).not.toBeInTheDocument();
+  });
+
+  it("serves every shell section from its own URL (A4/D1)", async () => {
+    localStorage.setItem("hiveos.session", "tok");
+    mockApi({
+      "GET /wallet": { balance: 50, blocked: false },
+      "GET /wallet/transactions": { items: [], total: 0 },
+    });
+    // A deep link straight into the wallet must render the wallet, not the chat
+    // default — the v0.1 screen-switch could not do this at all.
+    renderWithRouter(<App />, { route: "/wallet" });
+    expect(await screen.findByRole("heading", { name: /کیف پول/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /کیف پول/ }).length).toBeGreaterThan(0);
   });
 });

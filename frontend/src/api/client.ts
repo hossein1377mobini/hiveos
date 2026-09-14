@@ -85,12 +85,22 @@ export async function api<T>(
   if (!response.ok || !payload.success) {
     const error = payload.error ?? { code: "UNKNOWN", message: "" };
     // S13 (external review): an expired/revoked session ends at the login screen.
+    //
+    // The redirect must not fire inside the admin panel: that surface has its
+    // own login and its own token, and an anonymous visitor to /admin is not a
+    // signed-out organization user. Bouncing them to /login made the panel
+    // unreachable by URL - the operator could never even see its login form,
+    // because the identity probe the shell fires on every route answered 401
+    // and this line sent the browser away. Purely client-side: a real
+    // organization 401 outside /admin still lands on /login.
+    const path = window.location.pathname;
+    const insideAdmin = path === "/admin" || path.startsWith("/admin/");
     if (
       response.status === 401 &&
       ["AUTH_REQUIRED", "SESSION_EXPIRED", "SESSION_REVOKED"].includes(error.code)
     ) {
       clearToken();
-      if (window.location.pathname !== "/login") window.location.assign("/login");
+      if (!insideAdmin && path !== "/login") window.location.assign("/login");
     }
     throw new ApiError(
       response.status,

@@ -31,7 +31,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Chat page (RG-14)", () => {
   it("reports a failed credit check instead of keeping a stale banner", async () => {
     mockApi({
-      "GET /chat/sessions": { sessions: [] },
+      "GET /chat/sessions": { items: [], total_count: 0, page: 1, page_size: 20, has_more: false },
       "GET /wallet": { status: 500, code: "SERVER_ERROR", message: "boom" },
     });
     render(<Chat />);
@@ -47,10 +47,14 @@ describe("Chat page (RG-14)", () => {
   it("renders messages and disabled composer when wallet is blocked", async () => {
     mockApi({
       "GET /chat/sessions": {
-        sessions: [{ id: "s1", title: null, status: "ACTIVE", created_at: "" }],
+        items: [{ id: "s1", title: null, status: "ACTIVE", created_at: "" }],
+        total_count: 1,
+        page: 1,
+        page_size: 20,
+        has_more: false,
       },
       "GET /chat/sessions/s1/messages": {
-        messages: [
+        items: [
           { id: "m1", role: "USER", body: { text: "سلام" }, created_at: "" },
           {
             id: "m2",
@@ -78,7 +82,7 @@ describe("Chat page (RG-14)", () => {
     // screen. send() used to return at that point with no message and no
     // error, which made the send button look broken - the PO's report.
     const fetchMock = mockApi({
-      "GET /chat/sessions": { sessions: [] },
+      "GET /chat/sessions": { items: [], total_count: 0, page: 1, page_size: 20, has_more: false },
       "GET /wallet": { balance: 500, blocked: false },
       "POST /chat/sessions": { id: "new-session" },
       "POST /chat/sessions/new-session/messages": { id: "m1" },
@@ -89,7 +93,7 @@ describe("Chat page (RG-14)", () => {
         error: null,
       },
       "GET /chat/sessions/new-session/messages": {
-        messages: [
+        items: [
           { id: "m1", role: "USER", body: { text: "سوال من" }, created_at: "" },
           { id: "m2", role: "ASSISTANT", body: { text: "پاسخ سرور" }, created_at: "" },
         ],
@@ -114,7 +118,7 @@ describe("Chat page (RG-14)", () => {
     // Whatever else changes, submitting with text must produce a network call:
     // a no-op submit is indistinguishable from a broken button.
     const fetchMock = mockApi({
-      "GET /chat/sessions": { sessions: [] },
+      "GET /chat/sessions": { items: [], total_count: 0, page: 1, page_size: 20, has_more: false },
       "GET /wallet": { balance: 500, blocked: false },
       "POST /chat/sessions": { status: 500, code: "SERVER_ERROR", message: "boom" },
     });

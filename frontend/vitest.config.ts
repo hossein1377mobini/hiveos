@@ -14,5 +14,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // vitest's default glob is **/*.spec.* - without this it would try to run the
+    // playwright specs in jsdom, where they fail for reasons that have nothing to
+    // do with the code (no real browser, no navigations).
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["node_modules/**", "dist/**", "e2e/**"],
   },
 });
