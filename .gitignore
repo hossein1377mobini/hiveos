@@ -11,6 +11,12 @@ node_modules/
 dist/
 frontend/.npm-cache/
 
+# Playwright: traces, screenshots and videos from failed e2e runs. The specs and
+# the config are committed; only the artifacts are not.
+frontend/test-results/
+frontend/playwright-report/
+frontend/.playwright/
+
 # Env / secrets — ADR-022: هیچ secret در گیت
 .env
 .env.*
@@ -20,6 +26,11 @@ frontend/.npm-cache/
 backups/
 deploy/_build.log
 deploy/_wheels/
+
+# Exported int8 ONNX models (~2.6GB). Built by
+# backend/scripts/export_onnx_models.py and bind-mounted at /opt/models on the
+# server — never committed, never baked into an image.
+models/
 
 # DSH plugin memory
 .dsh-project-memory/
@@ -39,3 +50,14 @@ backend/_*.txt
 
 desktop/node_modules/
 desktop/dist/
+
+# The Electron wrapper's build inputs, mirroring the frontend rules above.
+desktop/out/
+desktop/.vite/
+
+# Graph (re)generation output and probe scratch: tooling by-products, not sources.
+graphify-out/
+frontend/_*.txt
+frontend/_probe*.cjs
+_probe.js
+_*.txt

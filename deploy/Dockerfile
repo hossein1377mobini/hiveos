@@ -1,3 +1,10 @@
+# UNUSED. The real image is infrastructure/api.Dockerfile (uv-based).
+#
+# This file survives only because deploy/docker-compose.staging.yml - which is
+# also unused - references it. Do not build from it: the vendored wheelhouse it
+# expects has no torch/triton entry any more, and satisfying it by downloading
+# torch produced a 2.05GB image for a 1.43GB job. See deploy/README.md.
+#
 # HiveOS v0.1 backend image (staging/prod, zero-open deploy bundle).
 # Dependencies are vendored as wheels by the deployer before building:
 #   cd backend && py -3.11 -m pip download . -d ../deploy/_wheels
@@ -17,8 +24,12 @@ COPY backend/migrations ./backend/migrations
 COPY backend/backend ./backend/backend
 
 # hatchling (build backend) is vendored too; --no-build-isolation avoids network.
+# onnxruntime + transformers power the local embedding and rerank models
+# (PO decision 2026-09-12). Vendored as wheels like everything else, so the
+# build still needs no network. The int8 graphs themselves are mounted from
+# /opt/models at run time and are not part of the image.
 RUN pip install --no-cache-dir /app/_wheels/hatchling-*.whl && \
-    pip install --no-cache-dir --no-build-isolation ./backend
+    pip install --no-cache-dir --no-build-isolation "./backend[local-ml]"
 
 EXPOSE 8000
 WORKDIR /app/backend

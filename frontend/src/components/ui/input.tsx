@@ -1,23 +1,20 @@
-import { forwardRef, type InputHTMLAttributes } from "react";
-import { cn } from "../../lib/utils";
+import * as React from "react"
+import { cn } from "@/lib/utils"
 
-// HiveOS Input — mockup assets/hiveos.css §۶ (padding 11/13, focus ring accent).
-const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, type, ...props }, ref) => (
+function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  return (
     <input
-      ref={ref}
       type={type}
+      data-slot="input"
       className={cn(
-        "w-full rounded-control border border-neutral-200 bg-neutral-0 px-[13px] py-[11px] text-sm text-neutral-900 transition-colors",
-        "placeholder:text-neutral-400",
-        "focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50",
-        "disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-400",
-        className,
+        "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30",
+        "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40",
+        className
       )}
       {...props}
     />
-  ),
-);
-Input.displayName = "Input";
+  )
+}
 
-export { Input };
+export { Input }

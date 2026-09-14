@@ -4,6 +4,7 @@ Runs with EMBEDDING_PROVIDER=mock (conftest) - deterministic vectors make
 the ranking assertions stable without model weights on the dev host.
 """
 
+import asyncio
 
 from backend.config import get_settings
 from backend.knowledge.embeddings import embed_one, embed_texts
@@ -41,7 +42,9 @@ def _drain():
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_run())
+    # asyncio.get_event_loop() is deprecated and raises on a fresh main thread
+    # once another test closed the loop; asyncio.run always builds a new one.
+    asyncio.run(_run())
 
 
 def _sync_rows(sql):
@@ -57,14 +60,16 @@ def _sync_rows(sql):
 
 
 def test_mock_embeddings_are_deterministic_and_normalized():
-    first = embed_one("متن آزمایشی")
-    second = embed_one("متن آزمایشی")
+    # Embedding is async now (the remote provider awaits HTTP, the local one
+    # offloads to a thread), so the test drives it through an event loop.
+    first = asyncio.run(embed_one("متن آزمایشی"))
+    second = asyncio.run(embed_one("متن آزمایشی"))
     assert first == second
     settings = get_settings()
     assert len(first) == settings.embedding_dim
     norm = sum(value * value for value in first) ** 0.5
     assert abs(norm - 1.0) < 1e-6  # unit vector (cosine distance is meaningful)
-    batch = embed_texts(["الف", "ب"])
+    batch = asyncio.run(embed_texts(["الف", "ب"]))
     assert len(batch) == 2
 
 

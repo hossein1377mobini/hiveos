@@ -210,6 +210,51 @@ def test_onboarding_status_reports_steps_and_resume(client, tmp_path):
     assert status["knowledge_source"]["path"] == str(folder)
 
 
+def test_onboarding_status_points_at_otp_once_the_owner_exists(client):
+    """The signup flow has to be resumable after the owner form is submitted.
+
+    A pending organization with an owner used to report next_step "owner" for
+    both "nobody registered yet" and "waiting on the SMS code". The client
+    therefore sent a returning owner back to the owner form, which can only
+    answer ORGANIZATION_NOT_PENDING / OWNER_ALREADY_EXISTS - and verify-otp, the
+    only call that activates the organization, became unreachable. On a refresh
+    the organization was stuck at pending_owner_registration for good.
+    """
+    org_id = _bootstrap_org(client)
+    body = _register_owner(client, org_id).json()["data"]
+    headers = {"Authorization": f"Bearer {body['session']['token']}"}
+
+    status = client.get(f"{AUTH}/onboarding-status", headers=headers).json()["data"]
+    assert status["organization_status"] == "pending_owner_registration"
+    assert status["next_step"] == "otp"
+
+    # The step stays "otp" on every later read until the code is verified...
+    again = client.get(f"{AUTH}/onboarding-status", headers=headers).json()["data"]
+    assert again["next_step"] == "otp"
+
+    # ...and verifying it activates the organization and moves the flow on.
+    assert client.post(f"{AUTH}/send-otp", headers=headers).status_code == 200
+    code = MockSmsProvider.SENT[_mobile_of(org_id)][-1]
+    assert (
+        client.post(f"{AUTH}/verify-otp", headers=headers, json={"code": code}).status_code == 200
+    )
+    after = client.get(f"{AUTH}/onboarding-status", headers=headers).json()["data"]
+    assert after["organization_status"] == "active"
+    assert after["next_step"] == "workspace"
+
+
+def _mobile_of(org_id: str) -> str:
+    engine = _sync_engine()
+    with engine.connect() as conn:
+        mobile = conn.execute(
+            text("SELECT u.mobile FROM hiveos.users u WHERE u.id ="
+                 " (SELECT owner_user_id FROM hiveos.organizations WHERE id = :o)"),
+            {"o": org_id},
+        ).scalar_one()
+    engine.dispose()
+    return mobile
+
+
 def test_onboarding_status_expires_pending_org(client):
     """C3: a pending org past its window flips to EXPIRED with an audit event."""
     org_id = _bootstrap_org(client)  # born pending_owner_registration

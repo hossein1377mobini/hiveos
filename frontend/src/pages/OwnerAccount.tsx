@@ -3,11 +3,12 @@ import { useEffect, useState } from "react";
 import { api, setToken } from "../api/client";
 import { AuthBrand, Field, PanelHead, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import { normDigits } from "../utils/format";
 import { sanitizeUsernameInput, usernameError } from "../utils/username";
+import { Surface } from "../components/ui/surface";
 
 // 02-owner-account.html — US-002: first account + role assignment. Global
 // stepper at step ۲, panel head, +98 mobile input group (design-system §6),
@@ -15,13 +16,17 @@ import { sanitizeUsernameInput, usernameError } from "../utils/username";
 export default function OwnerAccount({
   organizationId,
   onDone,
+  onBack,
 }: {
   organizationId: string;
   onDone: (sessionToken: string) => void;
+  /** PO request: step back to the previous screen of the signup flow. */
+  onBack?: () => void;
 }) {
   const [username, setUsername] = useState("");
   const [available, setAvailable] = useState<boolean | null>(null);
   const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
@@ -33,18 +38,24 @@ export default function OwnerAccount({
       setAvailable(null);
       return;
     }
+    let stale = false;
     const timer = setTimeout(async () => {
       try {
         const data = await api<{ available: boolean }>(
           "GET",
           `/auth/username-available?username=${encodeURIComponent(username)}`,
         );
-        setAvailable(data.available);
+        // F: a slow answer for an earlier prefix used to overwrite the verdict
+        // for what the user has typed since ("آزاد نیست" on a free name).
+        if (!stale) setAvailable(data.available);
       } catch {
-        setAvailable(null);
+        if (!stale) setAvailable(null);
       }
     }, 400);
-    return () => clearTimeout(timer);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
   }, [username]);
 
   const checks = [
@@ -62,11 +73,17 @@ export default function OwnerAccount({
       ? "0" + mobileDigits
       : mobileDigits;
   const mobileInvalid = mobileDigits.length > 0 && !/^09\d{9}$/.test(normalizedMobile);
+  // The API has accepted and validated an owner email all along
+  // (RegisterOwnerRequest.email, unique case-insensitively) and the server
+  // rejects a duplicate with EMAIL_ALREADY_EXISTS — but the form never sent one,
+  // so the field was unreachable. Optional, because the API defaults it to null.
+  // [H3]
+  const emailInvalid = email.trim().length > 0 && !/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email.trim());
   const pwdMismatch = confirmPassword.length > 0 && confirmPassword !== password;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (mobileInvalid || pwdMismatch) return;
+    if (mobileInvalid || pwdMismatch || emailInvalid) return;
     setBusy(true);
     setError(null);
     try {
@@ -74,6 +91,7 @@ export default function OwnerAccount({
         organization_id: organizationId,
         username,
         mobile: normalizedMobile,
+        email: email.trim() || null,
         password,
         confirm_password: confirmPassword,
       });
@@ -93,7 +111,7 @@ export default function OwnerAccount({
       <AuthBrand title="حساب مدیر سازمان" subtitle="حساب اول سازمان و نقش مدیر را بسازید." />
       <Stepper current={2} />
 
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+      <Surface className="p-7">
         <PanelHead icon={UserRound} title="حساب مدیر سازمان" hint="گام ۲ از ۶" />
         <form onSubmit={submit}>
           <Field
@@ -120,7 +138,7 @@ export default function OwnerAccount({
             <div className="flex" dir="ltr">
               <span
                 aria-hidden
-                className="flex select-none items-center justify-center rounded-[10px] border border-neutral-200 border-e-0 bg-neutral-50 px-3 text-sm font-bold text-neutral-600"
+                className="flex select-none items-center justify-center rounded-[10px] border border-border border-e-0 bg-secondary px-3 text-sm font-bold text-muted-foreground"
               >
                 +۹۸
               </span>
@@ -135,6 +153,23 @@ export default function OwnerAccount({
                 autoComplete="tel-national"
               />
             </div>
+          </Field>
+
+          <Field
+            label="ایمیل"
+            optional
+            error={emailInvalid ? "ایمیل معتبر نیست." : undefined}
+            hint="برای بازیابی حساب و اطلاع‌رسانی‌های سامانه استفاده می‌شود."
+          >
+            <Input
+              type="email"
+              dir="ltr"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="text-left"
+              placeholder="manager@example.com"
+              autoComplete="email"
+            />
           </Field>
 
           <Field label="رمز عبور" required error={pwdMismatch ? undefined : undefined}>
@@ -152,7 +187,7 @@ export default function OwnerAccount({
                 type="button"
                 onClick={() => setShowPwd((v) => !v)}
                 aria-label={showPwd ? "پنهان‌کردن رمز" : "نمایش رمز"}
-                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-[6px] p-1 text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-600"
+                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 {showPwd ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
               </button>
@@ -161,7 +196,7 @@ export default function OwnerAccount({
               {checks.map((c) => (
                 <span
                   key={c.label}
-                  className={cn("flex items-center gap-1.5 text-[11.5px]", c.ok ? "text-success" : "text-neutral-400")}
+                  className={cn("flex items-center gap-1.5 text-micro", c.ok ? "text-success" : "text-muted-foreground")}
                 >
                   <span aria-hidden className={cn("size-1.5 rounded-full", c.ok ? "bg-success" : "bg-neutral-300")} />
                   {c.label}
@@ -187,12 +222,22 @@ export default function OwnerAccount({
               <Banner tone="error">{error}</Banner>
             </div>
           )}
-          <Button type="submit" className="w-full" loading={busy}>
+          <LoadingButton type="submit" className="w-full" loading={busy}>
             <ShieldCheck aria-hidden />
             ایجاد حساب و دریافت کد تأیید
-          </Button>
+          </LoadingButton>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              data-testid="owner-back"
+              className="mt-3 w-full cursor-pointer text-center text-caption text-primary underline-offset-4 hover:underline"
+            >
+              بازگشت
+            </button>
+          )}
         </form>
-      </div>
+      </Surface>
     </section>
   );
 }

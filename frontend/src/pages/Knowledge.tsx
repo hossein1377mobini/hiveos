@@ -1,14 +1,20 @@
 import { CircleAlert, FileText, FolderOpen, RefreshCw, Search, UploadCloud, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api/client";
-import { Badge } from "../components/ui/badge";
+import { ApiError, api } from "../api/client";
+import { persianError } from "../api/errors";
+import { DomainStatus } from "../components/ui/domain-status";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
-import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { LoadingButton } from "../components/ui/button-loading";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { DialogBody } from "../components/ui/dialog-body";
 import { Input } from "../components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { RetryNotice } from "../components/ui/retry";
 import { cn } from "../lib/utils";
 import { faNum, humanSize, norm } from "../utils/format";
+import { Surface } from "../components/ui/surface";
 
 // 02-knowledge/01-knowledge-home.html at mockup fidelity: page-head with
 // پویش اکنون/افزودن سند, source card (folder icon, active badge, auto-scan
@@ -23,36 +29,86 @@ interface Asset {
   size_bytes: number;
   extension: string;
   origin: string;
+  // H2: the pipeline stage, so "queued" is no longer one undifferentiated state.
+  asset_type?: string | null;
+  pipeline?: string | null;
+  text_length?: number;
+  chunks?: number;
 }
 
 interface Job {
   id: string;
   asset_id: string | null;
   status: string;
-  stage: string | null;
-  error_code: string | null;
+  job_type: string;
+  // The job payload has never carried "error_code" or "stage": the worker writes
+  // "CODE: developer message" into error_detail (knowledge/worker.py:112) and the
+  // API returns exactly that. The page read two fields that do not exist, so a
+  // failed document showed no reason at all.
+  error_detail: string | null;
 }
 
-const STATUS_FA: Record<string, string> = {
-  queued: "در صف",
-  processing: "در حال پردازش",
-  ready: "تکمیل شد",
-  failed: "ناموفق",
-  deleted: "حذف‌شده",
-};
+// Must stay identical to the server's US-205 table (backend/knowledge/assets.py):
+// an extension the picker offers but the server refuses is a broken promise.
+const ACCEPTED =
+  ".txt,.md,.pdf,.docx,.pptx,.xlsx,.csv,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp";
 
-const STATUS_VARIANT: Record<string, "success" | "error" | "info" | "warning" | "neutral"> = {
-  ready: "success",
-  failed: "error",
-  deleted: "neutral",
-  queued: "info",
-  processing: "info",
-};
-
-const ACCEPTED = ".pdf,.docx,.txt,.md,.csv";
+/**
+ * The machine code at the head of a job's error_detail, e.g.
+ * "PARSE_FAILED: no text could be extracted" -> "PARSE_FAILED".
+ *
+ * The worker stores one free-text column, so the code has to be split back out
+ * before it can be translated. An entry with no separator is treated as the
+ * code itself; anything else degrades to the generic Persian sentence rather
+ * than showing the developer's English.
+ */
+function jobFailureCode(detail: string | null | undefined): string {
+  if (!detail) return "EXTRACTION_FAILED";
+  const code = detail.split(":", 1)[0].trim().toUpperCase();
+  return /^[A-Z][A-Z0-9_]{2,}$/.test(code) ? code : "EXTRACTION_FAILED";
+}
 
 type TabKey = "all" | "ready" | "processing" | "queued" | "failed";
 const PAGE_SIZE = 8;
+
+/**
+ * What a document is doing inside the pipeline (H2).
+ *
+ * The document table used to show only a coarse status, so a file waiting its
+ * turn and one that had already been read but not split into knowledge units
+ * looked identical — an operator could not tell whether a stuck queue was
+ * moving. The API reports the stage it actually reached, and this renders it.
+ *
+ * Deliberately not a percentage: the server knows how far it got, not how much
+ * remains, and a progress bar invented from an unknown denominator is a lie that
+ * looks like information.
+ */
+function AssetProgress({ asset }: { asset: Asset }) {
+  if (asset.status === "failed") {
+    return <span className="text-micro text-muted-foreground">متوقف — به خطا رسید</span>;
+  }
+  if (asset.status === "ready") {
+    const chunks = asset.chunks ?? 0;
+    return (
+      <span data-numeric className="text-micro text-muted-foreground">
+        {chunks > 0 ? faNum(chunks) + " واحد دانش" : "بدون واحد دانش"}
+      </span>
+    );
+  }
+  // Still in the queue or being worked on: report the furthest stage reached.
+  const textLength = asset.text_length ?? 0;
+  const stage = textLength > 0 ? (asset.pipeline ? "متن استخراج شد" : "در حال پردازش") : "در صف پردازش";
+  return (
+    <span className="text-micro text-muted-foreground">
+      {stage}
+      {textLength > 0 && (
+        <span data-numeric className="ms-1 opacity-75">
+          · {faNum(textLength)} نویسه
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function Knowledge() {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -70,22 +126,39 @@ export default function Knowledge() {
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const reload = useCallback(async () => {
     const [a, j, s] = await Promise.all([
-      api<{ assets: Asset[] }>("GET", "/knowledge/assets"),
+      // The asset router moved off "/knowledge" to "/knowledge-assets" when the
+      // source router was split out, and this page was left calling the old
+      // prefix - so every one of these four calls 404'd. The unit suite stubbed
+      // the same wrong string, which is exactly why it stayed green.
+      api<{ assets: Asset[] }>("GET", "/knowledge-assets"),
       api<{ jobs: Job[] }>("GET", "/processing/jobs"),
-      api<Record<string, unknown>>("GET", "/knowledge"),
+      api<Record<string, unknown>>("GET", "/knowledge-sources"),
     ]);
     setAssets(a.assets ?? []);
     setJobs(j.jobs ?? []);
     setSource(
       s && "id" in s ? { id: String(s.id), path: String(s.path ?? ""), status: String(s.status ?? "") } : null,
     );
+    setLoadError(null);
   }, []);
 
-  useEffect(() => {
-    reload().catch(() => setError("دریافت وضعیت دانش ناموفق بود."));
+  // PO request: the server's Persian reason stays visible and a retry button
+  // replaces the empty page when the first load fails.
+  const refresh = useCallback(async () => {
+    try {
+      await reload();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "دریافت وضعیت دانش ناموفق بود.");
+    }
   }, [reload]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   async function upload() {
     if (picked.length === 0) {
@@ -98,19 +171,15 @@ export default function Knowledge() {
     try {
       const form = new FormData();
       for (const f of picked) form.append("files", f);
-      const token = localStorage.getItem("hiveos.session");
-      const response = await fetch("/api/v1/knowledge/upload", {
-        method: "POST",
-        headers: { Authorization: "Bearer " + token },
-        body: form,
-      });
-      if (!response.ok) throw new Error("upload failed");
+      await api("POST", "/knowledge-assets/upload", form);
       setNotice("فایل‌ها در صف پردازش قرار گرفتند.");
       setPicked([]);
       setDialogOpen(false);
       await reload();
-    } catch {
-      setError("آپلود ناموفق بود.");
+    } catch (exc) {
+      // D6: keep the server's reason (size cap, format, quota) instead of a
+      // generic message that hides it.
+      setError(exc instanceof ApiError ? exc.message : "آپلود ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -119,12 +188,14 @@ export default function Knowledge() {
   async function scanNow() {
     if (!source) return;
     setBusy(true);
+    setError(null);
+    setNotice(null);
     try {
-      await api("POST", "/knowledge/" + source.id + "/scan");
+      await api("POST", "/knowledge-sources/" + source.id + "/scan");
       setNotice("پویش دستی اجرا شد.");
       await reload();
-    } catch {
-      setError("پویش ناموفق بود.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "پویش ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -132,12 +203,14 @@ export default function Knowledge() {
 
   async function classify(assetId: string) {
     setBusy(true);
+    setError(null);
+    setNotice(null);
     try {
-      await api("POST", "/knowledge/assets/" + assetId + "/classify");
+      await api("POST", "/knowledge-assets/" + assetId + "/classify");
       setNotice("دسته‌بندی سند اجرا شد.");
       await reload();
-    } catch {
-      setError("دسته‌بندی ناموفق بود.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "دسته‌بندی ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -177,19 +250,19 @@ export default function Knowledge() {
       {/* page-head (mockup) */}
       <div className="mb-5 flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-[19px] font-extrabold text-neutral-900">دانش سازمان</h1>
-          <p className="mt-[3px] text-[13px] text-neutral-600">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
+          <h1 className="text-heading font-extrabold text-foreground">دانش سازمان</h1>
+          <p className="mt-[3px] text-caption text-muted-foreground">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
         </div>
         <div className="ms-auto flex items-center gap-2">
           {source && (
-            <Button variant="secondary" size="sm" onClick={scanNow} loading={busy}>
+            <LoadingButton variant="secondary" size="sm" onClick={scanNow} loading={busy}>
               <RefreshCw aria-hidden />
               پویش اکنون
-            </Button>
+            </LoadingButton>
           )}
-          <Button size="sm" onClick={() => setDialogOpen(true)}>
+          <LoadingButton size="sm" onClick={() => setDialogOpen(true)}>
             افزودن سند
-          </Button>
+          </LoadingButton>
         </div>
       </div>
 
@@ -203,10 +276,20 @@ export default function Knowledge() {
           <Banner tone="error" data-testid="knowledge-error">{error}</Banner>
         </div>
       )}
+      {loadError && (
+        <div className="mb-4">
+          <RetryNotice
+            message={loadError}
+            onRetry={() => void refresh()}
+            testId="knowledge-retry"
+            compact
+          />
+        </div>
+      )}
 
       {/* کارت منبع پوشه (mockup) */}
       {source && (
-        <div className="mb-4 rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card">
+        <Surface className="mb-4 p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span
@@ -216,17 +299,21 @@ export default function Knowledge() {
                 <FolderOpen className="size-5" />
               </span>
               <div>
-                <div className="text-[15px] font-extrabold text-neutral-900">پوشه اسناد سازمان</div>
-                <div className="mt-1 font-mono text-[13px] text-neutral-600" dir="ltr">
+                <div className="text-body font-extrabold text-foreground">پوشه اسناد سازمان</div>
+                <div className="mt-1 font-mono text-caption text-muted-foreground" dir="ltr">
                   {source.path}
                 </div>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Badge variant="success" size="lg" dot>
-                {source.status === "active" ? "فعال" : source.status}
-              </Badge>
-              <span className="text-[11px] text-neutral-400">پویش خودکار هر ۳۰ دقیقه</span>
+              {/* The watch state is a health signal, not a knowledge status:
+                  "active" here means the scheduled scan is running. */}
+              {/* The source status is "active" | "disabled" - the watch state,
+                  not a health probe. Rendering it through the health registry
+                  fell through to the raw value, so the badge read "active" in
+                  English. It has its own registry now. */}
+              <DomainStatus domain="source" value={source.status} dot />
+              <span className="text-micro text-muted-foreground">پویش خودکار هر ۳۰ دقیقه</span>
             </div>
           </div>
           <div className="mt-4">
@@ -235,7 +322,7 @@ export default function Knowledge() {
               برای پردازش فوری از «پویش اکنون» استفاده کنید یا سند را مستقیم از رایانه اضافه کنید.
             </Banner>
           </div>
-        </div>
+        </Surface>
       )}
 
       {/* آمار (stat-card, mockup §۲۱) */}
@@ -247,7 +334,7 @@ export default function Knowledge() {
       </div>
 
       {/* tabs + search (mockup §۱۷) */}
-      <div className="mb-4 rounded-card border border-neutral-200 bg-neutral-0 p-4 shadow-card">
+      <Surface className="mb-4 p-4">
         <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setPage(0); }}>
           <TabsList>
             <TabsTrigger value="all">
@@ -274,7 +361,7 @@ export default function Knowledge() {
         </Tabs>
         <div className="mt-3 flex flex-wrap gap-3">
           <div className="relative min-w-[220px] flex-1">
-            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
+            <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
               value={search}
@@ -284,112 +371,121 @@ export default function Knowledge() {
               className="ps-9"
             />
           </div>
-          <select
-            value={format}
-            onChange={(e) => { setFormat(e.target.value); setPage(0); }}
-            aria-label="فیلتر فرمت"
-            className="cursor-pointer rounded-control border border-neutral-200 bg-neutral-0 px-3 py-[11px] text-sm text-neutral-600 focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50"
-          >
-            <option value="all">همه فرمت‌ها</option>
-            {formats.map((f) => (
-              <option key={f} value={f}>
-                {f.toUpperCase()}
-              </option>
-            ))}
-          </select>
+          <Select value={format} onValueChange={(v) => { setFormat(v); setPage(0); }}>
+            <SelectTrigger
+              aria-label="فیلتر فرمت"
+              className="h-[42px] w-[150px] rounded-control border-border bg-card text-sm text-muted-foreground"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">همه فرمت‌ها</SelectItem>
+              {formats.map((f) => (
+                <SelectItem key={f} value={f}>
+                  {f.toUpperCase()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </div>
+      </Surface>
 
       {/* جدول اسناد (mockup §۸) */}
-      <div className="overflow-x-auto rounded-card border border-neutral-200 bg-neutral-0 shadow-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200 text-[12px] text-neutral-400">
-              <th className="p-3 ps-5 text-start font-bold">نام سند</th>
-              <th className="p-3 text-start font-bold">فرمت</th>
-              <th className="p-3 text-start font-bold">حجم</th>
-              <th className="p-3 text-start font-bold">وضعیت</th>
-              <th className="p-3 pe-5 text-start font-bold"></th>
-            </tr>
-          </thead>
-          <tbody>
+      <Surface className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-border text-caption text-muted-foreground">
+              <TableHead className="p-3 ps-5 font-bold">نام سند</TableHead>
+              <TableHead className="p-3 font-bold">فرمت</TableHead>
+              <TableHead className="p-3 font-bold">حجم</TableHead>
+              <TableHead className="p-3 font-bold">وضعیت</TableHead>
+              <TableHead className="p-3 font-bold">پیشرفت</TableHead>
+              <TableHead className="p-3 pe-5 font-bold"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {pageItems.map((a) => {
               const job = jobByAsset.get(a.id);
-              const failedCode = a.status === "failed" ? (job?.error_code ?? "") : "";
+              const failedReason =
+                a.status === "failed" ? persianError(jobFailureCode(job?.error_detail)) : "";
               return (
-                <tr key={a.id} className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50/60">
-                  <td className="p-3 ps-5 font-bold text-neutral-900" data-testid="asset-name">
+                <TableRow key={a.id} className="border-border last:border-0">
+                  <TableCell className="p-3 ps-5 font-bold whitespace-normal text-foreground" data-testid="asset-name">
                     {a.name}
-                  </td>
-                  <td className="p-3">
-                    <span className="inline-block rounded-[6px] border border-neutral-200 bg-neutral-50 px-2 py-0.5 font-mono text-[11px] text-neutral-600" dir="ltr">
+                  </TableCell>
+                  <TableCell className="p-3">
+                    <span className="inline-block rounded-[6px] border border-border bg-secondary px-2 py-0.5 font-mono text-micro text-muted-foreground" dir="ltr">
                       {(a.extension ?? "").toUpperCase()}
                     </span>
-                  </td>
-                  <td className="p-3 font-mono text-[12px] text-neutral-600" dir="ltr">
+                  </TableCell>
+                  <TableCell className="p-3 font-mono text-caption text-muted-foreground" dir="ltr">
                     {humanSize(a.size_bytes)}
-                  </td>
-                  <td className="p-3" data-testid={"asset-status-" + a.status}>
-                    <Badge variant={STATUS_VARIANT[a.status] ?? "neutral"} dot>
-                      {STATUS_FA[a.status] ?? a.status}
-                    </Badge>
-                    {failedCode && (
-                      <div className="mt-1 font-mono text-[10.5px] text-error" dir="ltr">
-                        {failedCode}
-                      </div>
+                  </TableCell>
+                  <TableCell className="p-3" data-testid={"asset-status-" + a.status}>
+                    <DomainStatus domain="asset" value={a.status} dot />
+                    {failedReason && (
+                      <div className="mt-1 text-micro leading-relaxed text-error">{failedReason}</div>
                     )}
-                  </td>
-                  <td className="p-3 pe-5 text-end">
+                  </TableCell>
+                  {/* H2: what the document is actually doing. A file that has
+                      been extracted but not chunked reads differently from one that
+                      has not been touched, and the operator can tell whether a
+                      stuck queue is moving. Stage names, never a made-up
+                      percentage. */}
+                  <TableCell className="p-3" data-testid={"asset-progress-" + a.id}>
+                    <AssetProgress asset={a} />
+                  </TableCell>
+                  <TableCell className="p-3 pe-5 text-end">
                     {a.status === "queued" && (
-                      <Button variant="secondary" size="xs" onClick={() => classify(a.id)} disabled={busy}>
+                      <LoadingButton variant="secondary" size="xs" onClick={() => classify(a.id)} disabled={busy}>
                         دسته‌بندی
-                      </Button>
+                      </LoadingButton>
                     )}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               );
             })}
             {pageItems.length === 0 && (
-              <tr>
-                <td colSpan={5} className="p-0">
+              <TableRow>
+                <TableCell colSpan={6} className="p-0">
                   <div className="px-5 py-12 text-center">
                     <span
                       aria-hidden
-                      className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-[16px] border border-neutral-200 bg-neutral-50 text-neutral-400"
+                      className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-[16px] border border-border bg-secondary text-muted-foreground"
                     >
                       <FileText className="size-[26px]" />
                     </span>
-                    <h3 className="text-[15px] font-extrabold text-neutral-900">هنوز سندی نیست.</h3>
-                    <p className="mx-auto mt-1.5 max-w-[380px] text-[13px] text-neutral-600">
+                    <h3 className="text-body font-extrabold text-foreground">هنوز سندی نیست.</h3>
+                    <p className="mx-auto mt-1.5 max-w-[380px] text-caption text-muted-foreground">
                       {search || tab !== "all" || format !== "all"
                         ? "سندی مطابق جستجو یا فیلتر پیدا نشد."
                         : "با «افزودن سند» یا قرار دادن فایل در پوشه اسناد، پردازش آغاز می‌شود."}
                     </p>
                     {!search && tab === "all" && format === "all" && (
-                      <Button size="sm" className="mt-4" onClick={() => setDialogOpen(true)}>
+                      <LoadingButton size="sm" className="mt-4" onClick={() => setDialogOpen(true)}>
                         افزودن سند
-                      </Button>
+                      </LoadingButton>
                     )}
                   </div>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )}
-          </tbody>
-        </table>
-        <div className="flex items-center justify-between border-t border-neutral-200 px-5 py-3">
-          <span className="text-xs text-neutral-400">
+          </TableBody>
+        </Table>
+        <div className="flex items-center justify-between border-t border-border px-5 py-3">
+          <span className="text-xs text-muted-foreground">
             نمایش {faNum(pageItems.length)} از {faNum(filtered.length)} سند
           </span>
           <div className="flex gap-2">
-            <Button variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            <LoadingButton variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
               قبلی
-            </Button>
-            <Button variant="secondary" size="xs" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
+            </LoadingButton>
+            <LoadingButton variant="secondary" size="xs" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
               بعدی
-            </Button>
+            </LoadingButton>
           </div>
         </div>
-      </div>
+      </Surface>
 
       {/* Dialog افزودن سند — الگوی آپلود متعارف ماک‌آپ (بازبینی سوم) */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -401,50 +497,60 @@ export default function Knowledge() {
             </DialogDescription>
           </DialogHeader>
           <DialogBody>
-            <div
-              role="button"
-              tabIndex={0}
-              aria-label="انتخاب فایل"
+            {/* A real <button>, not a div with role="button". The div version
+                announced itself as a button but kept none of the behaviour: no
+                native Enter/Space activation, no disabled state, and the drag
+                handlers on the clickable region swallowed text selection.
+                Letting the button itself be the drop target keeps one element
+                doing one thing. [E4] */}
+            <button
+              type="button"
+              aria-describedby="dropzone-hint"
               data-testid="dropzone"
               onClick={() => fileRef.current?.click()}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileRef.current?.click(); }}
-              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragOver={(event) => {
+                event.preventDefault()
+                setDragging(true)
+              }}
               onDragLeave={() => setDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragging(false);
-                setPicked(Array.from(e.dataTransfer.files));
+              onDrop={(event) => {
+                event.preventDefault()
+                setDragging(false)
+                setPicked(Array.from(event.dataTransfer.files))
               }}
               className={cn(
-                "flex cursor-pointer flex-col items-center justify-center rounded-[14px] border-2 border-dashed px-6 py-10 text-center transition-colors",
-                dragging ? "border-navy-600 bg-navy-50" : "border-neutral-200 bg-neutral-50 hover:border-navy-200",
+                "flex w-full cursor-pointer flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-10 text-center transition-colors",
+                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                dragging ? "border-primary bg-accent" : "border-border bg-secondary hover:border-primary/40",
               )}
             >
-              <UploadCloud aria-hidden className="mb-2 size-7 text-neutral-400" />
-              <p className="text-[13px] font-bold text-neutral-900">فایل‌ها را اینجا رها کنید یا کلیک کنید</p>
-              <p className="mt-1 text-[11.5px] text-neutral-400">چند فایل در هر بار</p>
-            </div>
+              <UploadCloud aria-hidden className="mb-2 size-7 text-muted-foreground" />
+              <span className="text-caption font-bold text-foreground">فایل‌ها را اینجا رها کنید یا کلیک کنید</span>
+              <span id="dropzone-hint" className="mt-1 text-micro text-muted-foreground">
+                چند فایل در هر بار · حداکثر ۵۰ مگابایت برای هر فایل
+              </span>
+            </button>
             <input
               ref={fileRef}
               type="file"
               multiple
               accept={ACCEPTED}
-              className="hidden"
+              className="hidden border-border bg-card"
               onChange={(e) => setPicked(Array.from(e.target.files ?? []))}
             />
             {picked.length > 0 && (
               <ul className="mt-3 space-y-2">
                 {picked.map((f, i) => (
-                  <li key={f.name + i} className="flex items-center gap-3 rounded-[10px] border border-neutral-200 bg-neutral-0 px-3 py-2">
-                    <FileText aria-hidden className="size-4 shrink-0 text-neutral-400" />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-neutral-900">{f.name}</span>
-                    <span className="font-mono text-[11px] text-neutral-400" dir="ltr">
+                  <li key={f.name + i} className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-2">
+                    <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-caption font-semibold text-foreground">{f.name}</span>
+                    <span className="font-mono text-micro text-muted-foreground" dir="ltr">
                       {humanSize(f.size)}
                     </span>
                     <button
                       type="button"
                       aria-label={"حذف " + f.name}
-                      className="cursor-pointer rounded-[7px] p-1 text-neutral-400 transition-colors hover:bg-error-bg hover:text-error"
+                      className="cursor-pointer rounded-[7px] p-1 text-muted-foreground transition-colors hover:bg-error-bg hover:text-error"
                       onClick={() => setPicked((p) => p.filter((_, idx) => idx !== i))}
                     >
                       <X className="size-4" />
@@ -455,12 +561,12 @@ export default function Knowledge() {
             )}
           </DialogBody>
           <DialogFooter>
-            <Button variant="secondary" size="sm" onClick={() => setDialogOpen(false)}>
+            <LoadingButton variant="secondary" size="sm" onClick={() => setDialogOpen(false)}>
               انصراف
-            </Button>
-            <Button size="sm" onClick={upload} loading={busy} disabled={picked.length === 0} data-testid="upload">
+            </LoadingButton>
+            <LoadingButton size="sm" onClick={upload} loading={busy} disabled={picked.length === 0} data-testid="upload">
               {picked.length > 0 ? `افزودن به پردازش (${faNum(picked.length)})` : "افزودن به پردازش"}
-            </Button>
+            </LoadingButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -470,7 +576,7 @@ export default function Knowledge() {
 
 function CountChip({ value }: { value: number }) {
   return (
-    <span className="me-0 rounded-full border border-neutral-200 bg-neutral-50 px-[7px] text-[10.5px] text-neutral-600">
+    <span className="me-0 rounded-full border border-border bg-secondary px-[7px] text-micro text-muted-foreground">
       {faNum(value)}
     </span>
   );
@@ -488,16 +594,16 @@ function StatCard({
   return (
     <div
       className={cn(
-        "rounded-[16px] border border-neutral-200 bg-neutral-0 p-[18px] shadow-card",
-        tone === "info" && "border-navy-200 bg-navy-50/60",
+        "rounded-[16px] border border-border bg-card p-[18px] shadow-card",
+        tone === "info" && "border-primary/40 bg-accent/60",
         tone === "danger" && "border-error bg-error-bg",
       )}
     >
-      <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-600">
+      <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
         {tone === "danger" && <CircleAlert aria-hidden className="size-[15px] text-error" />}
         {label}
       </div>
-      <div className="mt-2 text-2xl font-extrabold tracking-[-0.5px] text-neutral-900">{value}</div>
+      <div className="mt-2 text-2xl font-extrabold tracking-[-0.5px] text-foreground">{value}</div>
     </div>
   );
 }

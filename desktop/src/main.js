@@ -25,8 +25,12 @@ function createWindow() {
     title: "HiveOS",
     webPreferences: { contextIsolation: true, sandbox: true },
   });
-  // open target=_blank / window.open in the OS browser, not inside the app
+  // open target=_blank / window.open in the OS browser, not inside the app.
+  // E: openExternal hands the string to the OS, so only real web links may
+  // reach it - a file://, smb:// or custom-scheme URL from page content would
+  // otherwise launch an arbitrary local handler.
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (!/^https?:[/][/]/i.test(url)) return { action: "deny" };
     shell.openExternal(url);
     return { action: "deny" };
   });

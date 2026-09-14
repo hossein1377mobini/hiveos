@@ -1,199 +1,365 @@
-import { Bell, BookOpen, CalendarClock, House, LogOut, MessageCircle, MoreVertical, Wallet, Zap } from "lucide-react";
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { clearToken } from "../api/client";
-import { cn } from "../lib/utils";
+import {
+  BellIcon,
+  BookOpenIcon,
+  CalendarClockIcon,
+  ChevronRightIcon,
+  HouseIcon,
+  LayoutDashboardIcon,
+  LogOutIcon,
+  MessageCircleIcon,
+  SearchIcon,
+  WalletIcon,
+  ZapIcon,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import { useEffect, useRef, type ReactNode } from "react"
+import { NavLink, useLocation, useNavigate } from "react-router-dom"
 
-// App shell — mockup 10-shell/01-app-shell.html + the real shell markup used by
-// every post-login mockup page (sidebar 248px on inline-start, brand block,
-// section headings, user chip with «خروج» menu, 58px topbar with breadcrumbs).
-// Sidebar keeps five items incl. «اشتراک» (dev-guidelines §2, PO 2026-09-14).
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "./ui/breadcrumb"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from "./ui/sidebar"
+import { Button } from "./ui/button"
+import { CommandPalette, useCommandPalette, type CommandItem } from "./ui/command-palette"
+import { clearToken } from "../api/client"
+import type { SessionIdentity } from "../lib/session"
+import { cn } from "../lib/utils"
 
-type NavItem = { id: NavId; label: string; icon: ComponentType<{ className?: string }> };
+/**
+ * App shell — the organisation-facing frame.
+ *
+ * Rewritten for v0.5:
+ *  - navigation is real routing (NavLink), so every section is linkable,
+ *    bookmarkable and restores on refresh. [A4/D1]
+ *  - a Ctrl/⌘+K command palette jumps between sections from anywhere. [D2]
+ *  - the user chip shows the real organisation and user names when the API
+ *    supplies them, falling back to the role label rather than hard-coding it. [D10]
+ *  - the notification bell is a real control with a described, disabled state
+ *    instead of an inert icon with a permanent red dot. [D11]
+ *  - type sizes come from the seven-step scale. [B1]
+ */
+
+export type NavId = "chat" | "knowledge" | "usage" | "wallet" | "subscription"
+
+type NavItem = { id: NavId; label: string; icon: LucideIcon; path: string; keyword: string }
 
 const NAV_GROUPS: ReadonlyArray<{ section: string; items: readonly NavItem[] }> = [
-  { section: "هوش سازمان", items: [{ id: "chat", label: "گفتگو", icon: MessageCircle }] },
-  { section: "دانش سازمان", items: [{ id: "knowledge", label: "دانش سازمان", icon: BookOpen }] },
+  {
+    section: "هوش سازمان",
+    items: [
+      {
+        id: "chat",
+        label: "گفتگو",
+        icon: MessageCircleIcon,
+        path: "/chat",
+        keyword: "هوش مصنوعی پرسش پاسخ گفتگو",
+      },
+    ],
+  },
+  {
+    section: "دانش سازمان",
+    items: [
+      {
+        id: "knowledge",
+        label: "دانش سازمان",
+        icon: BookOpenIcon,
+        path: "/knowledge",
+        keyword: "اسناد مدرک پوشه آپلود جستجو",
+      },
+    ],
+  },
   {
     section: "مدیریت",
     items: [
-      { id: "usage", label: "اعتبار و مصرف", icon: Zap },
-      { id: "wallet", label: "کیف پول", icon: Wallet },
-      { id: "subscription", label: "اشتراک", icon: CalendarClock },
+      {
+        id: "usage",
+        label: "اعتبار و مصرف",
+        icon: ZapIcon,
+        path: "/usage",
+        keyword: "توکن هزینه مصرف اعتبار",
+      },
+      {
+        id: "wallet",
+        label: "کیف پول",
+        icon: WalletIcon,
+        path: "/wallet",
+        keyword: "شارژ پرداخت تراکنش موجودی",
+      },
+      {
+        id: "subscription",
+        label: "اشتراک",
+        icon: CalendarClockIcon,
+        path: "/subscription",
+        keyword: "پلن تمدید دوره اشتراک",
+      },
     ],
   },
-];
+]
 
-export type NavId = "chat" | "knowledge" | "usage" | "wallet" | "subscription";
-
-const NAV_LABEL: Record<NavId, string> = {
+export const NAV_LABEL: Record<NavId, string> = {
   chat: "گفتگو",
   knowledge: "دانش سازمان",
   usage: "اعتبار و مصرف",
   wallet: "کیف پول",
   subscription: "اشتراک",
-};
+}
 
-function UserChip() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+const PATH_LABEL: Record<string, string> = {
+  "/chat": "گفتگو",
+  "/knowledge": "دانش سازمان",
+  "/usage": "اعتبار و مصرف",
+  "/wallet": "کیف پول",
+  "/subscription": "اشتراک",
+  "/admin": "پنل مدیریت",
+}
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+function UserMenu({ identity }: { identity?: SessionIdentity | null }) {
+  const navigate = useNavigate()
+  const name = identity?.user_name?.trim() || "مدیر"
+  const role = identity?.organization_name?.trim()
+    ? identity.organization_name
+    : "مدیر سازمان"
+  const initial = name.slice(0, 1)
 
   return (
-    <div ref={ref} className={cn("relative cursor-pointer rounded-[10px] p-2 hover:bg-neutral-50", open && "bg-neutral-50")}>
-      <button
-        type="button"
-        className="flex w-full cursor-pointer items-center gap-2.5 text-start"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span
-          aria-hidden
-          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-navy-600 text-xs font-extrabold text-white"
-        >
-          م
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-bold text-neutral-900">مدیر</span>
-          <span className="block text-[11px] text-neutral-400">مدیر سازمان</span>
-        </span>
-        <MoreVertical aria-hidden className="size-[15px] text-neutral-400" />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute bottom-[calc(100%+8px)] end-2 z-40 min-w-[180px] rounded-[12px] border border-neutral-200 bg-neutral-0 p-1.5 shadow-pop"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              clearToken();
-              location.reload();
-            }}
-            className="flex w-full cursor-pointer items-center gap-2.5 rounded-[9px] px-3 py-2.5 text-[13px] font-semibold text-neutral-600 transition-colors hover:bg-neutral-50 hover:text-neutral-900"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
+          <span
+            aria-hidden
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-micro font-bold text-sidebar-primary-foreground"
           >
-            <LogOut aria-hidden className="size-4 rtl:-scale-x-100" />
-            خروج
-          </button>
-        </div>
-      )}
-    </div>
-  );
+            {initial}
+          </span>
+          <span className="grid min-w-0 flex-1 text-start leading-tight">
+            <span className="truncate text-caption font-bold text-sidebar-foreground">{name}</span>
+            <span className="truncate text-micro text-muted-foreground">{role}</span>
+          </span>
+        </SidebarMenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="end" className="min-w-[190px]">
+        <DropdownMenuLabel className="text-micro text-muted-foreground">حساب کاربری</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={() => {
+            clearToken()
+            navigate("/login", { replace: true })
+          }}
+        >
+          <LogOutIcon data-icon="inline-start" className="rtl:-scale-x-100" />
+          خروج
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 export function AppShell({
   children,
-  active,
-  onNavigate,
   breadcrumb,
   actions,
   flush = false,
+  identity,
 }: {
-  children: ReactNode;
-  active?: NavId;
-  onNavigate?: (id: NavId) => void;
-  /** Topbar breadcrumb; defaults to the active section label (mockup: crumbs). */
-  breadcrumb?: ReactNode;
-  /** Extra topbar icon buttons (e.g. chat search) — rendered before the bell. */
-  actions?: ReactNode;
-  /** Full-height pages (chat) render without main padding — mockup .main--flush. */
-  flush?: boolean;
+  children: ReactNode
+  /** Overrides the breadcrumb leaf; defaults to the active route label. */
+  breadcrumb?: ReactNode
+  /** Extra topbar controls (e.g. chat search) — rendered before the bell. */
+  actions?: ReactNode
+  /** Full-height pages (chat) render without main padding. */
+  flush?: boolean
+  identity?: SessionIdentity | null
 }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const palette = useCommandPalette()
+  const mainRef = useRef<HTMLElement>(null)
+
+  // Skip the very first render: focusing <main> on initial load would scroll
+  // past the header and swallow the browser's own focus behaviour.
+  const firstRender = useRef(true)
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false
+      return
+    }
+    mainRef.current?.focus()
+  }, [location.pathname])
+
+  const activeItem = NAV_GROUPS.flatMap((group) => group.items).find((item) =>
+    location.pathname.startsWith(item.path),
+  )
+  const crumbLabel = activeItem ? activeItem.label : (PATH_LABEL[location.pathname] ?? "")
+
+  const commands: CommandItem[] = [
+    ...NAV_GROUPS.flatMap((group) =>
+      group.items.map((item) => ({
+        id: "nav-" + item.id,
+        label: item.label,
+        group: group.section,
+        path: item.path,
+        icon: item.icon,
+        keywords: [item.keyword],
+      })),
+    ),
+    {
+      id: "nav-admin",
+      label: "پنل مدیریت سامانه",
+      group: "سامانه",
+      path: "/admin",
+      icon: LayoutDashboardIcon,
+      keywords: ["ادمین", "مدیریت", "سازمان‌ها", "تنظیمات", "رویدادها"],
+    },
+  ]
+
   return (
-    <div className="flex min-h-dvh bg-neutral-50">
-      <aside
-        aria-label="ناوبری اصلی"
-        className="sticky top-0 flex h-dvh w-[248px] shrink-0 flex-col border-e border-neutral-200 bg-neutral-0"
-      >
-        <div className="flex items-center gap-2.5 px-4 pb-3.5 pt-[18px]">
+    <SidebarProvider className="min-h-dvh">
+      <Sidebar side="right" collapsible="icon" className="border-e">
+        <SidebarHeader className="flex-row items-center gap-2.5 px-2 py-3.5">
           <span
             aria-hidden
-            className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] bg-navy-600 text-white"
+            className="flex size-9 shrink-0 items-center justify-center rounded-control bg-sidebar-primary text-sidebar-primary-foreground"
           >
-            <House className="size-[18px]" />
+            <HouseIcon className="size-4.5" />
           </span>
-          <span className="text-[14.5px] font-extrabold text-neutral-900" dir="ltr">
+          <span className="truncate text-heading font-bold tracking-tight text-sidebar-foreground" dir="ltr">
             HiveOS
           </span>
-        </div>
-        <nav className="flex-1 overflow-auto px-3 pt-1" aria-label="بخش‌ها">
+        </SidebarHeader>
+        <SidebarContent>
           {NAV_GROUPS.map((group) => (
-            <div key={group.section}>
-              <div className="px-2.5 pb-1.5 pt-3.5 text-[10.5px] font-extrabold tracking-[0.5px] text-neutral-400">
+            <SidebarGroup key={group.section}>
+              <SidebarGroupLabel className="text-micro font-bold tracking-[0.4px]">
                 {group.section}
-              </div>
-              <ul>
-                {group.items.map(({ id, label, icon: Icon }) => {
-                  const isActive = active === id;
-                  return (
-                    <li key={id}>
-                      <button
-                        type="button"
-                        onClick={() => onNavigate?.(id)}
-                        aria-current={isActive ? "page" : undefined}
-                        className={cn(
-                          "relative mb-0.5 flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-[9px] text-[13.5px] font-semibold transition-colors",
-                          isActive
-                            ? "bg-navy-50 font-bold text-navy-600 before:absolute before:-start-3 before:bottom-2 before:top-2 before:w-[3px] before:rounded-[3px] before:bg-navy-600 before:content-['']"
-                            : "text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900",
-                        )}
+              </SidebarGroupLabel>
+              <SidebarMenu>
+                {group.items.map(({ id, label, icon: Icon, path }) => (
+                  <SidebarMenuItem key={id}>
+                    <SidebarMenuButton asChild tooltip={label}>
+                      <NavLink
+                        to={path}
+                        className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
                       >
-                        <Icon aria-hidden className="size-[17px]" />
-                        {label}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+                        <Icon aria-hidden />
+                        <span>{label}</span>
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
           ))}
-        </nav>
-        <div className="border-t border-neutral-200 p-3">
-          <UserChip />
-        </div>
-      </aside>
+        </SidebarContent>
+        <SidebarFooter className="border-t">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <UserMenu identity={identity} />
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      </Sidebar>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-[58px] shrink-0 items-center gap-3 border-b border-neutral-200 bg-neutral-0 px-[22px]">
-          <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-neutral-600">
-            {breadcrumb ?? <span className="font-bold text-neutral-900">{active ? NAV_LABEL[active] : ""}</span>}
-          </div>
+      <SidebarInset className="min-w-0">
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2.5 border-b border-border bg-background/95 px-4 backdrop-blur-sm">
+          <SidebarTrigger aria-label="نمایش یا پنهان کردن ناوبری" />
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap text-caption">
+              <BreadcrumbItem className="hidden sm:inline-flex">
+                <BreadcrumbLink asChild>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/chat")}
+                    className="cursor-pointer text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    HiveOS
+                  </button>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator className="hidden sm:inline-flex rtl:-scale-x-100">
+                <ChevronRightIcon className="size-3.5" />
+              </BreadcrumbSeparator>
+              <BreadcrumbItem className="min-w-0">
+                <BreadcrumbPage className="truncate font-bold text-foreground">
+                  {breadcrumb ?? crumbLabel}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+
           <div className="ms-auto flex items-center gap-2">
-            {actions}
-            <button
-              type="button"
-              aria-label="اعلان‌ها"
-              className="relative flex size-9 cursor-pointer items-center justify-center rounded-[10px] border border-neutral-200 bg-neutral-0 text-neutral-600 transition-colors hover:bg-neutral-50 hover:text-neutral-900"
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => palette.setOpen(true)}
+              className="hidden rounded-control text-muted-foreground md:inline-flex"
+              aria-keyshortcuts="Control+K"
             >
-              <Bell aria-hidden className="size-[17px]" />
-              <span
-                aria-hidden
-                className="absolute end-2 top-[7px] size-[7px] rounded-full border-[1.5px] border-white bg-error"
-              />
-            </button>
+              <SearchIcon className="size-3.5" />
+              جستجو
+              <kbd className="mono ms-1 rounded-xs border border-border bg-secondary px-1 py-px text-micro">
+                Ctrl K
+              </kbd>
+            </Button>
+            {actions}
+            <Button
+              variant="outline"
+              size="icon-sm"
+              disabled
+              aria-label="اعلان‌ها — به‌زودی"
+              title="مرکز اعلان‌ها در نسخهٔ بعدی فعال می‌شود."
+              className="rounded-control"
+            >
+              <BellIcon className="size-4" />
+            </Button>
           </div>
         </header>
-        <main className={cn("min-w-0 flex-1", flush ? "flex flex-col" : "px-7 pb-12 pt-6")}>{children}</main>
-      </div>
-    </div>
-  );
+        {/* A client-side route change does not move focus: a keyboard or screen
+            reader user stays parked on the sidebar link they just activated and
+            never learns the page content changed. Focus is moved to the main
+            landmark, which carries an accessible name. tabIndex={-1} makes it
+            programmatically focusable without adding a tab stop. [E1] */}
+        <main
+          ref={mainRef}
+          tabIndex={-1}
+          aria-label={crumbLabel || "محتوای صفحه"}
+          className={cn(
+            "outline-none",
+            flush ? "flex min-w-0 flex-1 flex-col pb-0" : "min-w-0 flex-1 px-6 pb-12 pt-6",
+          )}
+        >
+          {children}
+        </main>
+      </SidebarInset>
+
+      <CommandPalette items={commands} open={palette.open} onOpenChange={palette.setOpen} />
+    </SidebarProvider>
+  )
 }
 
-export type { NavItem };
-export { NAV_LABEL };
+export type { NavItem }

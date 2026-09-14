@@ -20,6 +20,9 @@ from backend.models.processing_job import (
     JOB_PRIORITIES,
 )
 
+# E: retry ceiling for a failed extraction/embedding job.
+MAX_JOB_ATTEMPTS = 3
+
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
@@ -63,7 +66,9 @@ async def enqueue_job(
                 ProcessingJob.status.in_(ACTIVE_STATUSES),
             )
         )
-    ).scalar_one_or_none()
+    # E: scalar_one_or_none() raised MultipleResultsFound inside drain_queue when
+    # a race left two active rows, aborting every job behind it in the batch.
+    ).scalars().first()
     if existing is not None:
         return None
 
@@ -127,9 +132,20 @@ async def retry_job(session: AsyncSession, organization: Organization, job_id) -
         raise ApiError(404, "PROCESSING_JOB_NOT_FOUND", "Processing job not found.")
     if job.status != "failed":
         raise ApiError(409, "JOB_NOT_RETRYABLE", "Only failed jobs can be retried.")
+    # E: the counter was incremented but never checked, so a client could retry
+    # the same extraction + embedding forever.
+    if job.attempt_count >= MAX_JOB_ATTEMPTS:
+        raise ApiError(
+            409, "JOB_ATTEMPTS_EXHAUSTED", "This job failed too many times; re-upload the document."
+        )
     job.status = "retrying"
     job.attempt_count += 1
     job.error_detail = None
+    # E: leave the asset queued so the UI stops showing it as permanently failed
+    # for the whole re-run.
+    asset = await session.get(KnowledgeAsset, job.asset_id)
+    if asset is not None:
+        asset.status = "queued"
     await record_audit(
         session,
         "processing-job.retry.requested",
@@ -138,6 +154,12 @@ async def retry_job(session: AsyncSession, organization: Organization, job_id) -
         entity_id=job.id,
         detail={"attempt": job.attempt_count},
     )
+    # E: the asset write above forces a flush on the next query, which expires
+    # the server-generated updated_at - reading it afterwards lazily loaded it
+    # from sync context and answered 500 (MissingGreenlet). Reload it inside the
+    # coroutine instead.
+    await session.flush()
+    await session.refresh(job, attribute_names=["updated_at"])
     return _payload(job)
 
 

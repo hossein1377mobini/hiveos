@@ -1,74 +1,63 @@
-import { Slot } from "@radix-ui/react-slot";
-import { cva, type VariantProps } from "class-variance-authority";
-import { forwardRef, type ButtonHTMLAttributes } from "react";
-import { cn } from "../../lib/utils";
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { cn } from "@/lib/utils"
+import { Slot } from "radix-ui"
 
-// HiveOS Button — design-system §3 (Variant/Size/Loading/Disabled/Focus) with
-// mockup assets/hiveos.css §۹ values (btn / btn-primary / btn-sm / btn-xs ...).
 const buttonVariants = cva(
-  "inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap font-bold transition-all disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-200 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        primary:
-          "bg-navy-600 text-white shadow-[0_3px_12px_rgba(43,58,115,0.28)] hover:-translate-y-px hover:bg-navy-800 hover:shadow-[0_6px_18px_rgba(43,58,115,0.34)]",
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive:
+          "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
+        outline:
+          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
-          "border border-neutral-200 bg-neutral-0 text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900",
-        ghost: "text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900",
-        destructive: "bg-error text-white hover:bg-[#9A1F14]",
-        "danger-soft": "border border-error bg-error-bg text-error hover:bg-[#fbd9d7]",
-        accent: "border border-navy-200 bg-navy-50 text-navy-600 hover:bg-[#e2e7f8]",
-        link: "text-navy-600 underline-offset-4 hover:underline",
+          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        ghost:
+          "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "rounded-control px-5 py-3 text-sm",
-        sm: "rounded-[9px] px-3.5 py-2 text-[12.5px]",
-        xs: "rounded-[7px] px-2.5 py-[5px] text-[11.5px]",
-        lg: "rounded-control px-[26px] py-[14px] text-[15px]",
-        icon: "rounded-[9px] p-[9px]",
+        default: "h-9 px-4 py-2 has-[>svg]:px-3",
+        xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
+        lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
+        icon: "size-9",
+        "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-8",
+        "icon-lg": "size-10",
       },
     },
-    defaultVariants: { variant: "primary", size: "default" },
-  },
-);
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+)
 
-export interface ButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
-  loading?: boolean;
+function Button({
+  className,
+  variant = "default",
+  size = "default",
+  asChild = false,
+  ...props
+}: React.ComponentProps<"button"> &
+  VariantProps<typeof buttonVariants> & {
+    asChild?: boolean
+  }) {
+  const Comp = asChild ? Slot.Root : "button"
+
+  return (
+    <Comp
+      data-slot="button"
+      data-variant={variant}
+      data-size={size}
+      className={cn(buttonVariants({ variant, size, className }))}
+      {...props}
+    />
+  )
 }
 
-const Spinner = () => (
-  <span
-    aria-hidden
-    className="size-4 animate-spin rounded-full border-2 border-current/30 border-t-current"
-  />
-);
-
-const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, loading = false, children, disabled, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button";
-    return (
-      <Comp
-        ref={ref}
-        className={cn(buttonVariants({ variant, size }), className)}
-        disabled={disabled || loading}
-        aria-busy={loading || undefined}
-        {...props}
-      >
-        {loading ? (
-          <>
-            <Spinner />
-            {children}
-          </>
-        ) : (
-          children
-        )}
-      </Comp>
-    );
-  },
-);
-Button.displayName = "Button";
-
-export { Button, buttonVariants };
+export { Button, buttonVariants }

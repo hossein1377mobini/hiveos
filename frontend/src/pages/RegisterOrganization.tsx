@@ -3,10 +3,12 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { AuthBrand, Field, PanelHead, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { cn } from "../lib/utils";
+import { Surface } from "../components/ui/surface";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 // 01-register-organization.html — US-001 merged path (US-001/006). Three
 // in-card panels (اطلاعات / توصیف / دسترسی هوش) behind the global stepper,
@@ -58,6 +60,14 @@ export default function RegisterOrganization({
         size,
         business_description: businessDescription || null,
       });
+      // Persist the id so the owner-account step survives a refresh or a Back
+      // navigation. Without it a reload mid-signup loses the organization the
+      // user just created. [A4-adjacent]
+      try {
+        sessionStorage.setItem("hiveos.pending_organization", data.organization_id);
+      } catch {
+        /* private mode — the flow still works, it just cannot resume after a reload */
+      }
       onCreated(data.organization_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "خطا");
@@ -71,7 +81,7 @@ export default function RegisterOrganization({
       <AuthBrand title="ساخت سازمان" subtitle="سازمان جدید را در چند گام کوتاه تنظیم کنید." />
       <Stepper current={1} />
 
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+      <Surface className="p-7">
         {step === 0 && (
           <div>
             <PanelHead icon={Building2} title="اطلاعات سازمان" hint="گام ۱ از ۳" />
@@ -83,39 +93,44 @@ export default function RegisterOrganization({
                 maxLength={100}
                 className={cn(nameInvalid && "border-error focus:ring-error-bg")}
               />
-              <div className="mt-[5px] text-xs text-neutral-400">بین ۳ تا ۱۰۰ کاراکتر.</div>
+              <div className="mt-[5px] text-xs text-muted-foreground">بین ۳ تا ۱۰۰ کاراکتر.</div>
             </Field>
             <div className="flex gap-4">
               <Field label="صنعت" required className="min-w-0 flex-1">
-                <select
-                  value={industry}
-                  onChange={(e) => setIndustry(e.target.value)}
-                  aria-label="صنعت"
-                  className="w-full cursor-pointer rounded-[10px] border border-neutral-200 bg-neutral-0 px-[13px] py-[11px] text-sm text-neutral-900 focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50"
-                >
-                  <option value="" disabled>
-                    انتخاب کنید
-                  </option>
-                  {INDUSTRIES.map((i) => (
-                    <option key={i} value={i}>
-                      {i}
-                    </option>
-                  ))}
-                </select>
+                <Select value={industry} onValueChange={setIndustry}>
+                  <SelectTrigger
+                    aria-label="صنعت"
+                    className="h-[42px] w-full rounded-control border-border bg-card px-[13px] text-sm text-foreground"
+                  >
+                    <SelectValue placeholder="انتخاب کنید" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* The industry name is the key: it is unique within the
+                        list and stable, unlike the array position. */}
+                    {INDUSTRIES.map((industry) => (
+                      <SelectItem key={industry} value={industry}>
+                        {industry}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
               <Field label="اندازه سازمان" required className="min-w-0 flex-1">
-                <select
-                  value={size}
-                  onChange={(e) => setSize(e.target.value)}
-                  aria-label="اندازه سازمان"
-                  className="w-full cursor-pointer rounded-[10px] border border-neutral-200 bg-neutral-0 px-[13px] py-[11px] text-sm text-neutral-900 focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50"
-                >
-                  {SIZES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
+                <Select value={size} onValueChange={setSize}>
+                  <SelectTrigger
+                    aria-label="اندازه سازمان"
+                    className="h-[42px] w-full rounded-control border-border bg-card px-[13px] text-sm text-foreground"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SIZES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
             {error && (
@@ -124,10 +139,10 @@ export default function RegisterOrganization({
               </div>
             )}
             <div className="mt-6 flex items-center gap-2.5">
-              <Button className="flex-1" onClick={() => setStep(1)} disabled={name.trim().length < 3 || !industry}>
+              <LoadingButton className="flex-1" onClick={() => setStep(1)} disabled={name.trim().length < 3 || !industry}>
                 ادامه
                 <ChevronLeft aria-hidden className="rtl:-scale-x-100" />
-              </Button>
+              </LoadingButton>
             </div>
           </div>
         )}
@@ -151,14 +166,14 @@ export default function RegisterOrganization({
               </div>
             )}
             <div className="mt-6 flex items-center gap-2.5">
-              <Button variant="ghost" onClick={() => setStep(0)}>
+              <LoadingButton variant="ghost" onClick={() => setStep(0)}>
                 <ChevronRight aria-hidden className="rtl:-scale-x-100" />
                 قبلی
-              </Button>
-              <Button className="flex-1" onClick={() => setStep(2)} disabled={businessDescription.trim().length === 0}>
+              </LoadingButton>
+              <LoadingButton className="flex-1" onClick={() => setStep(2)} disabled={businessDescription.trim().length === 0}>
                 ادامه
                 <ChevronLeft aria-hidden className="rtl:-scale-x-100" />
-              </Button>
+              </LoadingButton>
             </div>
           </div>
         )}
@@ -168,26 +183,26 @@ export default function RegisterOrganization({
             <PanelHead icon={Building2} tone="violet" title="دسترسی هوش سازمان" hint="گام ۳ از ۳" />
             <Field label="نوع دسترسی هوش" required>
               <div className="flex flex-wrap gap-3">
-                <div className="relative min-w-[140px] flex-1 rounded-[13px] border border-navy-200 bg-navy-50 p-3.5 shadow-[0_0_0_1px_var(--focus-border)]">
+                <div className="relative min-w-[140px] flex-1 rounded-[13px] border border-primary/40 bg-accent p-3.5 shadow-[0_0_0_1px_var(--focus-border)]">
                   <span
                     aria-hidden
-                    className="absolute end-2.5 top-2.5 flex size-[17px] items-center justify-center rounded-full bg-navy-600 text-white"
+                    className="absolute end-2.5 top-2.5 flex size-[17px] items-center justify-center rounded-full bg-primary text-primary-foreground"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" className="size-2.5">
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
                   </span>
-                  <div className="text-sm font-bold text-neutral-900">آنلاین</div>
-                  <div className="mt-0.5 text-xs text-neutral-600">
+                  <div className="text-sm font-bold text-foreground">آنلاین</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
                     اتصال به هوش از طریق سرویس ابری؛ اتصال و کلیدها سمت HiveOS مدیریت می‌شود.
                   </div>
                 </div>
-                <div className="relative min-w-[140px] flex-1 rounded-[13px] border border-neutral-200 bg-neutral-0 p-3.5 opacity-55">
-                  <span className="absolute end-2 top-2 rounded-full border border-warning bg-warning-bg px-2 py-px text-[10px] font-bold text-warning">
+                <div className="relative min-w-[140px] flex-1 rounded-[13px] border border-border bg-card p-3.5 opacity-55">
+                  <span className="absolute end-2 top-2 rounded-full border border-warning bg-warning-bg px-2 py-px text-micro font-bold text-warning">
                     به‌زودی (نسخه ۰.۳)
                   </span>
-                  <div className="text-sm font-bold text-neutral-900">محلی</div>
-                  <div className="mt-0.5 text-xs text-neutral-600">اجرای هوش روی سرور خودتان</div>
+                  <div className="text-sm font-bold text-foreground">محلی</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">اجرای هوش روی سرور خودتان</div>
                 </div>
               </div>
             </Field>
@@ -197,24 +212,24 @@ export default function RegisterOrganization({
               </div>
             )}
             <div className="mt-6 flex items-center gap-2.5">
-              <Button variant="ghost" onClick={() => setStep(1)}>
+              <LoadingButton variant="ghost" onClick={() => setStep(1)}>
                 <ChevronRight aria-hidden className="rtl:-scale-x-100" />
                 قبلی
-              </Button>
-              <Button className="flex-1" onClick={submit} loading={busy}>
+              </LoadingButton>
+              <LoadingButton className="flex-1" onClick={submit} loading={busy}>
                 ساخت سازمان
-              </Button>
+              </LoadingButton>
             </div>
             <button
               type="button"
               onClick={onBack}
-              className="mt-3 w-full cursor-pointer text-center text-xs text-neutral-600 underline-offset-4 hover:underline"
+              className="mt-3 w-full cursor-pointer text-center text-caption text-primary underline-offset-4 hover:underline"
             >
               بازگشت به ورود
             </button>
           </div>
         )}
-      </div>
+      </Surface>
     </section>
   );
 }

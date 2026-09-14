@@ -48,6 +48,30 @@ MELIPAYAMAK_OTP_SERVICE_ID=$SMS_SERVICE_ID
 EOF
 umask 022
 
+# PO decision 2026-09-12: retrieval runs on this host. Defaults live in the
+# compose file; these let the PO flip a provider without editing the image.
+# Only append when unset, so a PO-set value survives the next deploy.
+#
+# The heredoc above rewrites .env from scratch, so any variable an operator
+# added by hand and that is not repeated here is LOST on the next deploy.
+# EMBEDDING_PROVIDER and RERANK_PROVIDER are load-bearing: without them the
+# config default ("mock") applies and retrieval stops using the local ONNX
+# models. LLM_PROVIDER is recorded here for accuracy and for the admin panel's
+# report (admin.py reads settings.llm_provider directly); the live answer path
+# resolves the provider from providers_pricing first and only falls back to this
+# value, so it is descriptive rather than a switch.
+# All three are append-only: an existing value always wins.
+grep -q '^EMBEDDING_PROVIDER=' "$APP_DIR/.env" || echo "EMBEDDING_PROVIDER=onnx" >> "$APP_DIR/.env"
+grep -q '^RERANK_PROVIDER=' "$APP_DIR/.env" || echo "RERANK_PROVIDER=onnx" >> "$APP_DIR/.env"
+grep -q '^LLM_PROVIDER=' "$APP_DIR/.env" || echo "LLM_PROVIDER=openai-compatible" >> "$APP_DIR/.env"
+
+# The int8 graphs the api container mounts read-only. Failing here beats a
+# container that boots and then returns EMBEDDING_UNAVAILABLE on every upload.
+if [[ ! -f /opt/models/bge-m3-onnx/model.onnx ]]; then
+  echo "FATAL: /opt/models/bge-m3-onnx/model.onnx missing - upload the exported models first"
+  exit 1
+fi
+
 # Host dirs bind-mounted into the api container (compose volumes). The api runs as
 # uid 10001, so ownership must match or workspace/brain init fails with 500
 # (WORKSPACE_INITIALIZATION_FAILED) - keep this before compose up.

@@ -1,26 +1,37 @@
-import { AlertCircle, CheckCircle2, Info, ShieldAlert, type LucideIcon } from "lucide-react";
-import type { HTMLAttributes, ReactNode } from "react";
-import { cn } from "../../lib/utils";
+import {
+  AlertCircleIcon,
+  CheckCircle2Icon,
+  InfoIcon,
+  ShieldAlertIcon,
+  type LucideIcon,
+} from "lucide-react"
 
-// HiveOS Banner/Alert — mockup §۱۱ (.banner.error/success/warning/info/plain with
-// 18px icon, bold title, secondary body, optional actions row).
-type BannerTone = "error" | "success" | "warning" | "info" | "plain";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { cn } from "@/lib/utils"
+
+/**
+ * HiveOS Banner — the five message tones of design-system §2.3 rendered with the
+ * official Alert (role, grid layout, icon sizing, title/description slots all
+ * come from Alert). Only the tone colour map is local, because shadcn models
+ * two variants and the product brief defines five.
+ */
+export type BannerTone = "info" | "success" | "warning" | "error" | "plain"
 
 const TONE_ICON: Record<BannerTone, LucideIcon> = {
-  error: AlertCircle,
-  success: CheckCircle2,
-  warning: ShieldAlert,
-  info: Info,
-  plain: Info,
-};
+  info: InfoIcon,
+  success: CheckCircle2Icon,
+  warning: ShieldAlertIcon,
+  error: AlertCircleIcon,
+  plain: InfoIcon,
+}
 
 const TONE_CLASS: Record<BannerTone, string> = {
-  error: "border-error bg-error-bg text-error",
-  success: "border-success bg-success-bg text-success",
-  warning: "border-warning bg-warning-bg text-warning",
-  info: "border-navy-200 bg-navy-50 text-navy-600",
-  plain: "border-neutral-200 bg-neutral-50 text-neutral-600",
-};
+  info: "border-info-border bg-info-bg text-info",
+  success: "border-success-border bg-success-bg text-success",
+  warning: "border-warning-border bg-warning-bg text-warning",
+  error: "border-error-border bg-error-bg text-error",
+  plain: "border-border bg-secondary text-muted-foreground",
+}
 
 export function Banner({
   tone = "info",
@@ -28,26 +39,33 @@ export function Banner({
   children,
   actions,
   className,
+  icon,
   ...props
-}: HTMLAttributes<HTMLDivElement> & {
-  tone?: BannerTone;
-  title?: ReactNode;
-  children?: ReactNode;
-  actions?: ReactNode;
+}: React.ComponentProps<typeof Alert> & {
+  tone?: BannerTone
+  title?: React.ReactNode
+  actions?: React.ReactNode
+  icon?: LucideIcon | null
 }) {
-  const Icon = TONE_ICON[tone];
+  const Icon = icon === undefined ? TONE_ICON[tone] : icon
   return (
-    <div
+    <Alert
+      data-slot="banner"
+      data-tone={tone}
       role={tone === "error" ? "alert" : "status"}
-      className={cn("flex items-start gap-2.5 rounded-control border p-3 text-[13px]", TONE_CLASS[tone], className)}
+      className={cn("gap-x-2.5 gap-y-1 rounded-lg px-3 py-3 text-caption", TONE_CLASS[tone], className)}
       {...props}
     >
-      <Icon aria-hidden className="mt-0.5 size-[18px] shrink-0" />
-      <div className="min-w-0 flex-1">
-        {title && <div className="font-extrabold">{title}</div>}
-        {children && <div className={cn(title && "mt-1", "text-neutral-600")}>{children}</div>}
-        {actions && <div className="mt-2 flex gap-2">{actions}</div>}
-      </div>
-    </div>
-  );
+      {Icon ? <Icon /> : null}
+      {title ? <AlertTitle className="font-extrabold">{title}</AlertTitle> : null}
+      {actions ? (
+        <AlertDescription className="col-start-2 flex gap-2 text-current">{actions}</AlertDescription>
+      ) : null}
+      {children ? (
+        <AlertDescription className="col-start-2 gap-0 text-current opacity-90">
+          {children}
+        </AlertDescription>
+      ) : null}
+    </Alert>
+  )
 }

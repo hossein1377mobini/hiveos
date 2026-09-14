@@ -72,15 +72,47 @@ async def read_setting(session: AsyncSession, key: str) -> dict:
     return (row.value or {}) if row else {}
 
 
+def provider_error(status_code: int, raw: str) -> tuple[int, str, str]:
+    """Translate a provider failure into something the PO can act on.
+
+    HTTP 429 alone is not actionable: the same status covers an exhausted
+    account balance and a genuine rate limit, and the PO needs to know whether
+    to top up the account or slow down. The provider body is never forwarded;
+    only the reason we recognise becomes a code.
+    """
+    lowered = (raw or "").lower()
+    if status_code in (401, 403):
+        return 502, "LLM_PROVIDER_AUTH", f"Provider rejected the key (HTTP {status_code})."
+    if status_code == 402 or "insufficient" in lowered or "quota" in lowered or "balance" in lowered:
+        return 502, "LLM_PROVIDER_CREDIT", "The provider account is out of credit."
+    if status_code == 429:
+        return 502, "LLM_PROVIDER_RATE_LIMIT", "The provider is rate limiting this server."
+    if status_code in (400, 404):
+        return 502, "LLM_PROVIDER_MODEL", f"Provider rejected the request (HTTP {status_code})."
+    return 502, "LLM_PROVIDER_ERROR", f"Provider returned HTTP {status_code}."
+
+
 async def aroute_model(session: AsyncSession, requested_model: str | None) -> str:
-    """Allowlist enforcement (US-1601): a model outside the admin allowlist
-    falls back to the allowlist default instead of hard-failing the chat."""
-    model = route_model(requested_model)
+    """Pick the model that writes the answer.
+
+    Order of precedence: an explicit request, the panel's answer_model, the
+    allowlist, then the environment default. The panel wins over the env
+    default because the System Admin is the only one who knows which model the
+    account is actually funded for.
+    """
+    pricing = await read_setting(session, "providers_pricing")
+    answer_model = (pricing.get("answer_model") or "").strip()
+    # A chat session with no settings carries the placeholder "hive-mind-default"
+    # (see chat/service.py DEFAULT_SETTINGS). Sending that string to the provider
+    # is meaningless, so treat it as "no preference".
+    requested = (requested_model or "").strip()
+    if requested == "hive-mind-default":
+        requested = ""
+    model = route_model(requested or answer_model or None)
     allowlist = await read_setting(session, "models_allowlist")
     models = [m for m in (allowlist.get("models") or []) if isinstance(m, str)]
-    if models:
-        if model not in models:
-            model = allowlist.get("default") or models[0]
+    if models and model not in models:
+        model = allowlist.get("default") or models[0]
     return model
 
 
@@ -98,8 +130,9 @@ async def agenerate(session: AsyncSession, model: str, prompt: str, context: str
         return result
 
     if provider == "openai-compatible":
-        base_url = (pricing.get("base_url") or "").rstrip("/")
-        api_key = pricing.get("api_key") or ""
+        # Panel-first, env as the bootstrap fallback (PO 2026-09-12).
+        base_url = (pricing.get("base_url") or get_settings().llm_base_url or "").rstrip("/")
+        api_key = pricing.get("api_key") or get_settings().llm_api_key or ""
         if not base_url or not api_key:
             raise ApiError(
                 503,
@@ -131,11 +164,10 @@ async def agenerate(session: AsyncSession, model: str, prompt: str, context: str
         except httpx.HTTPError as error:
             raise ApiError(502, "LLM_PROVIDER_ERROR", f"Provider unreachable: {error}") from error
         if response.status_code != 200:
-            raise ApiError(
-                502,
-                "LLM_PROVIDER_ERROR",
-                f"Provider returned HTTP {response.status_code}.",
-            )
+            # PO 2026-09-12: an out-of-credit account must not look like a
+            # transient outage - the PO has to know to top the account up.
+            status_code, code, message = provider_error(response.status_code, response.text)
+            raise ApiError(status_code, code, message)
         body = response.json()
         try:
             answer = body["choices"][0]["message"]["content"]

@@ -171,7 +171,17 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
     RG-07/Amendment 2: a knowledge-based answer carries citations; without
     retrieved evidence the answer says so and citations stay empty.
     """
-    execution = await get_execution_row(session, organization_id, execution_id)
+    # D3: row lock so two concurrent /run calls cannot both pass the status
+    # check and bill the wallet twice for one execution.
+    execution = (
+        await session.execute(
+            select(AgentExecution)
+            .where(AgentExecution.id == execution_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if execution is None or execution.organization_id != organization_id:
+        raise ApiError(404, "EXECUTION_NOT_FOUND", "Execution not found.")
     if execution.status not in ("PENDING", "RUNNING"):
         raise ApiError(409, "NOT_RUNNING", f"Cannot run an execution in {execution.status}.")
     execution.status = "RUNNING"

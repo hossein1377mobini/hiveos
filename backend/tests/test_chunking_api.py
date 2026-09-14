@@ -35,7 +35,7 @@ def _drain():
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_run())
+    asyncio.run(_run())
 
 
 def test_normalize_folds_unicode_and_whitespace():

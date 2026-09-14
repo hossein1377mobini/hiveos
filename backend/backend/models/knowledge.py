@@ -20,7 +20,8 @@ class KnowledgeSource(Base, TimestampMixin):
             name="ck_knowledge_sources_status_allowed_values",
         ),
         CheckConstraint(
-            "source_type IN ('local_folder')", name="ck_knowledge_sources_type_allowed_values"
+            "source_type IN ('local_folder', 'client_folder')",
+            name="ck_knowledge_sources_type_allowed_values",
         ),
     )
 
@@ -39,7 +40,13 @@ class KnowledgeSource(Base, TimestampMixin):
     source_type: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="local_folder"
     )
+    # 'client_folder' (v0.1 cloud, ADR-023): the path is on the owner's own PC and
+    # the Windows client uploads the files, so the server can never walk it. The
+    # column keeps the last reported path for compatibility; the UI shows
+    # path_label. 'local_folder' is the on-prem variant the server walks itself.
     path: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Owner-facing, display-only folder path from their machine (US-007).
+    path_label: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(10), nullable=False, server_default="active")
     # US-007 FR-004: scheduled scan every 30 minutes by default (US-202).
     scan_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="30")

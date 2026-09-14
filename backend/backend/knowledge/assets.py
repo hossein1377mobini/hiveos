@@ -10,10 +10,11 @@ FR-008: a source can be disabled/re-enabled; disabled sources accept no
 new queue entries (the scheduler itself is US-202/S2).
 """
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
@@ -22,7 +23,7 @@ from backend.config import get_settings
 from backend.knowledge.chunking import build_metadata, list_chunks, normalize_text, replace_chunks
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.processing import enqueue_job
-from backend.models import KnowledgeAsset, KnowledgeSource, Organization
+from backend.models import KnowledgeAsset, KnowledgeChunk, KnowledgeSource, Organization
 
 # US-205 classification table, v0.1 active formats; HTML is explicitly banned.
 ALLOWED_EXTENSIONS = frozenset(
@@ -30,6 +31,10 @@ ALLOWED_EXTENSIONS = frozenset(
 )
 
 _SCAN_BLOCKED = ("disabled", "failed")
+# US-1606 caps each file; these bound the request itself so one multipart POST
+# cannot fill the disk or the worker's memory.
+MAX_FILES_PER_UPLOAD = 20
+MAX_UPLOAD_REQUEST_MB = 100
 
 
 def _utc_now() -> datetime:
@@ -72,12 +77,55 @@ def _storage_dir(organization_id) -> Path:
     return path
 
 
+async def _org_storage_bytes(session: AsyncSession, organization_id) -> int:
+    """Total bytes already stored for one organization.
+
+    Counted from the asset rows rather than by walking the directory: the
+    filesystem also holds soft-deleted and orphaned files, and a quota must
+    measure what the organization actually owns."""
+    total = (
+        await session.execute(
+            select(func.coalesce(func.sum(KnowledgeAsset.size_bytes), 0)).where(
+                KnowledgeAsset.organization_id == organization_id,
+                KnowledgeAsset.deleted_at.is_(None),
+            )
+        )
+    ).scalar()
+    return int(total or 0)
+
+
+async def _assert_quota(session: AsyncSession, organization, incoming_bytes: int) -> None:
+    """FR-011: refuse an upload that would push the organization past its cap.
+
+    Without this, one tenant can fill the shared disk and take every other
+    tenant down with it - the failure is silent until the volume is full.
+    The admin panel can raise the cap per organization; 0 means unlimited.
+    """
+    limit_mb = getattr(organization, "storage_quota_mb", None)
+    if not limit_mb:
+        return
+    used = await _org_storage_bytes(session, organization.id)
+    limit = int(limit_mb) * 1024 * 1024
+    if used + incoming_bytes > limit:
+        raise ApiError(
+            413,
+            "STORAGE_QUOTA_EXCEEDED",
+            f"Storage quota of {limit_mb}MB would be exceeded.",
+        )
+
+
 async def upload_assets(
     session: AsyncSession, organization: Organization, user_id, files
 ) -> dict:
     """US-201 scenario 5: validate, persist, and queue each file."""
     if not files:
         raise ApiError(400, "UPLOAD_EMPTY", "No files were provided.")
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise ApiError(
+            400,
+            "UPLOAD_TOO_MANY_FILES",
+            f"At most {MAX_FILES_PER_UPLOAD} files can be uploaded at once.",
+        )
 
     source = await _active_source(session, organization.id)
     if source is not None and source.status in _SCAN_BLOCKED:
@@ -89,8 +137,40 @@ async def upload_assets(
     rejected: list[dict] = []
     upload_dir = _storage_dir(organization.id)
 
+    settings = get_settings()
+    per_file_max = settings.upload_max_file_mb * 1024 * 1024
+    request_max = MAX_UPLOAD_REQUEST_MB * 1024 * 1024
+    total_bytes = 0
+
+    # FR-011: the per-file and per-request caps bound one upload; the quota
+    # bounds the whole tenant. Checked before any body is buffered so an
+    # over-quota organization never pays for the transfer.
+    declared_total = sum(
+        int(getattr(f, "size", 0) or 0) for f in files
+    )
+    await _assert_quota(session, organization, declared_total)
+
     for upload in files:
+        # US-1606: reject on the declared size BEFORE buffering the body — the
+        # old order read the whole file into memory and only then measured it.
+        declared = getattr(upload, "size", None)
+        if declared is not None and declared > per_file_max:
+            rejected.append(
+                {
+                    "name": upload.filename,
+                    "code": "UPLOAD_TOO_LARGE",
+                    "message": f"File exceeds the {settings.upload_max_file_mb}MB limit.",
+                }
+            )
+            continue
         content = await upload.read()
+        total_bytes += len(content)
+        if total_bytes > request_max:
+            raise ApiError(
+                400,
+                "UPLOAD_TOO_LARGE",
+                f"Upload exceeds the {MAX_UPLOAD_REQUEST_MB}MB request limit.",
+            )
         try:
             extension = _validate_file(upload.filename or "", len(content))
         except ApiError as exc:
@@ -111,8 +191,9 @@ async def upload_assets(
         await session.flush()
 
         target = upload_dir / f"{asset.id}.{extension}"
-        with open(target, "wb") as handle:
-            handle.write(content)
+        # the write is blocking file IO; keep the event loop free to serve
+        # the other requests waiting on this worker.
+        await asyncio.to_thread(target.write_bytes, content)
         asset.storage_path = str(target)
         stored.append(
             {
@@ -175,6 +256,13 @@ async def list_assets(
             .order_by(KnowledgeAsset.created_at.desc())
         )
     ).scalars().all()
+    # H2: the document table had no progress column because this endpoint
+    # reported nothing but a coarse status, so "queued" looked identical for a
+    # file waiting its turn and one that had been OCR'd but not chunked. The
+    # pipeline stage and text length are already on the row - they were simply
+    # never read. Reported as-is, not as a percentage: a percentage here would
+    # be invented, and an invented progress bar is worse than an honest label.
+    chunk_counts = await _chunk_counts(session, organization.id, [row.id for row in rows])
     return [
         {
             "id": row.id,
@@ -184,9 +272,32 @@ async def list_assets(
             "extension": row.extension,
             "origin": "upload" if row.source_id is None else "folder_scan",
             "deleted_at": row.deleted_at,
+            "asset_type": row.asset_type,
+            "pipeline": row.pipeline,
+            # 0 for a file whose text has not been extracted yet.
+            "text_length": len(row.extracted_text or ""),
+            "chunks": chunk_counts.get(row.id, 0),
+            "classified_at": row.classified_at,
         }
         for row in rows
     ]
+
+
+async def _chunk_counts(
+    session: AsyncSession, organization_id, asset_ids: list
+) -> dict:
+    """Chunk count per asset, in one query rather than one per row."""
+    if not asset_ids:
+        return {}
+    rows = await session.execute(
+        select(KnowledgeChunk.asset_id, func.count())
+        .where(
+            KnowledgeChunk.organization_id == organization_id,
+            KnowledgeChunk.asset_id.in_(asset_ids),
+        )
+        .group_by(KnowledgeChunk.asset_id)
+    )
+    return {asset_id: int(count) for asset_id, count in rows.all()}
 
 
 async def classify_single_asset(

@@ -5,7 +5,6 @@ caller's organization, current asset versions and non-deleted assets are
 searchable (ADR-024 + US-241).
 """
 
-import asyncio
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +13,7 @@ from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.knowledge.embeddings import embed_one
+from backend.knowledge.rerank import RERANK_CANDIDATES, rerank
 from backend.models import KnowledgeAsset, KnowledgeChunk
 
 
@@ -28,9 +28,10 @@ async def semantic_search(
     if not query.strip():
         raise ApiError(400, "EMPTY_QUERY", "The search query is empty.")
 
-    # H1-new (external review): local-model encode is CPU-bound; keep it off
-    # the event loop.
-    vector = await asyncio.to_thread(embed_one, query)
+    # Embedding is async now: the local provider offloads to a thread, the
+    # remote one awaits HTTP.
+    vector = await embed_one(query)
+    pool = max(limit, RERANK_CANDIDATES if settings.rerank_enabled else limit)
     rows = (
         (
             await session.execute(
@@ -47,20 +48,23 @@ async def semantic_search(
                     KnowledgeAsset.deleted_at.is_(None),
                 )
                 .order_by(KnowledgeChunk.embedding.cosine_distance(vector))
-                .limit(limit)
+                .limit(pool)
             )
         )
         .all()
     )
+    # Recall stage done; order the candidates by relevance before trimming to
+    # top_k. Falls back to the vector order when reranking is unavailable.
+    order = await rerank(query, [row[0].content for row in rows], limit) if rows else []
     hits = [
         {
-            "asset_id": chunk.asset_id,
-            "asset_name": asset_name,
-            "chunk_index": chunk.chunk_index,
-            "content": chunk.content,
-            "score": round(1.0 - float(distance), 4),
+            "asset_id": rows[index][0].asset_id,
+            "asset_name": rows[index][1],
+            "chunk_index": rows[index][0].chunk_index,
+            "content": rows[index][0].content,
+            "score": round(1.0 - float(rows[index][2]), 4),
         }
-        for chunk, asset_name, distance in rows
+        for index in order
     ]
     await record_audit(
         session,

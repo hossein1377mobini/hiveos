@@ -13,7 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.audit import record_audit
 from backend.enums_helpers import status_value
-from backend.models import KnowledgeSource, Organization, OrganizationBrain, OrganizationStatus, Workspace
+from backend.models import (
+    KnowledgeSource,
+    Organization,
+    OrganizationBrain,
+    OrganizationStatus,
+    User,
+    Workspace,
+)
 
 
 def _utc_now() -> datetime:
@@ -45,7 +52,11 @@ async def _expire_pending_organization(
     return True
 
 
-async def onboarding_status(session: AsyncSession, organization: Organization) -> dict:
+async def onboarding_status(
+    session: AsyncSession,
+    organization: Organization,
+    user: "User | None" = None,
+) -> dict:
     expired = await _expire_pending_organization(session, organization)
 
     workspace = (
@@ -85,13 +96,42 @@ async def onboarding_status(session: AsyncSession, organization: Organization) -
             "expires_at": plan_expires_at,
             "expired": plan_expired,
         },
+        # H1/D10: the shell showed a hardcoded «مدیر» and a generic role chip
+        # because this endpoint reported only booleans. The caller is already
+        # authenticated as this user in this organization, so returning their own
+        # name is not a disclosure — it is the identity the header needs.
+        "identity": _identity(organization, user),
         # C2: the first incomplete step drives the UI redirect.
         "next_step": _next_step(organization, workspace, brain, source),
     }
 
 
+def _identity(organization: Organization, user: "User | None") -> dict:
+    """Display names for the app shell (H1/D10).
+
+    `plan_label` carries the raw plan value, not a Persian sentence: the
+    presentation of a plan is the status registry's job in the frontend
+    (`lib/status.ts`), and duplicating that vocabulary here would let the two
+    drift apart.
+    """
+    return {
+        "user_name": None if user is None else user.username,
+        "organization_name": organization.name,
+        "plan_label": organization.plan,
+    }
+
+
 def _next_step(organization: Organization, workspace, brain, source) -> str:
     if organization.status == OrganizationStatus.PENDING_OWNER_REGISTRATION.value:
+        # A pending organization with an owner already registered is waiting on
+        # mobile verification, not on the owner form. Reporting "owner" for both
+        # made the signup flow unresumable: after POST /auth/owner succeeded the
+        # status still said "owner", so a refresh (or any later visit) sent the
+        # owner back to a form that can only answer ORGANIZATION_NOT_PENDING /
+        # OWNER_ALREADY_EXISTS - and the only call that activates the
+        # organization, POST /auth/verify-otp, was never reachable again.
+        if organization.owner_user_id is not None:
+            return "otp"
         return "owner"
     if organization.status == OrganizationStatus.EXPIRED.value:
         return "expired"

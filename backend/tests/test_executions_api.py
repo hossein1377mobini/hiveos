@@ -87,7 +87,7 @@ def test_run_with_knowledge_hits_returns_citations(client, tmp_path):
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_drain())
+    asyncio.run(_drain())
 
     query = "# دفترچه نصب سرور"  # exact chunk text -> mock score 1.0
     created = client.post(EX, json={"input": {"text": query}}, headers=ctx["headers"]).json()["data"]

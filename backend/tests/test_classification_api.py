@@ -81,7 +81,7 @@ def test_worker_classifies_and_extracts_text_file(client, tmp_path):
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_drain())
+    asyncio.run(_drain())
 
     status, asset_status, extracted = _job_status()
     assert status == "completed" and asset_status == "ready"
@@ -135,7 +135,10 @@ def test_office_docx_extraction(client, tmp_path):
 
 
 def test_unknown_type_goes_to_review_queue(client, tmp_path):
-    ctx = _register_one_file(client, tmp_path, "blob.bin", b"\x00\x01\x02weird")
+    # PO decision 2026-09-12: the folder scan drops off-list extensions, so the
+    # "unknown body under an allowed extension" case is reached by uploading the
+    # very same bytes instead - the review-queue route itself is unchanged.
+    ctx = _register_one_file(client, tmp_path, "blob.png", b"\x00\x01\x02weird")
     response = client.post(f"{KA}/{ctx['asset_id']}/classify", headers=ctx["headers"])
     assert response.status_code == 200
     assert response.json()["data"]["needs_review"] is True
@@ -145,10 +148,12 @@ def test_unknown_type_goes_to_review_queue(client, tmp_path):
 
 
 def test_archive_classifies_but_does_not_extract(client, tmp_path):
+    # a zip renamed to an allowed extension still sniffs as an archive (magic
+    # bytes win over the name) - the review-queue route is what is under test.
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as bundle:
         bundle.writestr("inside.txt", "x")
-    ctx = _register_one_file(client, tmp_path, "pack.zip", buffer.getvalue())
+    ctx = _register_one_file(client, tmp_path, "pack.txt", buffer.getvalue())
 
     response = client.post(f"{KA}/{ctx['asset_id']}/classify", headers=ctx["headers"])
     assert response.status_code == 200  # review queue -> flagged, not extracted
@@ -173,7 +178,7 @@ def test_worker_records_failure_for_corrupt_file(client, tmp_path):
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_drain())
+    asyncio.run(_drain())
 
     status, asset_status, _extracted = _job_status()
     assert status == "failed" and asset_status == "failed"  # US-203 scenario 4

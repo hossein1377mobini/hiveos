@@ -50,6 +50,9 @@ def install_error_handlers(app: FastAPI) -> None:
             status.HTTP_401_UNAUTHORIZED: "UNAUTHORIZED",
             status.HTTP_403_FORBIDDEN: "FORBIDDEN",
             status.HTTP_429_TOO_MANY_REQUESTS: "RATE_LIMITED",
+    # Provider-side failures get their own codes so the panel can tell the PO
+    # "top up the account" apart from "slow down" (both arrive as HTTP 429).
+    402: "PAYMENT_REQUIRED",
         }
         code = codes.get(exc.status_code, "HTTP_" + str(exc.status_code))
         return JSONResponse(status_code=exc.status_code, content=_error_body(code, str(exc.detail)))

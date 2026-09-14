@@ -23,6 +23,62 @@ def test_onboarding_status_carries_subscription(client):
     assert status["subscription"]["expired"] is False
 
 
+def test_onboarding_status_carries_the_callers_identity(client):
+    """H1/D10: the app shell header has to name the signed-in person and their
+    organization. Without this block it rendered a hardcoded «مدیر» and a generic
+    role chip, so a user in a shared office could never confirm which account
+    they were looking at."""
+    ctx = _bootstrap_full(client)
+    status = client.get("/api/v1/auth/onboarding-status", headers=ctx["headers"]).json()["data"]
+
+    identity = status["identity"]
+    assert identity["user_name"]
+    assert identity["organization_name"]
+    # Raw plan value: the Persian label belongs to the frontend's status registry,
+    # so the API must not invent its own wording for it.
+    assert identity["plan_label"] == status["subscription"]["plan"]
+
+
+def test_identity_comes_from_the_session_not_from_a_hint(client):
+    """The names describe the authenticated session, and nothing in the request
+    can redirect them at another organization. A second, fully separate tenant is
+    created here so there is a real other name to try to reach."""
+    first = _bootstrap_full(client)
+
+    # A second, independent organization with its own owner and session.
+    second_org = client.post(
+        "/api/v1/auth/register-organization",
+        json={"name": "سازمان دوم", "industry": "fintech", "size": "10_50"},
+    ).json()["data"]["organization_id"]
+    second_owner = client.post(
+        "/api/v1/auth/owner",
+        json={
+            "organization_id": second_org,
+            "username": "owner.two",
+            "mobile": "9129998877",
+            "password": "Str0ng!Pass",
+            "confirm_password": "Str0ng!Pass",
+        },
+    ).json()["data"]
+    second_headers = {"Authorization": f"Bearer {second_owner['session']['token']}"}
+
+    one = client.get("/api/v1/auth/onboarding-status", headers=first["headers"]).json()["data"]
+    two = client.get("/api/v1/auth/onboarding-status", headers=second_headers).json()["data"]
+
+    assert one["identity"]["organization_name"] != two["identity"]["organization_name"]
+    assert one["identity"]["user_name"] == "owner.one"
+    assert two["identity"]["user_name"] == "owner.two"
+
+    # Asking with a hint pointing at the other tenant changes nothing.
+    hinted = client.get(
+        "/api/v1/auth/onboarding-status",
+        headers=second_headers,
+        params={"organization_id": first["org_id"]},
+    ).json()["data"]
+    assert hinted["identity"]["organization_name"] == two["identity"]["organization_name"]
+    assert one["identity"]["organization_name"] not in str(hinted["identity"])
+
+
 def test_expired_plan_blocks_runs_and_admin_extends(client):
     ctx = _bootstrap_full(client)
     admin = _login(client)

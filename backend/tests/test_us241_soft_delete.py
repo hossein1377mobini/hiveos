@@ -51,7 +51,7 @@ def test_delete_upload_soft_deletes_and_hides_from_search(client, tmp_path):
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_drain())
+    asyncio.run(_drain())
     # the upload exists in search results before deletion
     query = "hello upload"
     hits = client.post("/api/v1/search", json={"query": query}, headers=ctx["headers"])
@@ -123,7 +123,7 @@ def test_zero_credit_mode_routes_to_review(client, tmp_path, monkeypatch):
             await drain_queue(session)
         await engine.dispose()
 
-    asyncio.get_event_loop().run_until_complete(_drain())
+    asyncio.run(_drain())
 
     engine = create_engine(to_sync_database_url(get_settings().database_url))
     with engine.connect() as conn:

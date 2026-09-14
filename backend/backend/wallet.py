@@ -204,11 +204,33 @@ async def create_charge_request(
     return {"request_id": request.id, "amount": amount, "status": request.status}
 
 
+def _as_uuid(value):
+    """Charge-request ids arrive as raw path strings; a malformed one is a 404,
+    not an asyncpg cast error surfacing as a 500."""
+    import uuid as _uuid
+
+    if isinstance(value, _uuid.UUID):
+        return value
+    try:
+        return _uuid.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        raise ApiError(404, "NOT_FOUND", "Charge request not found.") from None
+
+
 async def decide_charge_request(
     session: AsyncSession, request_id, approve: bool, decided_by: str
 ) -> dict:
     """Admin decision: APPROVED credits the wallet; terminal-once only."""
-    request = await session.get(ChargeRequest, request_id)
+    # D2: SELECT ... FOR UPDATE serializes concurrent decisions on the same
+    # request - without the row lock two racing approvals both read status
+    # PENDING and the organization is credited twice.
+    request = (
+        await session.execute(
+            select(ChargeRequest)
+            .where(ChargeRequest.id == _as_uuid(request_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
     if request is None:
         raise ApiError(404, "NOT_FOUND", "Charge request not found.")
     if request.status != "PENDING":
@@ -248,10 +270,15 @@ async def decide_charge_request(
     return {"request_id": request.id, "status": request.status, "balance": balance}
 
 
-async def list_charge_requests(session: AsyncSession, status: str | None) -> list[dict]:
+async def list_charge_requests(
+    session: AsyncSession, status: str | None, organization_id=None
+) -> list[dict]:
     stmt = select(ChargeRequest).order_by(ChargeRequest.created_at.desc()).limit(100)
     if status:
         stmt = stmt.where(ChargeRequest.status == status)
+    if organization_id is not None:
+        # E: the admin organization view needs this organization's requests only.
+        stmt = stmt.where(ChargeRequest.organization_id == organization_id)
     rows = (await session.execute(stmt)).scalars().all()
     return [
         {

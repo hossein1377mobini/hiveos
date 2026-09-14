@@ -27,14 +27,26 @@ def _event(kind: str, payload: dict) -> dict:
 class StreamHub:
     """Registry of active SSE streams keyed by stream_id."""
 
+    _MAX_STREAMS = 200  # S12: cap concurrent tracked streams
+    _MAX_BUFFERED_CHUNKS = 10_000  # S12: cap replay buffer per stream
+    # E: a chunk count alone is not a memory bound - 10k chunks of any size grew
+    # the buffer without limit. This caps the buffered text per stream.
+    _MAX_BUFFERED_CHARS = 1_000_000
+
     def __init__(self) -> None:
         self._streams: dict[str, dict] = {}
 
     def reset(self) -> None:
         self._streams.clear()
 
-    _MAX_STREAMS = 200  # S12: cap concurrent tracked streams
-    _MAX_BUFFERED_CHUNKS = 10_000  # S12: cap replay buffer per stream
+    def _buffer(self, state: dict, text: str) -> None:
+        """Append to the replay buffer while it stays inside both caps."""
+        if len(state["chunks"]) >= self._MAX_BUFFERED_CHUNKS:
+            return
+        if state.get("buffered_chars", 0) + len(text) > self._MAX_BUFFERED_CHARS:
+            return
+        state["chunks"].append(text)
+        state["buffered_chars"] = state.get("buffered_chars", 0) + len(text)
 
     def create(self, chat_session_id: uuid.UUID) -> str:
         self._sweep_expired()
@@ -45,6 +57,7 @@ class StreamHub:
             "session_id": chat_session_id,
             "queue": asyncio.Queue(),
             "chunks": [],
+            "buffered_chars": 0,
             "status": STATUS_ACTIVE,
             "created_at": time.monotonic(),
         }
@@ -64,11 +77,9 @@ class StreamHub:
         state = self._get(stream_id)
         if state["status"] != STATUS_ACTIVE:
             # US-09.2.2: chunks on a closed stream are buffered (replay later).
-            if len(state["chunks"]) < self._MAX_BUFFERED_CHUNKS:  # S12
-                state["chunks"].append(text)
+            self._buffer(state, text)
             return len(state["chunks"]) - 1
-        if len(state["chunks"]) < self._MAX_BUFFERED_CHUNKS:  # S12
-            state["chunks"].append(text)
+        self._buffer(state, text)
         state["queue"].put_nowait(
             _event("stream.chunk", {"index": len(state["chunks"]) - 1, "text": text})
         )
@@ -79,6 +90,9 @@ class StreamHub:
         state = self._get(stream_id)
         state["status"] = STATUS_COMPLETED
         state["queue"].put_nowait(_event("stream.completed", {"total_chunks": len(state["chunks"])}))
+        # NOTE: the buffer must survive complete() - the SSE generator reads
+        # buffered_chunks() to persist the assistant reply, and the TTL sweep
+        # (plus the char cap above) is what bounds the memory, not this call.
         return "".join(state["chunks"])
 
     def fail(self, stream_id: str, message: str) -> None:
@@ -98,13 +112,18 @@ class StreamHub:
     def _sweep_expired(self) -> None:
         """S12 (external review): drop streams nobody consumed within TTL."""
         now = time.monotonic()
+        # E: an ACTIVE stream may still be attached to a live SSE consumer;
+        # reaping it made buffered_chunks() raise inside the router generator,
+        # so the assistant reply was never persisted and the client saw nothing.
         expired = [
             sid
             for sid, st in self._streams.items()
-            if now - st.get("created_at", now) > self._STREAM_TTL_SECONDS
+            if st.get("status") != STATUS_ACTIVE
+            and now - st.get("created_at", now) > self._STREAM_TTL_SECONDS
         ]
         for sid in expired:
             self._streams.pop(sid, None)
+
     def status(self, stream_id: str) -> str:
         return self._get(stream_id)["status"]
 

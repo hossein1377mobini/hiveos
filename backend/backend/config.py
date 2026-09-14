@@ -49,12 +49,42 @@ class Settings(BaseSettings):
     # US-211 (T-S2-5): chunk window size + overlap, in characters.
     knowledge_chunk_size_chars: int = 800
     knowledge_chunk_overlap_chars: int = 100
-    # US-212 (T-S2-6): embedding provider. 'local' = BAAI/bge-m3 via
-    # sentence-transformers (staging/prod hosts with the model weights);
-    # 'mock' = deterministic hash vectors for dev/CI/offline.
-    embedding_provider: str = Field(default="mock", pattern="^(local|mock)$")
+    # US-212 (T-S2-6 + PO decision 2026-09-12): embedding provider.
+    # 'onnx' = bge-m3 int8 on this host. The launch default: document text
+    # stays on the server and measured quality matches the hosted models.
+    # 'remote' = the online provider configured in the admin panel.
+    # 'mock' = deterministic hash vectors for dev/CI (offline).
+    embedding_provider: str = Field(default="mock", pattern="^(onnx|remote|mock)$")
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
+    # Remote embedding model + vector width. Dim must match the column, so it
+    # is env-pinned (staging uses halfvec(1536) after migration 0025).
+    # Measured 2026-09-12 on Persian: 3-large at dims=1024 gives the widest
+    # relevant/irrelevant separation (gap 0.289) at half the storage of 3072.
+    embedding_remote_model: str = "text-embedding-3-large"
+    embedding_remote_dim: int = 1024
+    # ONNX (local) model locations. The server image ships the exported int8
+    # graphs under /opt/models; a dev box falls back to the HF cache.
+    embedding_onnx_dir: str = "/opt/models/bge-m3-onnx"
+    rerank_onnx_dir: str = "/opt/models/bge-reranker-v2-m3-onnx"
+    # bge-m3 was trained at 8192 tokens; a chunk is 800 characters, so 512
+    # covers it with room for the query. The reranker sees whole chunks.
+    embedding_onnx_max_tokens: int = 512
+    rerank_onnx_max_tokens: int = 512
+    local_inference_batch_size: int = 8
+    # Concurrent local inferences. Embedding/reranking are CPU-bound and the
+    # API is a single uvicorn worker (ADR-023), so this is the only thing
+    # keeping a burst of uploads from starving the event loop.
+    local_inference_concurrency: int = 2
+    embedding_timeout_seconds: float = 60.0
+    # PO decision 2026-09-12: reranking is the single biggest quality win -
+    # vector search finds candidates, a cross-encoder orders them.
+    rerank_enabled: bool = True
+    # 'onnx' = bge-reranker-v2-m3 on this server (default: no candidate text
+    # leaves the host); 'remote' = the provider's /rerank endpoint.
+    rerank_provider: str = Field(default="onnx", pattern="^(onnx|remote|off)$")
+    rerank_model: str = "cohere-rerank-v4.0-fast"
+    rerank_timeout_seconds: float = 30.0
     # US-227: semantic search defaults.
     search_default_top_k: int = 5
     search_max_top_k: int = 20
@@ -67,8 +97,13 @@ class Settings(BaseSettings):
     # US-1201/1202 (ADR-020/023): direct-mode aggregator seam. "mock" is the
     # v0.1 default (deterministic, keyless — ADR-022); the online provider
     # lands for staging/prod without runtime changes.
-    llm_provider: str = Field(default="mock", pattern="^(mock)$")
-    llm_default_model: str = "hive-mind-default"
+    llm_provider: str = Field(default="mock", pattern="^(mock|online-mock|openai-compatible)$")
+    llm_default_model: str = "gpt-5-mini"
+    # ADR-022: credentials come from the environment for a fresh install, but
+    # the admin panel is authoritative per call (PO request 2026-09-12: both
+    # the key AND the base URL must be editable in the panel afterwards).
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
     # US-1203: welcome credit for new organizations (admin-tunable later, US-1603).
     wallet_welcome_credit: int = 50
     # epic-16/T-S4-1: system admin (separate identity from org Owners).
@@ -96,6 +131,10 @@ class Settings(BaseSettings):
     # When the direct peer is trusted, X-Forwarded-For supplies the client key and
     # uvicorn's ProxyHeadersMiddleware rewrites scope client/scheme.
     trusted_proxies: str = "*"
+    # E (PO request): optional path of the service log file the admin panel
+    # tails (uvicorn/systemd redirect it there in staging). Empty = the panel
+    # shows the audit trail only.
+    log_file: str | None = None
 
     @model_validator(mode="after")
     def _resolve_database_url(self) -> "Settings":

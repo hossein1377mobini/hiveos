@@ -11,10 +11,13 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_CACHE_DIR=/tmp/uv-cache
 
 COPY --chown=hiveos:hiveos backend/pyproject.toml backend/uv.lock ./
 USER hiveos
-RUN uv sync --frozen --no-dev --no-install-project
+# --extra local-ml pulls onnxruntime + transformers: embeddings and reranking
+# run on this host so document text never leaves it (PO decision 2026-09-12).
+# The int8 graphs themselves are bind-mounted at /opt/models, not baked in.
+RUN uv sync --frozen --no-dev --extra local-ml --no-install-project
 
 COPY --chown=hiveos:hiveos backend/ .
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra local-ml
 
 EXPOSE 8100
 CMD ["uv", "run", "--no-sync", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8100"]

@@ -184,6 +184,10 @@ async def password_reset_endpoint(
 async def onboarding_status_endpoint(
     auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
 ) -> dict:
-    """US-007 C2/C3: resume point + pending expiry, applied on read."""
-    result = await onboarding_status(session, auth.organization)
+    """US-007 C2/C3: resume point + pending expiry, applied on read.
+
+    Also returns the caller's display identity (H1/D10): without it the app shell
+    had nothing to show but a hardcoded «مدیر».
+    """
+    result = await onboarding_status(session, auth.organization, auth.user)
     return _ok(result)

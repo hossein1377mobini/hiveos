@@ -48,6 +48,9 @@ MODEL_TABLES = (
     "charge_requests",
     "wallets",
     "system_settings",
+    "knowledge_sources",
+    "organization_brains",
+    "admin_sessions",
 )
 
 
@@ -113,6 +116,7 @@ def client(synced_database, monkeypatch):
     app.dependency_overrides[get_db] = _override_get_db
 
     # Reset the per-IP limiter state between tests (limiters are module-level).
+    from backend.admin import _admin_limiter
     from backend.brain.router import _brain_limiter
     from backend.chat import streaming
     from backend.chat.router import _chat_limiter
@@ -131,6 +135,9 @@ def client(synced_database, monkeypatch):
     _chat_limiter.reset()
     _execution_limiter.reset()
     _wallet_limiter.reset()
+    # E: a leaked admin counter (60/60s, shared by every /admin route) made
+    # later tests answer 429 - the window is per test, like every other limiter.
+    _admin_limiter.reset()
     streaming.hub.reset()
 
     # 'with' keeps one event loop for the whole test - the async engine must not

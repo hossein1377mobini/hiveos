@@ -66,15 +66,18 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
         return "completed"
     try:
         folder = await _source_path(session, asset)
-        verdict = classify_asset(asset, folder)
+        # E: classify/extract are synchronous file IO (open/zip/pypdf/openpyxl/
+        # tesseract). Awaiting them directly froze the whole API process - health
+        # checks and SSE streams included - for the duration of a large file.
+        verdict = await asyncio.to_thread(classify_asset, asset, folder)
         try:
-            asset.extracted_text = extract_text(asset, folder)
+            asset.extracted_text = await asyncio.to_thread(extract_text, asset, folder)
             normalized = normalize_text(asset.extracted_text or "")
             asset.extracted_text = normalized
             asset.asset_metadata = build_metadata(asset)
             chunk_rows = await replace_chunks(session, asset, normalized)
             if chunk_rows:
-                vectors = await asyncio.to_thread(embed_texts, [row.content for row in chunk_rows])
+                vectors = await embed_texts([row.content for row in chunk_rows])
                 for row, vector in zip(chunk_rows, vectors, strict=True):
                     row.embedding = vector  # type: ignore[assignment]
             asset.status = "ready"
@@ -127,13 +130,22 @@ async def drain_queue(session: AsyncSession, limit: int = 20) -> int:
                 select(ProcessingJob)
                 .where(ProcessingJob.status.in_(("queued", "retrying")))
                 .order_by(ProcessingJob.priority.desc(), ProcessingJob.created_at.asc())
+                # E: SKIP LOCKED so a scheduler tick and a manual scan (or a
+                # second process) never extract and embed the same asset twice.
+                .with_for_update(skip_locked=True)
                 .limit(limit)
             )
         )
         .scalars()
         .all()
     )
+    processed = 0
     for job in rows:
+        # The row was locked when selected, but re-check the state: it may have
+        # been cancelled or completed after the SELECT ordered it.
+        if job.status not in ("queued", "retrying"):
+            continue
         await process_job(session, job)
+        processed += 1
     await session.commit()
-    return len(rows)
+    return processed

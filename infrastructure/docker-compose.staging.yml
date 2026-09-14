@@ -15,11 +15,28 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-staging}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+      # Retrieval runs on this host: every ingested document is embedded and
+      # reranked locally, so only the answer prompt goes to the provider.
+      # HIVEOS_* overrides live in /opt/hiveos/app/.env; these are the defaults.
+      EMBEDDING_PROVIDER: ${HIVEOS_EMBEDDING_PROVIDER:-onnx}
+      EMBEDDING_ONNX_DIR: /opt/models/bge-m3-onnx
+      RERANK_ENABLED: ${HIVEOS_RERANK_ENABLED:-true}
+      RERANK_PROVIDER: ${HIVEOS_RERANK_PROVIDER:-onnx}
+      RERANK_ONNX_DIR: /opt/models/bge-reranker-v2-m3-onnx
+      LOCAL_INFERENCE_CONCURRENCY: ${HIVEOS_LOCAL_INFERENCE_CONCURRENCY:-2}
     ports:
       - "127.0.0.1:8100:8100"
     volumes:
       - /opt/hiveos/storage:/opt/hiveos/storage
       - /opt/hiveos/ingestion:/opt/hiveos/ingestion
+      # Read-only int8 ONNX graphs for bge-m3 and bge-reranker-v2-m3. Mounted
+      # rather than baked: 1.3GB each, and they never change between releases.
+      - /opt/models:/opt/models:ro
+      # Read-only view of the backup directory so the admin panel can report
+      # whether last night's pg_dump actually ran, its age and its size.
+      # Without this mount the endpoint can only answer "unavailable", which
+      # tells the operator nothing about whether a backup exists.
+      - /opt/hiveos/backups:/backups:ro
     networks:
       - dbnet
     restart: unless-stopped

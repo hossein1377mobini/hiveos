@@ -1,11 +1,12 @@
 import { KeyRound, RefreshCw, ShieldAlert } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, clearToken } from "../api/client";
 import { AuthBrand, faDigit, PanelHead, Stepper } from "../components/auth/parts";
 import { Banner } from "../components/ui/banner";
-import { Button } from "../components/ui/button";
+import { LoadingButton } from "../components/ui/button-loading";
 import { cn } from "../lib/utils";
 import { normDigits } from "../utils/format";
+import { Surface } from "../components/ui/surface";
 
 // 03-otp-verify.html — US-003: six-box OTP with auto-advance + filled state,
 // auto-submit on the sixth digit, 02:00 countdown then «ارسال مجدد» appears in
@@ -16,7 +17,14 @@ import { normDigits } from "../utils/format";
 const BOXES = 4;
 const TIMER_SECONDS = 120;
 
-export default function OtpVerify({ onVerified }: { onVerified: () => void }) {
+export default function OtpVerify({
+  onVerified,
+  onBack,
+}: {
+  onVerified: () => void;
+  /** PO request: the user must be able to step back out of the OTP screen. */
+  onBack?: () => void;
+}) {
   const [digits, setDigits] = useState<string[]>(Array(BOXES).fill(""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,40 +47,70 @@ export default function OtpVerify({ onVerified }: { onVerified: () => void }) {
     }
   }, []);
 
-  useEffect(() => {
-    if (timer <= 0) return;
-    const t = setInterval(() => setTimer((v) => v - 1), 1000);
-    return () => clearInterval(t);
-  }, [timer]);
+  // F: counting down by one per tick drifts (a throttled tab freezes the code
+  // TTL on screen and reports it as still valid). Anchor both countdowns to a
+  // deadline instead and read the clock on every tick.
+  const expiresAt = useRef<number | null>(null);
+  const cooldownUntil = useRef<number | null>(null);
 
   useEffect(() => {
-    if (cooldown <= 0) return;
-    const t = setInterval(() => setCooldown((c) => c - 1), 1000);
+    if (expiresAt.current === null) expiresAt.current = Date.now() + TIMER_SECONDS * 1000;
+    const tick = () => {
+      const left = Math.max(0, Math.ceil(((expiresAt.current ?? 0) - Date.now()) / 1000));
+      setTimer(left);
+      if (left === 0 && expiresAt.current !== null) {
+        clearInterval(t);
+        expiresAt.current = null;
+      }
+    };
+    const t = setInterval(tick, 1000);
+    tick();
     return () => clearInterval(t);
-  }, [cooldown]);
+  }, []);
+
+  useEffect(() => {
+    const tick = () => {
+      const until = cooldownUntil.current;
+      setCooldown(until === null ? 0 : Math.max(0, Math.ceil((until - Date.now()) / 1000)));
+    };
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const code = digits.join("");
 
-  // Auto-verify once the last box is filled (mockup: no explicit submit).
-  useEffect(() => {
-    if (sent && code.length === BOXES && !code.includes("") && !busy) void verify(code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]);
+  const verify = useCallback(
+    async (value: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await api("POST", "/auth/verify-otp", { code: value });
+        onVerified();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "کد واردشده درست نیست.");
+        setDigits(Array(BOXES).fill(""));
+        inputsRef.current[0]?.focus();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onVerified],
+  );
 
-  async function verify(value: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api("POST", "/auth/verify-otp", { code: value });
-      onVerified();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "کد واردشده درست نیست.");
-      setDigits(Array(BOXES).fill(""));
-      inputsRef.current[0]?.focus();
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Auto-verify once the last box is filled (mockup: no explicit submit).
+  // `verified` latches so a re-render (or a StrictMode double-invoke) cannot
+  // submit the same six digits twice.
+  const submitted = useRef<string | null>(null);
+  useEffect(() => {
+    // `digits.some((d) => !d)`, not `code.includes("")`. Every string contains
+    // the empty string, so that guard was always true and the auto-submit the
+    // mockup depends on never ran — the page silently required the extra button
+    // press it was designed to avoid.
+    if (!sent || code.length !== BOXES || digits.some((digit) => !digit)) return;
+    if (submitted.current === code) return;
+    submitted.current = code;
+    void verify(code);
+  }, [code, digits, sent, verify]);
 
   function setDigit(index: number, raw: string) {
     const clean = normDigits(raw).replace(/\D/g, "");
@@ -107,7 +145,9 @@ export default function OtpVerify({ onVerified }: { onVerified: () => void }) {
     try {
       const res = await api<{ dev_code?: string }>("POST", "/auth/resend-otp");
       if (res?.dev_code) setDevCode(res.dev_code);
+      cooldownUntil.current = Date.now() + 60 * 1000;
       setCooldown(60);
+      expiresAt.current = Date.now() + TIMER_SECONDS * 1000;
       setTimer(TIMER_SECONDS);
       setDigits(Array(BOXES).fill(""));
       inputsRef.current[0]?.focus();
@@ -126,7 +166,7 @@ export default function OtpVerify({ onVerified }: { onVerified: () => void }) {
       <AuthBrand title="تأیید کد" subtitle="کد ارسال‌شده را وارد کنید." />
       <Stepper current={3} />
 
-      <div className="rounded-card border border-neutral-200 bg-neutral-0 p-7 shadow-card">
+      <Surface className="p-7">
         {devCode && (
           <div className="mb-5" data-testid="dev-code">
             <Banner tone="success" title={`کد توسعه: ${devCode}`}>
@@ -135,9 +175,11 @@ export default function OtpVerify({ onVerified }: { onVerified: () => void }) {
           </div>
         )}
         <PanelHead icon={KeyRound} tone="amber" title="کد تأیید" center />
-        <p className="mt-2 text-center text-[13px] text-neutral-600">کد تأیید پیامک‌شده به شماره موبایل سازمان را وارد کنید.</p>
+        <p className="mt-2 text-center text-caption text-muted-foreground">کد تأیید پیامک‌شده به شماره موبایل سازمان را وارد کنید.</p>
 
         <div className="mt-7 flex justify-center gap-2.5" dir="rtl">
+          {/* The digit boxes are a fixed-length positional row: index 3 is always
+              the fourth box, so the position is the identity here. */}
           {digits.map((d, i) => (
             <input
               key={i}
@@ -153,11 +195,11 @@ export default function OtpVerify({ onVerified }: { onVerified: () => void }) {
               aria-label={`رقم ${faDigit(i + 1)}`}
               disabled={busy}
               className={cn(
-                "size-[52px] rounded-[12px] border bg-neutral-0 p-0 text-center text-2xl font-bold text-neutral-900 transition-[border-color,box-shadow]",
-                "focus:border-navy-600 focus:outline-none focus:ring-[3px] focus:ring-navy-50",
-                d && "border-navy-600 bg-navy-50",
+                "size-[52px] rounded-[12px] border bg-card p-0 text-center text-2xl font-bold text-foreground transition-[border-color,box-shadow]",
+                "focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-ring/20",
+                d && "border-primary bg-accent",
                 error && "border-error focus:ring-error-bg",
-                busy && "cursor-not-allowed bg-neutral-50 text-neutral-400",
+                busy && "cursor-not-allowed bg-secondary text-muted-foreground",
               )}
             />
           ))}
@@ -165,42 +207,63 @@ export default function OtpVerify({ onVerified }: { onVerified: () => void }) {
 
         <div className="mt-3.5 flex min-h-6 items-center justify-center gap-1.5 text-xs">
           {error ? (
-            <span className="flex items-center gap-1.5 text-error">
+            // role="alert" so a rejected code is announced: the digits are read
+            // back to the user and the boxes clear, and without this a screen
+            // reader user gets no signal that the attempt failed.
+            <span role="alert" className="flex items-center gap-1.5 text-error">
               <ShieldAlert aria-hidden className="size-3.5" />
               {error}
             </span>
           ) : timer > 0 && sent ? (
-            <span className="flex items-center gap-1.5 text-neutral-400">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
               کد تا
-              <span className="inline-block min-w-[44px] font-bold text-neutral-600" dir="ltr">
+              <span className="inline-block min-w-[44px] font-bold text-muted-foreground" dir="ltr">
                 {faDigit(mm)}:{faDigit(ss)}
               </span>
               معتبر است.
             </span>
           ) : (
-            <Button variant="accent" size="xs" onClick={resend} loading={busy || cooldown > 0}>
+            <LoadingButton
+              variant="outline"
+              size="xs"
+              className="border-info-border bg-info-bg text-info hover:bg-info-bg/70"
+              onClick={resend}
+              loading={busy || cooldown > 0}
+            >
               <RefreshCw aria-hidden />
               ارسال مجدد کد
-            </Button>
+            </LoadingButton>
           )}
         </div>
 
         <div className="mt-5">
-          <Button className="w-full" onClick={() => void verify(code)} loading={busy} disabled={code.length < BOXES}>
+          <LoadingButton className="w-full" onClick={() => void verify(code)} loading={busy} disabled={code.length < BOXES}>
             تأیید کد
-          </Button>
-          <button
-            type="button"
-            onClick={() => {
-              clearToken();
-              location.reload();
-            }}
-            className="mt-3 w-full cursor-pointer text-center text-xs text-neutral-600 underline-offset-4 hover:underline"
-          >
-            خروج از این حساب
-          </button>
+          </LoadingButton>
+          <div className="mt-3 flex items-center justify-center gap-4">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                data-testid="otp-back"
+                className="cursor-pointer text-caption text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                بازگشت
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                clearToken();
+                location.reload();
+              }}
+              className="cursor-pointer text-caption text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              خروج از این حساب
+            </button>
+          </div>
         </div>
-      </div>
+      </Surface>
     </section>
   );
 }

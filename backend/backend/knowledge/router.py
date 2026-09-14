@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth import AuthContext, get_auth_context
@@ -20,6 +21,12 @@ from backend.knowledge.assets import (
     soft_delete_asset,
     upload_assets,
 )
+from backend.knowledge.client_folder import (
+    register_client_folder,
+    sync_client_manifest,
+    upload_client_file,
+)
+from backend.knowledge.client_sync import sync_plan
 from backend.knowledge.service import (
     get_source,
     register_folder_source,
@@ -37,6 +44,22 @@ _rate_limit = rate_limit_dependency(_knowledge_limiter)
 
 class KnowledgeSourceCreate(BaseModel):
     path: str = Field(min_length=1, max_length=500)
+
+
+class ClientFolderCreate(BaseModel):
+    """US-007: the folder the owner picked on their own computer."""
+
+    path: str = Field(min_length=1, max_length=500)
+
+
+class ManifestEntry(BaseModel):
+    rel_path: str = Field(min_length=1, max_length=500)
+    fingerprint: str = Field(min_length=1, max_length=64)
+    size_bytes: int = Field(default=0, ge=0)
+
+
+class ManifestSync(BaseModel):
+    entries: list[ManifestEntry] = Field(default_factory=list, max_length=5000)
 
 
 class KnowledgeSourceStatus(BaseModel):
@@ -94,6 +117,97 @@ async def scan_history_endpoint(
 ) -> dict:
     """US-202 FR-009 (Amendment 2, C11): last N scans of one source."""
     return ok({"history": await scan_history(session, auth.organization, source_id)})
+
+
+@router.post("/client-folder", dependencies=[Depends(_rate_limit)])
+async def register_client_folder_endpoint(
+    payload: ClientFolderCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-007 (cloud v0.1): register the folder the Windows client watches.
+
+    Separate from POST /knowledge-sources because that path is validated as a
+    path ON THIS SERVER; this one describes a path on the owner's machine.
+    """
+    result = await register_client_folder(session, auth.organization, payload.path)
+    return ok(result)
+
+
+@router.get("/client-folder/sync-plan", dependencies=[Depends(_rate_limit)])
+async def client_folder_sync_plan_endpoint(
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+) -> dict:
+    """Auto-sync cadence (PO request): the client polls, the server decides.
+
+    The folder is on the owner's machine, so the server cannot run the scan.
+    It stays authoritative about WHEN: the interval is a server setting, so
+    changing it in the admin panel reaches every installed client on its next
+    poll without shipping a new build.
+    """
+    return ok(await sync_plan(session, auth.organization.id))
+
+
+@router.get("/client-folder/manifest", dependencies=[Depends(_rate_limit)])
+async def client_folder_manifest_endpoint(
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+) -> dict:
+    """What the client needs to decide which files to send: the current assets."""
+    from backend.models import KnowledgeAsset
+
+    rows = (
+        (
+            await session.execute(
+                select(KnowledgeAsset).where(
+                    KnowledgeAsset.organization_id == auth.organization.id,
+                    KnowledgeAsset.deleted_at.is_(None),
+                    KnowledgeAsset.rel_path.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return ok(
+        {
+            "files": [
+                {
+                    "asset_id": str(row.id),
+                    "rel_path": row.rel_path,
+                    "fingerprint": row.file_fingerprint,
+                    "status": row.status,
+                }
+                for row in rows
+            ]
+        }
+    )
+
+
+@router.post("/client-folder/sync", dependencies=[Depends(_rate_limit)])
+async def client_folder_sync_endpoint(
+    payload: ManifestSync,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-202 parity for a client folder: reconcile the manifest the client sent."""
+    result = await sync_client_manifest(
+        session,
+        auth.organization,
+        [entry.model_dump() for entry in payload.entries],
+    )
+    return ok(result)
+
+
+@router.post("/client-folder/files/{asset_id}", dependencies=[Depends(_rate_limit)])
+async def client_folder_upload_endpoint(
+    asset_id: uuid.UUID,
+    file: Annotated[UploadFile, File()],
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """The bytes for one manifest entry (the server never sees the folder)."""
+    result = await upload_client_file(session, auth.organization, asset_id, file)
+    return ok(result)
 
 
 @assets_router.post("/upload", dependencies=[Depends(_rate_limit)])

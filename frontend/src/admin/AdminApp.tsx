@@ -1,438 +1,437 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react"
+import {
+  BuildingIcon,
+  CreditCardIcon,
+  GaugeIcon,
+  LayoutDashboardIcon,
+  LogOutIcon,
+  ReceiptIcon,
+  ScrollTextIcon,
+  SearchIcon,
+  SettingsIcon,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import { NavLink, useLocation, useNavigate } from "react-router-dom"
 
-// Admin panel UI (epic-16, zero-open): the System Admin logs in and sets
-// provider credentials, allowlist, pricing, pipeline and the prompt template;
-// manages organizations + manual credit and approves wallet charge requests.
-// Values stay EMPTY by default — the PO fills them here (his explicit role).
-const ADMIN_BASE = "/api/v1/admin";
+import { Button } from "../components/ui/button"
+import { ErrorText } from "../components/ui/error-text"
+import { Field } from "../components/auth/parts"
+import { Input } from "../components/ui/input"
+import { CommandPalette, useCommandPalette, type CommandItem } from "../components/ui/command-palette"
+import { RouteFallback } from "../components/RouteFallback"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "../components/ui/breadcrumb"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from "../components/ui/sidebar"
+import { persianError } from "../api/errors"
+import {
+  ADMIN_BASE,
+  AdminSessionExpired,
+  adminApi,
+  readEnvelope,
+  setAdminSessionExpiredHandler,
+} from "./api"
 
-interface Envelope {
-  success: boolean;
-  data?: unknown;
-  error?: { code: string; message: string };
+/**
+ * Admin panel shell.
+ *
+ * v0.1 was one 1243-line file rendering six flat tabs with no URL of their own:
+ * an operator could not link a colleague to an organisation, refresh without
+ * losing their place, or use the browser Back button. It also hand-rolled its
+ * own buttons and inputs next to the design system, so the panel looked like a
+ * different product from the app it administers. [A1/D3/A3]
+ *
+ * Each workspace is a lazy route now, the chrome is the same Sidebar + Breadcrumb
+ * the organisation app uses, and every control comes from components/ui.
+ */
+
+export interface AdminWorkspace {
+  id: string
+  path: string
+  label: string
+  description: string
+  icon: LucideIcon
+  keywords: string[]
 }
 
-async function adminApi<T>(
-  token: string,
-  method: "GET" | "PUT" | "POST",
-  path: string,
-  body?: unknown,
-): Promise<T> {
-  const response = await fetch(ADMIN_BASE + path, {
-    method,
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const payload = (await response.json()) as Envelope;
-  if (!payload.success || payload.data === undefined) {
-    throw new Error(payload.error?.message ?? "خطای ناشناخته");
-  }
-  return payload.data as T;
+export const ADMIN_WORKSPACES: AdminWorkspace[] = [
+  {
+    id: "overview",
+    path: "/admin",
+    label: "نمای کلی",
+    description: "تصویر یک‌نگاه از سامانه",
+    icon: LayoutDashboardIcon,
+    keywords: ["خلاصه", "داشبورد", "وضعیت"],
+  },
+  {
+    id: "organizations",
+    path: "/admin/organizations",
+    label: "سازمان‌ها",
+    description: "کاربران، اعتبار و فضای هر سازمان",
+    icon: BuildingIcon,
+    keywords: ["مشتری", "کاربر", "اعتبار", "حذف"],
+  },
+  {
+    id: "billing",
+    path: "/admin/billing",
+    label: "مالی و اشتراک",
+    description: "درخواست‌های شارژ، پلن‌ها و قیمت‌گذاری",
+    icon: CreditCardIcon,
+    keywords: ["شارژ", "پرداخت", "پلن", "کیف پول"],
+  },
+  {
+    id: "operations",
+    path: "/admin/operations",
+    label: "پایش عملیات",
+    description: "سرور، پشتیبان‌گیری و صف پردازش",
+    icon: GaugeIcon,
+    keywords: ["سرور", "پشتیبان", "دیسک", "حافظه", "بکاپ"],
+  },
+  {
+    id: "ai",
+    path: "/admin/ai",
+    label: "هوش مصنوعی",
+    description: "درگاه، مدل‌ها و اعتبار حساب هوش مصنوعی",
+    icon: SettingsIcon,
+    keywords: ["مدل", "درگاه", "کلید", "اعتبار", "پرامپت"],
+  },
+  {
+    id: "events",
+    path: "/admin/events",
+    label: "رویدادها",
+    description: "ردیابی فعالیت‌ها و خطاها",
+    icon: ScrollTextIcon,
+    keywords: ["لاگ", "خطا", "فعالیت", "گزارش"],
+  },
+  {
+    id: "system",
+    path: "/admin/system",
+    label: "وضعیت سامانه",
+    description: "سالم بودن سرویس‌ها و شمارنده‌ها",
+    icon: ReceiptIcon,
+    keywords: ["سلامت", "دیتابیس", "سرویس", "شمارنده"],
+  },
+]
+
+export function workspaceFor(pathname: string): AdminWorkspace {
+  // Longest match wins: /admin/organizations must not be shadowed by /admin.
+  const sorted = [...ADMIN_WORKSPACES].sort((a, b) => b.path.length - a.path.length)
+  return sorted.find((w) => pathname === w.path || pathname.startsWith(w.path + "/")) ?? ADMIN_WORKSPACES[0]
 }
 
-type Tab = "settings" | "orgs" | "requests" | "status";
-
-const SETTING_KEYS = [
-  { key: "providers_pricing", title: "درگاه مدل و قیمت", hint: "provider: mock | online-mock | openai-compatible" },
-  { key: "models_allowlist", title: "لیست مدل‌های مجاز", hint: "مثال: {\"models\": [\"gpt-x\"], \"default\": \"gpt-x\"}" },
-  { key: "pipeline", title: "پایپ‌لاین بازیابی", hint: "تنظیمات مرحلهٔ بازیابی دانش" },
-  { key: "prompt_template", title: "قالب پرامپت", hint: "system + user_template با {question} و {context}" },
-] as const;
+const OverviewView = lazy(() => import("./views/OverviewView"))
+const OrganizationsView = lazy(() => import("./views/OrganizationsView"))
+const BillingView = lazy(() => import("./views/BillingView"))
+const OperationsView = lazy(() => import("./views/OperationsView"))
+const AiView = lazy(() => import("./views/AiView"))
+const EventsView = lazy(() => import("./views/EventsView"))
+const SystemView = lazy(() => import("./views/SystemView"))
 
 export default function AdminApp() {
-  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem("hiveos.admin"));
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("settings");
+  const location = useLocation()
 
-  async function login(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+  return (
+    <AdminGate>
+      {(token) => (
+        <AdminFrame pathname={location.pathname} token={token}>
+          <Suspense fallback={<RouteFallback />}>
+            <AdminRoutes token={token} />
+          </Suspense>
+        </AdminFrame>
+      )}
+    </AdminGate>
+  )
+}
+
+function AdminRoutes({ token }: { token: string }) {
+  const location = useLocation()
+  const workspace = workspaceFor(location.pathname)
+
+  switch (workspace.id) {
+    case "organizations":
+      return <OrganizationsView token={token} />
+    case "billing":
+      return <BillingView token={token} />
+    case "operations":
+      return <OperationsView token={token} />
+    case "ai":
+      return <AiView token={token} />
+    case "events":
+      return <EventsView token={token} />
+    case "system":
+      return <SystemView token={token} />
+    default:
+      return <OverviewView token={token} />
+  }
+}
+
+/**
+ * Login gate. Kept as a render prop so the frame below only ever runs with a
+ * real token and never has to branch on null.
+ */
+function AdminGate({ children }: { children: (token: string) => React.ReactNode }) {
+  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem("hiveos.admin"))
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    setAdminSessionExpiredHandler(() => {
+      sessionStorage.removeItem("hiveos.admin")
+      setToken(null)
+      setError("نشست مدیر منقضی شده است؛ دوباره وارد شوید.")
+    })
+    return () => setAdminSessionExpiredHandler(null)
+  }, [])
+
+  async function login(event: React.FormEvent) {
+    event.preventDefault()
+    setError(null)
+    setBusy(true)
     try {
       const response = await fetch(ADMIN_BASE + "/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
-      });
-      const payload = (await response.json()) as Envelope;
-      const data = payload.data as { token?: string } | undefined;
-      if (!payload.success || !data?.token) throw new Error(payload.error?.message ?? "ورود ناموفق");
-      sessionStorage.setItem("hiveos.admin", data.token);
-      setToken(data.token);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "ورود ناموفق");
-    }
-  }
-
-  if (!token) {
-    return (
-      <main className="flex min-h-dvh items-center justify-center px-4">
-        <form
-          onSubmit={login}
-          className="w-full max-w-sm rounded-card border border-neutral-200 bg-neutral-0 p-6 shadow-card"
-          aria-label="ورود مدیر سامانه"
-        >
-          <h1 className="text-lg font-bold">پنل مدیریت HiveOS</h1>
-          <label className="mt-4 block text-sm">
-            نام کاربری
-            <input
-              className="mt-1 w-full rounded-control border border-neutral-200 px-3 py-2 text-sm"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              dir="ltr"
-              required
-            />
-          </label>
-          <label className="mt-3 block text-sm">
-            گذرواژه
-            <input
-              type="password"
-              className="mt-1 w-full rounded-control border border-neutral-200 px-3 py-2 text-sm"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              dir="ltr"
-              required
-            />
-          </label>
-          {error && (
-            <p role="alert" className="mt-3 text-sm text-error" data-testid="admin-error">
-              {error}
-            </p>
-          )}
-          <button className="mt-4 w-full rounded-control bg-navy-600 px-4 py-2 text-sm font-bold text-white">
-            ورود
-          </button>
-        </form>
-      </main>
-    );
-  }
-
-  const tabs: ReadonlyArray<{ id: Tab; label: string }> = [
-    { id: "settings", label: "تنظیمات" },
-    { id: "orgs", label: "سازمان‌ها" },
-    { id: "requests", label: "درخواست‌های شارژ" },
-    { id: "status", label: "وضعیت سامانه" },
-  ];
-
-  return (
-    <div className="min-h-dvh bg-neutral-50">
-      <header className="border-b border-neutral-200 bg-neutral-0 px-4 py-2">
-        <div className="mx-auto flex max-w-4xl items-center justify-between">
-          <h1 className="text-base font-bold">پنل مدیریت HiveOS</h1>
-          <button
-            type="button"
-            className="text-sm text-neutral-600"
-            onClick={() => {
-              sessionStorage.removeItem("hiveos.admin");
-              setToken(null);
-            }}
-          >
-            خروج
-          </button>
-        </div>
-      </header>
-      <nav className="mx-auto mt-4 flex max-w-4xl gap-2 px-4" aria-label="بخش‌های پنل">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            aria-current={tab === t.id ? "page" : undefined}
-            className={
-              "rounded-control px-3 py-2 text-sm " +
-              (tab === t.id ? "bg-navy-600 font-bold text-white" : "bg-neutral-0 text-neutral-600")
-            }
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-      <main className="mx-auto max-w-4xl px-4 py-4">
-        {tab === "settings" && <SettingsTab token={token} />}
-        {tab === "orgs" && <OrgsTab token={token} />}
-        {tab === "requests" && <RequestsTab token={token} />}
-        {tab === "status" && <StatusTab token={token} />}
-      </main>
-    </div>
-  );
-}
-
-function SettingsTab({ token }: { token: string }) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [saved, setSaved] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const loaded: Record<string, string> = {};
-      for (const { key } of SETTING_KEYS) {
-        try {
-          const data = await adminApi<Record<string, unknown>>(token, "GET", "/settings/" + key);
-          loaded[key] = JSON.stringify(data, null, 2);
-        } catch {
-          loaded[key] = "";
-        }
+      })
+      const payload = await readEnvelope(response)
+      const data = payload?.data as { token?: string } | undefined
+      if (payload === null || !payload.success || !data?.token) {
+        throw new Error(
+          persianError(
+            payload?.error?.code ?? "CLIENT_BAD_RESPONSE",
+            response.status,
+            payload?.error?.message,
+          ),
+        )
       }
-      setValues(loaded);
-    })();
-  }, [token]);
-
-  async function save(key: string, text: string) {
-    setError(null);
-    setSaved(null);
-    let parsed: unknown;
-    try {
-      parsed = text.trim() ? JSON.parse(text) : {};
-    } catch {
-      setError("JSON نامعتبر است.");
-      return;
-    }
-    try {
-      await adminApi(token, "PUT", "/settings/" + key, { value: parsed });
-      setSaved(key);
+      sessionStorage.setItem("hiveos.admin", data.token)
+      setToken(data.token)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ذخیره ناموفق");
+      setError(err instanceof Error ? err.message : "ورود ناموفق بود.")
+    } finally {
+      setBusy(false)
     }
   }
 
+  if (token) return <>{children(token)}</>
+
   return (
-    <div className="space-y-4">
-      {SETTING_KEYS.map(({ key, title, hint }) => (
-        <section key={key} className="rounded-card border border-neutral-200 bg-neutral-0 p-4">
-          <h2 className="text-sm font-bold">{title}</h2>
-          <p className="mt-1 text-xs text-neutral-500" dir="auto">
-            {hint}
-          </p>
-          <textarea
-            dir="ltr"
-            rows={5}
-            className="mt-2 w-full rounded-control border border-neutral-200 p-2 font-mono text-xs"
-            aria-label={title}
-            value={values[key] ?? ""}
-            onChange={(e) => setValues({ ...values, [key]: e.target.value })}
-          />
-          <div className="mt-2 flex items-center gap-3">
-            <button
-              type="button"
-              className="rounded-control bg-navy-600 px-4 py-2 text-sm font-bold text-white"
-              onClick={() => save(key, values[key] ?? "")}
-            >
-              ذخیره
-            </button>
-            {saved === key && <span className="text-sm text-success">ذخیره شد ✓</span>}
-          </div>
-        </section>
-      ))}
-      {error && (
-        <p role="alert" className="text-sm text-error">
-          {error}
+    <main className="flex min-h-dvh items-center justify-center bg-secondary px-4">
+      <form
+        onSubmit={login}
+        className="w-full max-w-sm rounded-card border border-border bg-card p-6 shadow-raised"
+        aria-label="ورود مدیر سامانه"
+      >
+        <h1 className="text-title">پنل مدیریت HiveOS</h1>
+        <p className="mt-1 text-caption text-muted-foreground">
+          این بخش مخصوص مدیر سامانه است. دسترسی‌ها اینجا ثبت می‌شود.
         </p>
-      )}
-    </div>
-  );
+        <Field label="نام کاربری" htmlFor="admin-username" className="mb-0 mt-5">
+          <Input
+            id="admin-username"
+            className="rounded-control text-caption"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            dir="ltr"
+            autoComplete="username"
+            required
+          />
+        </Field>
+        <Field label="گذرواژه" htmlFor="admin-password" className="mb-0 mt-3">
+          <Input
+            id="admin-password"
+            type="password"
+            className="rounded-control text-caption"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            dir="ltr"
+            autoComplete="current-password"
+            required
+          />
+        </Field>
+        <ErrorText className="mt-3" data-testid="admin-error">
+          {error}
+        </ErrorText>
+        <Button type="submit" className="mt-5 w-full" disabled={busy}>
+          {busy ? "در حال ورود…" : "ورود"}
+        </Button>
+      </form>
+    </main>
+  )
 }
 
-interface Org {
-  id: string;
-  name: string;
-  status: string;
-  balance: number;
-  plan?: string;
-  plan_expires_at?: string | null;
-}
+function AdminFrame({
+  pathname,
+  token,
+  children,
+}: {
+  pathname: string
+  token: string
+  children: React.ReactNode
+}) {
+  const navigate = useNavigate()
+  const palette = useCommandPalette()
+  const workspace = workspaceFor(pathname)
 
-function OrgsTab({ token }: { token: string }) {
-  const [orgs, setOrgs] = useState<Org[]>([]);
-  const [amounts, setAmounts] = useState<Record<string, number>>({});
-  const [msg, setMsg] = useState<string | null>(null);
+  const commands: CommandItem[] = ADMIN_WORKSPACES.map((w) => ({
+    id: "admin-" + w.id,
+    label: w.label,
+    group: "پنل مدیریت",
+    path: w.path,
+    icon: w.icon,
+    keywords: [...w.keywords, w.description],
+  }))
 
-  async function reload() {
-    const data = await adminApi<{ organizations: Org[] }>(token, "GET", "/organizations");
-    setOrgs(data.organizations);
-  }
-
-  useEffect(() => {
-    reload().catch(() => setMsg("دریافت سازمان‌ها ناموفق بود."));
-  }, [token]);
-
-
-  async function credit(orgId: string) {
+  async function logout() {
+    // Dropping the browser copy is not a logout on its own: the token also
+    // lives in hiveos.admin_sessions, where it stayed valid for the full
+    // session TTL (12h by default). Anyone who had copied it kept full
+    // /api/v1/admin access after the operator believed they had signed out.
+    // POST /admin/auth/logout is what actually revokes the row. It is awaited
+    // with a short leash: a network failure must still drop the local session
+    // rather than trap the operator in the panel.
     try {
-      await adminApi(token, "POST", "/organizations/" + orgId + "/credit", {
-        amount: amounts[orgId] ?? 0,
-      });
-      setMsg("اعتبار افزوده شد ✓");
-      await reload();
+      await adminApi(token, "POST", "/auth/logout")
     } catch {
-      setMsg("افزودن اعتبار ناموفق بود.");
+      // Revocation is best-effort; the local token is discarded either way.
     }
+    sessionStorage.removeItem("hiveos.admin")
+    // A full reload is correct here: it drops every cached admin view's state,
+    // including the polling hooks, before the login form renders.
+    window.location.href = "/admin"
   }
 
   return (
-    <table className="w-full rounded-card border border-neutral-200 bg-neutral-0 text-sm">
-      <thead>
-        <tr className="border-b border-neutral-200 text-neutral-600">
-          <th className="p-3 text-start">سازمان</th>
-          <th className="p-3 text-start">موجودی</th>
-          <th className="p-3 text-start">پلن</th>
-          <th className="p-3 text-start">افزودن اعتبار</th>
-        </tr>
-      </thead>
-      <tbody>
-        {orgs.map((o) => (
-          <tr key={o.id} className="border-b border-neutral-100">
-            <td className="p-3 font-bold">{o.name}</td>
-            <td className="p-3" data-testid={"balance-" + o.id}>
-              {o.balance}
-            </td>
-            <td className="p-3 text-xs">
-              {o.plan ?? "trial"}
-              {o.plan_expires_at && (
-                <span dir="ltr" className="block text-neutral-500">
-                  {new Date(o.plan_expires_at).toISOString().slice(0, 10)}
-                </span>
-              )}
-            </td>
-            <td className="p-3">
-              <div className="flex gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  aria-label={"مبلغ برای " + o.name}
-                  className="w-24 rounded-control border border-neutral-200 px-2 py-1"
-                  value={amounts[o.id] ?? ""}
-                  onChange={(e) => setAmounts({ ...amounts, [o.id]: Number(e.target.value) })}
-                />
-                <button
-                  type="button"
-                  className="rounded-control bg-navy-600 px-3 py-1 font-bold text-white"
-                  onClick={() => credit(o.id)}
-                >
-                  اعمال
-                </button>
-              </div>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-      {msg && (
-        <tfoot>
-          <tr>
-            <td colSpan={4} className="p-3 text-success">
-              {msg}
-            </td>
-          </tr>
-        </tfoot>
-      )}
-    </table>
-  );
-}
+    <SidebarProvider className="min-h-dvh">
+      <Sidebar side="right" collapsible="icon" className="border-e">
+        <SidebarHeader className="flex-row items-center gap-2.5 px-2 py-3.5">
+          <span
+            aria-hidden
+            className="flex size-9 shrink-0 items-center justify-center rounded-control bg-sidebar-primary text-sidebar-primary-foreground"
+          >
+            <SettingsIcon className="size-4.5" />
+          </span>
+          <span className="grid min-w-0 flex-1 leading-tight">
+            <span className="truncate text-subheading font-bold text-sidebar-foreground">
+              مدیریت HiveOS
+            </span>
+            <span className="truncate text-micro text-muted-foreground">مدیر سامانه</span>
+          </span>
+        </SidebarHeader>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-micro font-bold tracking-[0.4px]">
+              بخش‌های پنل
+            </SidebarGroupLabel>
+            <SidebarMenu>
+              {ADMIN_WORKSPACES.map((w) => (
+                <SidebarMenuItem key={w.id}>
+                  <SidebarMenuButton asChild tooltip={w.label}>
+                    <NavLink
+                      to={w.path}
+                      end={w.path === "/admin"}
+                      className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
+                    >
+                      <w.icon aria-hidden />
+                      <span>{w.label}</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter className="border-t">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                onClick={logout}
+                tooltip="خروج از پنل"
+                className="h-auto py-2 text-caption text-muted-foreground"
+              >
+                <LogOutIcon aria-hidden className="rtl:-scale-x-100" />
+                <span>خروج از پنل</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      </Sidebar>
 
-interface ChargeRequestItem {
-  id: string;
-  organization_id: string;
-  amount: number;
-  status: string;
-  note: string | null;
-}
-
-function RequestsTab({ token }: { token: string }) {
-  const [items, setItems] = useState<ChargeRequestItem[]>([]);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  async function reload() {
-    const data = await adminApi<{ requests: ChargeRequestItem[] }>(
-      token,
-      "GET",
-      "/charge-requests",
-    );
-    setItems(data.requests);
-  }
-
-  useEffect(() => {
-    reload().catch(() => setMsg("دریافت درخواست‌ها ناموفق بود."));
-  }, [token]);
-
-  async function decide(id: string, approve: boolean) {
-    try {
-      await adminApi(token, "POST", "/charge-requests/" + id + "/decision", { approve });
-      await reload();
-      setMsg(approve ? "تأیید شد و اعتبار افزوده شد ✓" : "رد شد ✓");
-    } catch {
-      setMsg("عملیات ناموفق بود.");
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      {msg && <p className="text-sm text-success">{msg}</p>}
-      {items.length === 0 && <p className="text-sm text-neutral-600">درخواستی ثبت نشده است.</p>}
-      {items.map((r) => (
-        <div
-          key={r.id}
-          className="flex items-center justify-between rounded-card border border-neutral-200 bg-neutral-0 p-4"
-        >
-          <div className="text-sm">
-            <p className="font-bold" dir="ltr">
-              {r.amount} — {r.status}
-            </p>
-            {r.note && <p className="text-xs text-neutral-500">{r.note}</p>}
+      <SidebarInset className="min-w-0">
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2.5 border-b border-border bg-background/95 px-4 backdrop-blur-sm">
+          <SidebarTrigger aria-label="نمایش یا پنهان کردن ناوبری" />
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap text-caption">
+              <BreadcrumbItem className="hidden sm:inline-flex">
+                <span className="text-muted-foreground">پنل مدیریت</span>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator className="hidden sm:inline-flex rtl:-scale-x-100">
+                <span aria-hidden>/</span>
+              </BreadcrumbSeparator>
+              <BreadcrumbItem className="min-w-0">
+                <BreadcrumbPage className="truncate font-bold text-foreground">
+                  {workspace.label}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="ms-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => palette.setOpen(true)}
+              className="hidden rounded-control text-muted-foreground md:inline-flex"
+              aria-keyshortcuts="Control+K"
+            >
+              <SearchIcon className="size-3.5" />
+              جستجوی بخش
+              <kbd className="mono ms-1 rounded-xs border border-border bg-secondary px-1 py-px text-micro">
+                Ctrl K
+              </kbd>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-control"
+              onClick={() => navigate("/chat")}
+            >
+              نمای سازمان
+            </Button>
           </div>
-          {r.status === "PENDING" && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="rounded-control bg-success px-3 py-1 text-sm font-bold text-white"
-                onClick={() => decide(r.id, true)}
-              >
-                تأیید
-              </button>
-              <button
-                type="button"
-                className="rounded-control bg-error px-3 py-1 text-sm font-bold text-white"
-                onClick={() => decide(r.id, false)}
-              >
-                رد
-              </button>
+        </header>
+        <main className="min-w-0 flex-1 px-6 pb-14 pt-6">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-5">
+              <h1 className="text-title">{workspace.label}</h1>
+              <p className="mt-1 text-caption text-muted-foreground">{workspace.description}</p>
             </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
+            {children}
+          </div>
+        </main>
+      </SidebarInset>
+
+      <CommandPalette items={commands} open={palette.open} onOpenChange={palette.setOpen} />
+    </SidebarProvider>
+  )
 }
 
-interface SystemStatus {
-  overall: string;
-  checks: Array<{ check: string; status: string; detail?: string }>;
-}
-
-function StatusTab({ token }: { token: string }) {
-  const [status, setStatus] = useState<SystemStatus | null>(null);
-
-  useEffect(() => {
-    adminApi<SystemStatus>(token, "GET", "/system-status")
-      .then(setStatus)
-      .catch(() => setStatus({ overall: "ERROR", checks: [] }));
-  }, [token]);
-
-  if (!status) return <p className="text-sm text-neutral-600">در حال بارگذاری…</p>;
-  return (
-    <div className="rounded-card border border-neutral-200 bg-neutral-0 p-4">
-      <p className="text-sm">
-        وضعیت کلی:{" "}
-        <span className="font-bold" data-testid="overall">
-          {status.overall}
-        </span>
-      </p>
-      <ul className="mt-2 space-y-1 text-sm">
-        {status.checks.map((c) => (
-          <li key={c.check}>
-            {c.check}: {c.status}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+export { AdminSessionExpired }

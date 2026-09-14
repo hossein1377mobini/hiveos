@@ -1,3 +1,8 @@
+# UNUSED. The stack that actually runs on staging is the hand-maintained
+# /opt/hiveos/app/docker-compose.staging.yml; the tracked source is
+# infrastructure/docker-compose.staging.yml. This file points at the unused
+# deploy/Dockerfile and would build the wrong image. See deploy/README.md.
+#
 # HiveOS v0.1 staging stack (zero-open): PO starts the server, agent uploads,
 # PO sets provider keys in the admin panel and tests.
 #
@@ -12,6 +17,11 @@ services:
       POSTGRES_DB: hiveos
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Hand-tuned for the 6-core / 12GB launch host: the defaults (128MB
+      # shared_buffers) leave the vector index thrashing on disk. Half of RAM
+      # to the cache, enough parallel workers for the HNSW scans.
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hiveos -d hiveos"]
       interval: 5s
@@ -31,6 +41,15 @@ services:
       SYSTEM_ADMIN_PASSWORD: ${HIVEOS_SYSTEM_ADMIN_PASSWORD:?set HIVEOS_SYSTEM_ADMIN_PASSWORD in .env}
       LLM_PROVIDER: ${HIVEOS_LLM_PROVIDER:-mock}
       SMS_PROVIDER: ${HIVEOS_SMS_PROVIDER:-mock}
+      # Retrieval runs on this host: the embedded and reranked text of every
+      # ingested document stays here and only the answer prompt goes online.
+      # Set EMBEDDING_PROVIDER=remote / RERANK_PROVIDER=remote to flip back.
+      EMBEDDING_PROVIDER: ${HIVEOS_EMBEDDING_PROVIDER:-onnx}
+      EMBEDDING_ONNX_DIR: /opt/models/bge-m3-onnx
+      RERANK_ENABLED: ${HIVEOS_RERANK_ENABLED:-true}
+      RERANK_PROVIDER: ${HIVEOS_RERANK_PROVIDER:-onnx}
+      RERANK_ONNX_DIR: /opt/models/bge-reranker-v2-m3-onnx
+      LOCAL_INFERENCE_CONCURRENCY: ${HIVEOS_LOCAL_INFERENCE_CONCURRENCY:-2}
       WALLET_WELCOME_CREDIT: ${HIVEOS_WALLET_WELCOME_CREDIT:-50}
       # NB-1 (final review): nginx is the only hop and the api container is not
       # publicly exposed, so the proxy IP is trusted and X-Forwarded-For supplies
@@ -39,6 +58,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      # Read-only int8 ONNX graphs for bge-m3 and bge-reranker-v2-m3. Mounted
+      # rather than baked in: they are 1.3GB each and would otherwise be
+      # rebuilt into every image layer.
+      - /opt/models:/opt/models:ro
+      # Read-only view of the backup directory so the admin panel can report
+      # whether last night's dump actually ran and how big it was. Without the
+      # mount the endpoint could only claim a backup exists, which is exactly
+      # the kind of lie an operator discovers during a restore.
+      - /opt/hiveos/backups:/backups:ro
     expose:
       - "8000"
 
@@ -49,6 +78,12 @@ services:
     volumes:
       - ../frontend/dist:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Included by every location in nginx.conf. Mounted as its own file because
+      # add_header does not inherit across levels: without this the document and
+      # the JS bundle shipped with no CSP at all. Without the mount nginx fails
+      # to start, which is the correct failure - a config that silently drops the
+      # security headers is worse than one that refuses to serve.
+      - ./security-headers.conf:/etc/nginx/conf.d/security-headers.conf:ro
     depends_on:
       - backend
 
