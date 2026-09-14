@@ -440,9 +440,25 @@ async def scan_history(session: AsyncSession, organization: Organization, source
 
 
 async def find_due_sources(session: AsyncSession, now: datetime) -> list[KnowledgeSource]:
-    """US-202 FR-002: active sources whose scan interval has elapsed."""
+    """US-202 FR-002: active sources whose scan interval has elapsed.
+
+    Only 'local_folder' sources qualify. A 'client_folder' source holds the path
+    of the owner's own computer (see models.knowledge.KnowledgeSource.path) and
+    the server can never walk it: listing one here made every tick raise
+    INGESTION_PATH_NOT_READABLE, and because the whole tick is what drains the
+    processing queue, one enrolled desktop client stopped ingestion for every
+    other organization on the deployment. Those folders are synced by the client
+    pushing a manifest, so they have nothing to scan for on this side.
+    """
     rows = (
-        (await session.execute(select(KnowledgeSource).where(KnowledgeSource.status == "active")))
+        (
+            await session.execute(
+                select(KnowledgeSource).where(
+                    KnowledgeSource.status == "active",
+                    KnowledgeSource.source_type == "local_folder",
+                )
+            )
+        )
         .scalars()
         .all()
     )

@@ -31,15 +31,31 @@ logger = logging.getLogger("hiveos.scheduler")
 SCAN_LOCK_KEY = 0x48495645
 
 _ENGINE = None
+_ENGINE_LOOP = None
 
 
 def _engine():
     # One cached engine for the lifetime of the process. The loop used to call
     # create_async_engine every tick and dispose it at the end, so each scan
     # paid full pool setup and no connection was reused between ticks.
-    global _ENGINE
-    if _ENGINE is None:
+    #
+    # The cache is keyed on the running event loop. An engine's pooled
+    # connections belong to the loop that opened them, and an asyncpg connection
+    # bound to a closed loop fails with "Event loop is closed" / "NoneType has
+    # no attribute send" the moment it is reused. Under uvicorn there is one
+    # loop for the process so this never triggers in production; it is what
+    # makes the tick callable from a test that owns a fresh loop, and it stops
+    # any second call site from silently reusing a dead pool.
+    global _ENGINE, _ENGINE_LOOP
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # Called outside a loop (a sync caller): there is nothing to bind to,
+        # so keep whatever is cached rather than rebuilding a pool per call.
+        loop = None
+    if _ENGINE is None or (loop is not None and _ENGINE_LOOP is not loop):
         _ENGINE = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+        _ENGINE_LOOP = loop
     return _ENGINE
 
 
@@ -60,16 +76,39 @@ async def _scan_due_sources() -> None:
             now = datetime.now(UTC)
             due = await find_due_sources(session, now)
             for source in due:
+                # Read what we log BEFORE the scan: after a rollback the ORM
+                # expires the instance, and touching an attribute then triggers a
+                # lazy refresh - synchronous IO inside the event loop - which
+                # raises MissingGreenlet. That exception escaped the per-source
+                # except and killed the whole tick, so drain_queue never ran and
+                # every queued asset stayed queued. Plain values cannot expire.
+                source_id = source.id
+                source_org = source.organization_id
+                source_path = source.path
                 try:
-                    await run_scan(session, source.organization_id, source, "scheduled")
+                    await run_scan(session, source_org, source, "scheduled")
                     await session.commit()
-                except Exception:  # noqa: BLE001 - one bad source never stops the loop
+                except Exception as exc:  # noqa: BLE001 - one bad source never stops the loop
                     await session.rollback()
-                    logger.warning("scheduled scan failed for source %s", source.id)
-            # US-203: after scans, drain the processing queue (T-S2-4 workers).
-            await drain_queue(session)
-            await session.commit()
+                    logger.warning(
+                        "scheduled scan failed for source %s (%s): %s",
+                        source_id,
+                        source_path,
+                        exc,
+                    )
         finally:
+            # US-203: draining must happen even when a scan above failed. This
+            # used to sit after the per-source loop, so any exception that
+            # escaped it skipped the drain entirely - and the tick is the only
+            # thing that drains the queue, so assets queued by a manifest sync
+            # or an upload sat unprocessed until someone scanned successfully.
+            # It runs in its own try so a drain error cannot skip the unlock.
+            try:
+                await drain_queue(session)
+                await session.commit()
+            except Exception:  # noqa: BLE001 - a failed drain retries next tick
+                await session.rollback()
+                logger.exception("queue drain failed")
             # Advisory locks are session-scoped, so this also releases on
             # disconnect; releasing explicitly keeps it tied to the tick.
             await session.execute(
