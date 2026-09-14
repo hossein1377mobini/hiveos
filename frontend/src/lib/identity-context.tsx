@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react"
 
-import { api } from "@/api/client"
+import { api, getToken } from "@/api/client"
 import type { SessionIdentity } from "@/lib/session"
 
 /**
@@ -29,6 +29,12 @@ export function SessionIdentityProvider({
 
   useEffect(() => {
     if (initial) return
+    // No token, no identity to read - and asking anyway is not merely wasted
+    // work. The probe answers 401, and the shared API client answers a 401 by
+    // sending the browser to /login. That is what ejected a user who had just
+    // created an organization and was halfway through signup: /register and
+    // /owner are exactly the routes where nobody is signed in yet.
+    if (!getToken()) return
     let cancelled = false
     void (async () => {
       try {

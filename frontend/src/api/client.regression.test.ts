@@ -1,4 +1,4 @@
-﻿import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { api, clearToken } from "./client"
 
@@ -58,6 +58,20 @@ describe("api client 401 handling", () => {
     expect(location.assign).not.toHaveBeenCalled()
     location.restore()
   })
+
+  /**
+   * Signup runs entirely without a session until the owner account is created,
+   * so any 401 raised while the user is on those screens must not eject them.
+   */
+  for (const path of ["/register", "/owner", "/login"]) {
+    it(`does not redirect away from ${path}`, async () => {
+      stubFetch()
+      const location = stubLocation(path)
+      await expect(api("GET", "/auth/onboarding-status")).rejects.toBeTruthy()
+      expect(location.assign).not.toHaveBeenCalled()
+      location.restore()
+    })
+  }
 
   it("still sends an organization user to the login screen", async () => {
     stubFetch()

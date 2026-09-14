@@ -94,13 +94,23 @@ export async function api<T>(
     // and this line sent the browser away. Purely client-side: a real
     // organization 401 outside /admin still lands on /login.
     const path = window.location.pathname;
-    const insideAdmin = path === "/admin" || path.startsWith("/admin/");
+    // Two surfaces must never be bounced to /login:
+    //  - the admin panel, which has its own login and its own token;
+    //  - the public signup screens (login/register/owner), where nobody is
+    //    signed in by definition and a stray probe must not eject the user
+    //    mid-flow.
+    const redirectable =
+      path !== "/login" &&
+      path !== "/register" &&
+      path !== "/owner" &&
+      path !== "/admin" &&
+      !path.startsWith("/admin/");
     if (
       response.status === 401 &&
       ["AUTH_REQUIRED", "SESSION_EXPIRED", "SESSION_REVOKED"].includes(error.code)
     ) {
       clearToken();
-      if (!insideAdmin && path !== "/login") window.location.assign("/login");
+      if (redirectable) window.location.assign("/login");
     }
     throw new ApiError(
       response.status,
