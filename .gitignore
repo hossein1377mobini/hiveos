@@ -30,7 +30,13 @@ deploy/_wheels/
 # Exported int8 ONNX models (~2.6GB). Built by
 # backend/scripts/export_onnx_models.py and bind-mounted at /opt/models on the
 # server — never committed, never baked into an image.
-models/
+#
+# Anchored to the repository root on purpose. The bare pattern 'models/' matches
+# at every depth, so it also swallowed backend/backend/models/agent.py: that file
+# was present on disk, so the suite passed locally, and absent from git, so CI
+# died on "No module named 'backend.models.agent'". Matching only the top-level
+# export directory is what the comment above always intended.
+/models/
 
 # DSH plugin memory
 .dsh-project-memory/
