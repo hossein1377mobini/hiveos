@@ -28,7 +28,27 @@ audit_session_factory = async_sessionmaker(audit_engine, expire_on_commit=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency: request-scoped transaction (commit-on-success)."""
+    """FastAPI dependency: request-scoped transaction (commit-on-success).
+
+    Callers must declare this with ``Depends(get_db, scope="function")``.
+
+    FastAPI changed the default for ``yield`` dependencies in 0.106: the code
+    after ``yield`` now runs when the *request* scope exits, which is AFTER the
+    response has already been handed to the client. With the default, a client
+    that receives a success response and immediately issues the next call can
+    reach the server before the row is committed and be told it does not exist.
+
+    Reproduced against staging before the fix: POST /auth/register-organization
+    answered 200 with an organization id, and POST /auth/owner on that id
+    answered 404 ORGANIZATION_NOT_FOUND in roughly one attempt in twelve, with
+    no delay between them. The same race applies to every endpoint that creates
+    a row the client is expected to use next.
+
+    ``scope="function"`` commits before the response is sent, so a 2xx again
+    means "durably stored". It is declared at each call site rather than here
+    because the scope is a property of how the dependency is used, not of the
+    generator itself.
+    """
     async with session_factory() as session:
         try:
             yield session

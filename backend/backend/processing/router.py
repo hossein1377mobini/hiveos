@@ -19,7 +19,7 @@ _rate_limit = rate_limit_dependency(_processing_limiter)
 
 @router.get("/jobs", dependencies=[Depends(_rate_limit)])
 async def list_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-203: the caller's most recent processing jobs."""
     return ok({"jobs": await list_jobs(session, auth.organization)})
@@ -29,7 +29,7 @@ async def list_endpoint(
 async def get_endpoint(
     job_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-203: one job (tenant-isolated)."""
     return ok(await get_job(session, auth.organization, job_id))
@@ -39,7 +39,7 @@ async def get_endpoint(
 async def retry_endpoint(
     job_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-203 FR-008 / scenario 4: retry a failed job."""
     return ok(await retry_job(session, auth.organization, job_id))
@@ -49,7 +49,7 @@ async def retry_endpoint(
 async def cancel_endpoint(
     job_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-214 (T-S2-3): cancel a queued/pending/retrying job."""
     return ok(await cancel_job(session, auth.organization, job_id))

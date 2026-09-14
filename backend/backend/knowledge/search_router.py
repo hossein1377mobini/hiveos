@@ -26,7 +26,7 @@ class SearchBody(BaseModel):
 async def search_endpoint(
     body: SearchBody,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-227: semantic search scoped to the caller's organization."""
     return ok(await semantic_search(session, auth.organization.id, body.query, body.top_k))

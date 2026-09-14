@@ -1,4 +1,4 @@
-"""Bootstrap endpoints (dev-guidelines §۴.۲): /api/v1/auth/....
+"""Bootstrap endpoints (dev-guidelines Ã‚Â§Ã›Â´.Ã›Â²): /api/v1/auth/....
 
 - POST /api/v1/auth/register-organization  (US-001 merged path)
 - POST /api/v1/auth/owner                  (US-002)
@@ -61,7 +61,7 @@ def _ok(data: dict) -> dict:
 
 @router.post("/register-organization", dependencies=[Depends(_rate_limit)])
 async def create_organization(
-    payload: RegisterOrganizationRequest, session: AsyncSession = Depends(get_db)
+    payload: RegisterOrganizationRequest, session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-001 scenario 1: create organization + workspace, then redirect to owner step."""
     result = await register_organization(session, payload)
@@ -71,7 +71,7 @@ async def create_organization(
 
 @router.post("/owner", dependencies=[Depends(_rate_limit)])
 async def create_owner(
-    payload: RegisterOwnerRequest, session: AsyncSession = Depends(get_db)
+    payload: RegisterOwnerRequest, session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-002 scenario 1: create owner account, assign role, issue initial session."""
     result = await register_owner(session, payload)
@@ -82,7 +82,7 @@ async def create_owner(
 @router.get("/username-available")
 async def check_username(
     username: str = Query(min_length=1, max_length=50),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     result = await username_available(session, username)
     checked = UsernameAvailability(**result)
@@ -91,7 +91,7 @@ async def check_username(
 
 @router.post("/send-otp", dependencies=[Depends(_rate_limit)])
 async def send_otp_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-003 scenario 1: send the owner-verification OTP to the session user's mobile."""
     result = await send_otp(
@@ -103,7 +103,7 @@ async def send_otp_endpoint(
 
 @router.post("/resend-otp", dependencies=[Depends(_rate_limit)])
 async def resend_otp_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-003 scenario 3: resend after cooldown / expiry; new code invalidates the old one."""
     result = await send_otp(
@@ -117,7 +117,7 @@ async def resend_otp_endpoint(
 async def verify_otp_endpoint(
     payload: VerifyOtpRequest,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-003 FR-003: activate owner + organization; session slides to a fresh TTL."""
     result = await verify_otp(session, auth.user, auth.organization, payload.code)
@@ -131,7 +131,7 @@ async def verify_otp_endpoint(
 
 
 @router.post("/login", dependencies=[Depends(_rate_limit)])
-async def login_endpoint(payload: LoginRequest, session: AsyncSession = Depends(get_db)) -> dict:
+async def login_endpoint(payload: LoginRequest, session: AsyncSession = Depends(get_db, scope="function")) -> dict:
     """US-009 scenarios 1/2/3: login with lockout; errors stay generic (no field disclosure)."""
     result = await login_service(session, payload.username, payload.password)
     logged_in = LoginResponse(
@@ -144,7 +144,7 @@ async def login_endpoint(payload: LoginRequest, session: AsyncSession = Depends(
 
 @router.post("/logout", dependencies=[Depends(_rate_limit)])
 async def logout_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-009: revoke the caller's session; later use returns 401 SESSION_REVOKED."""
     await logout_service(session, auth.session)
@@ -153,7 +153,7 @@ async def logout_endpoint(
 
 @router.post("/password/reset-request", dependencies=[Depends(_rate_limit)])
 async def password_reset_request(
-    payload: PasswordResetRequest, session: AsyncSession = Depends(get_db)
+    payload: PasswordResetRequest, session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-010: generic response whether or not the mobile is registered."""
     result = await send_reset_request(session, payload.mobile)
@@ -162,7 +162,7 @@ async def password_reset_request(
 
 @router.post("/password/reset-verify", dependencies=[Depends(_rate_limit)])
 async def password_reset_verify(
-    payload: PasswordResetVerify, session: AsyncSession = Depends(get_db)
+    payload: PasswordResetVerify, session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-010: OTP check step; the code is consumed only at reset time."""
     result = await verify_reset_code(session, payload.mobile, payload.code)
@@ -171,7 +171,7 @@ async def password_reset_verify(
 
 @router.post("/password/reset", dependencies=[Depends(_rate_limit)])
 async def password_reset_endpoint(
-    payload: PasswordReset, session: AsyncSession = Depends(get_db)
+    payload: PasswordReset, session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-010 FR-003/FR-004: new password + revoke all active sessions."""
     result = await reset_password(
@@ -182,12 +182,12 @@ async def password_reset_endpoint(
 
 @router.get("/onboarding-status")
 async def onboarding_status_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-007 C2/C3: resume point + pending expiry, applied on read.
 
     Also returns the caller's display identity (H1/D10): without it the app shell
-    had nothing to show but a hardcoded «مدیر».
+    had nothing to show but a hardcoded Ã‚Â«Ã™â€¦Ã˜Â¯Ã›Å’Ã˜Â±Ã‚Â».
     """
     result = await onboarding_status(session, auth.organization, auth.user)
     return _ok(result)

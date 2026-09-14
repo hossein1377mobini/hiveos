@@ -70,7 +70,7 @@ class KnowledgeSourceStatus(BaseModel):
 async def register_endpoint(
     payload: KnowledgeSourceCreate,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-201 scenario 1/2: validate + register the ingestion folder."""
     result = await register_folder_source(session, auth.organization, payload.path)
@@ -79,7 +79,7 @@ async def register_endpoint(
 
 @router.get("", dependencies=[Depends(_rate_limit)])
 async def get_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-201: the (single) knowledge source of the caller's organization."""
     result = await get_source(session, auth.organization)
@@ -91,7 +91,7 @@ async def update_status_endpoint(
     source_id: uuid.UUID,
     payload: KnowledgeSourceStatus,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-201 FR-008: disable / re-enable the source (scenario 4)."""
     result = await set_source_status(session, auth.organization, source_id, payload.status)
@@ -102,7 +102,7 @@ async def update_status_endpoint(
 async def scan_endpoint(
     source_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-202 FR-003 / scenario 4: Scan Now (manual scan run)."""
     result = await scan_source(session, auth.organization, source_id)
@@ -113,7 +113,7 @@ async def scan_endpoint(
 async def scan_history_endpoint(
     source_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-202 FR-009 (Amendment 2, C11): last N scans of one source."""
     return ok({"history": await scan_history(session, auth.organization, source_id)})
@@ -123,7 +123,7 @@ async def scan_history_endpoint(
 async def register_client_folder_endpoint(
     payload: ClientFolderCreate,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-007 (cloud v0.1): register the folder the Windows client watches.
 
@@ -136,7 +136,7 @@ async def register_client_folder_endpoint(
 
 @router.get("/client-folder/sync-plan", dependencies=[Depends(_rate_limit)])
 async def client_folder_sync_plan_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """Auto-sync cadence (PO request): the client polls, the server decides.
 
@@ -150,7 +150,7 @@ async def client_folder_sync_plan_endpoint(
 
 @router.get("/client-folder/manifest", dependencies=[Depends(_rate_limit)])
 async def client_folder_manifest_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """What the client needs to decide which files to send: the current assets."""
     from backend.models import KnowledgeAsset
@@ -187,7 +187,7 @@ async def client_folder_manifest_endpoint(
 async def client_folder_sync_endpoint(
     payload: ManifestSync,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-202 parity for a client folder: reconcile the manifest the client sent."""
     result = await sync_client_manifest(
@@ -203,7 +203,7 @@ async def client_folder_upload_endpoint(
     asset_id: uuid.UUID,
     file: Annotated[UploadFile, File()],
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """The bytes for one manifest entry (the server never sees the folder)."""
     result = await upload_client_file(session, auth.organization, asset_id, file)
@@ -214,7 +214,7 @@ async def client_folder_upload_endpoint(
 async def upload_endpoint(
     files: Annotated[list[UploadFile], File()],
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-201 FR-009 (Amendment 2): multi-file direct upload -> queued assets."""
     result = await upload_assets(session, auth.organization, auth.user.id, files)
@@ -225,7 +225,7 @@ async def upload_endpoint(
 async def assets_list_endpoint(
     status: str = "active",
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-007 FR-005 + US-241 FR-003: asset list (status=active|deleted)."""
     return ok({"assets": await list_assets(session, auth.organization, status)})
@@ -235,7 +235,7 @@ async def assets_list_endpoint(
 async def asset_classify_endpoint(
     asset_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-205: classify + extract one asset on demand."""
     return ok(await classify_single_asset(session, auth.organization, asset_id))
@@ -245,7 +245,7 @@ async def asset_classify_endpoint(
 async def asset_classification_endpoint(
     asset_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-205: read the classification of one asset."""
     return ok(await get_classification(session, auth.organization, asset_id))
@@ -255,7 +255,7 @@ async def asset_classification_endpoint(
 async def asset_chunks_endpoint(
     asset_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-211: chunks of the asset's current version."""
     return ok(await list_asset_chunks(session, auth.organization, asset_id))
@@ -265,7 +265,7 @@ async def asset_chunks_endpoint(
 async def asset_metadata_endpoint(
     asset_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-208: the pipeline metadata bag."""
     return ok(await get_asset_metadata(session, auth.organization, asset_id))
@@ -275,7 +275,7 @@ async def asset_metadata_endpoint(
 async def asset_delete_endpoint(
     asset_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-241: soft delete an uploaded document."""
     result = await soft_delete_asset(session, auth.organization, auth.user.id, asset_id)

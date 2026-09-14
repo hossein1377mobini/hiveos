@@ -24,7 +24,7 @@ class ChargeBody(BaseModel):
 @router.get("", dependencies=[Depends(_rate_limit)])
 async def wallet_endpoint(
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-1203 AC1: balance + recent transactions (blocked flag for the banner)."""
     return ok(await wallet.get_wallet_state(session, auth.organization.id))
@@ -34,7 +34,7 @@ async def wallet_endpoint(
 async def charge_endpoint(
     body: ChargeBody,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-1203 AC2: mock charge (payment gateway lands with US-1204 UI)."""
     return ok(await wallet.charge(session, auth.organization.id, body.amount))
@@ -51,7 +51,7 @@ class ChargeRequestBody(BaseModel):
 async def charge_request_endpoint(
     body: ChargeRequestBody,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """User files a charge request; the System Admin approves it in the panel."""
     data = await wallet.create_charge_request(

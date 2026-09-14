@@ -18,7 +18,7 @@ _rate_limit = rate_limit_dependency(_workspace_limiter)
 
 @router.post("/initialize", dependencies=[Depends(_rate_limit)])
 async def initialize_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-004 scenario 1: idempotent initialization of the primary workspace."""
     result = await initialize_workspace(session, auth.organization)

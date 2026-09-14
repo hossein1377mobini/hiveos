@@ -30,7 +30,7 @@ class AuthContext:
 
 
 async def get_auth_context(
-    request: Request, db: AsyncSession = Depends(get_db)
+    request: Request, db: AsyncSession = Depends(get_db, scope="function")
 ) -> AuthContext:
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer "):

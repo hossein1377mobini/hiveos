@@ -44,7 +44,7 @@ class SettingsBody(BaseModel):
 
 
 class SendMessageBody(BaseModel):
-    # US-09.9.1: citations belong to ASSISTANT messages (RG-07) — a USER
+    # US-09.9.1: citations belong to ASSISTANT messages (RG-07) â€” a USER
     # payload carrying them is rejected outright.
     model_config = ConfigDict(extra="forbid")
 
@@ -55,7 +55,7 @@ class SendMessageBody(BaseModel):
 async def create_session_endpoint(
     body: CreateSessionBody,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.1.1: create a chat session."""
     return ok(
@@ -73,7 +73,7 @@ async def list_sessions_endpoint(
     page: int = 1,
     page_size: int = 20,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.1.2: filtered, paginated session list."""
     return ok(
@@ -96,7 +96,7 @@ async def list_sessions_endpoint(
 async def get_session_endpoint(
     session_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.1.3: session details (404 for deleted)."""
     return ok(
@@ -109,7 +109,7 @@ async def update_settings_endpoint(
     session_id: uuid.UUID,
     body: SettingsBody,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.1.4: update session settings (optimistic lock)."""
     return ok(
@@ -128,7 +128,7 @@ async def update_settings_endpoint(
 async def archive_endpoint(
     session_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.1.5: archive a session."""
     return ok(
@@ -142,7 +142,7 @@ async def archive_endpoint(
 async def unarchive_endpoint(
     session_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.1.5: unarchive a session."""
     return ok(
@@ -156,7 +156,7 @@ async def unarchive_endpoint(
 async def delete_session_endpoint(
     session_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.1.6 (v0.1): soft delete."""
     return ok(
@@ -169,7 +169,7 @@ async def send_message_endpoint(
     session_id: uuid.UUID,
     body: SendMessageBody,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> dict:
     """US-09.9.1: append a USER message (Agent reply lands via T-S3-4)."""
@@ -195,7 +195,7 @@ async def list_messages_endpoint(
     before: int | None = None,
     after: int | None = None,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.9.2: paginated message history."""
     return ok(
@@ -217,7 +217,7 @@ async def list_messages_endpoint(
 async def create_stream_endpoint(
     session_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-09.2.1: open an SSE stream session for an active chat session."""
     await service.authorize_session(session, auth.organization.id, auth.user.id, session_id)
@@ -245,7 +245,7 @@ async def stream_events_endpoint(
     session_id: uuid.UUID,
     stream_id: str,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> StreamingResponse:
     """US-09.2.3: SSE event stream (started/chunk/completed/error frames)."""
     await service.authorize_session(session, auth.organization.id, auth.user.id, session_id)

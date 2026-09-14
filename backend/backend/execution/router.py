@@ -32,7 +32,7 @@ class CreateExecutionBody(BaseModel):
 async def create_execution_endpoint(
     body: CreateExecutionBody,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> dict:
     """US-301: create a validated execution (idempotent via header)."""
@@ -53,7 +53,7 @@ async def list_executions_endpoint(
     page: int = 1,
     page_size: int = 20,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-301: org-isolated, filterable execution list."""
     return ok(
@@ -67,7 +67,7 @@ async def list_executions_endpoint(
 async def get_execution_endpoint(
     execution_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-301: execution details (result contract)."""
     return ok(await service.get_execution(session, auth.organization.id, execution_id))
@@ -77,7 +77,7 @@ async def get_execution_endpoint(
 async def start_execution_endpoint(
     execution_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-303/304: start the execution and initialize its context."""
     return ok(
@@ -91,7 +91,7 @@ async def start_execution_endpoint(
 async def run_cycle_endpoint(
     execution_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-305/306: run the (minimal) runtime cycle to completion."""
     return ok(await service.run_cycle(session, auth.organization.id, execution_id))
@@ -101,7 +101,7 @@ async def run_cycle_endpoint(
 async def cancel_execution_endpoint(
     execution_id: uuid.UUID,
     auth: AuthContext = Depends(get_auth_context),
-    session: AsyncSession = Depends(get_db),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-301: cancel a non-terminal execution."""
     return ok(

@@ -17,7 +17,7 @@ _rate_limit = rate_limit_dependency(_brain_limiter)
 
 @router.post("/initialize", dependencies=[Depends(_rate_limit)])
 async def initialize_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db)
+    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
     """US-005 scenario 1: idempotent, transactional Brain bootstrap."""
     result = await initialize_brain(session, auth.organization)
