@@ -1,18 +1,22 @@
 """Knowledge endpoints (US-201/US-007, dev-guidelines 4.2)."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.api_errors import ApiError
 from backend.auth import AuthContext, get_auth_context
 from backend.db import get_db
 from backend.envelope import ok
 from backend.knowledge.assets import (
     classify_single_asset,
+    get_asset,
     get_asset_metadata,
     get_classification,
     list_asset_chunks,
@@ -64,6 +68,27 @@ class ManifestSync(BaseModel):
 
 class KnowledgeSourceStatus(BaseModel):
     status: str = Field(pattern="^(active|disabled)$")
+
+
+class ReportSection(BaseModel):
+    """One block of a generated report.
+
+    Rows are free-form dicts because a report's columns differ per report; the
+    cap bounds how much a single request can write to disk.
+    """
+
+    heading: str = Field(min_length=1, max_length=200)
+    kind: str = Field(default="table", pattern="^(table|bars|trend)$")
+    rows: list[dict] = Field(default_factory=list, max_length=500)
+    label_key: str | None = Field(default=None, max_length=100)
+    value_key: str | None = Field(default=None, max_length=100)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ReportCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    format: str = Field(default="html", pattern="^(html|csv)$")
+    sections: list[ReportSection] = Field(min_length=1, max_length=20)
 
 
 @router.post("", dependencies=[Depends(_rate_limit)])
@@ -210,6 +235,73 @@ async def client_folder_upload_endpoint(
     return ok(result)
 
 
+@assets_router.post("/reports", dependencies=[Depends(_rate_limit)])
+async def create_report_endpoint(
+    body: ReportCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db, scope="function"),
+) -> dict:
+    """PO request: a requested report is built inside the system and saved to
+    the user's files.
+
+    The caller supplies the sections (already-computed rows, not a query), so
+    this endpoint cannot be turned into an arbitrary SQL surface, and the shape
+    of what a report may contain stays fixed: heading, kind, rows.
+
+    Both formats are produced from the same sections. HTML carries the charts;
+    CSV carries the numbers for anyone who wants to re-analyse them. Only the
+    requested one is written to disk - writing both would double the quota cost
+    of every report and leave a file the user never asked for.
+    """
+    from backend.knowledge.reporting import (
+        render_csv_report,
+        render_html_report,
+        save_report,
+    )
+
+    organization = auth.organization
+    if organization is None:
+        raise ApiError(404, "ORGANIZATION_NOT_FOUND", "Organization not found.")
+
+    sections = [section.model_dump() for section in body.sections]
+    generated_at = datetime.now(UTC)
+
+    if body.format == "csv":
+        content = render_csv_report(sections)
+        if not content:
+            raise ApiError(400, "REPORT_EMPTY", "A CSV report needs at least one table section.")
+        extension = "csv"
+    else:
+        content = render_html_report(
+            title=body.title,
+            organization_name=organization.name,
+            sections=sections,
+            generated_at=generated_at,
+        )
+        extension = "html"
+
+    asset = await save_report(
+        session,
+        organization=organization,
+        title=body.title,
+        content=content,
+        extension=extension,
+        user_id=auth.user.id,
+        detail={"format": body.format, "sections": len(sections)},
+    )
+    await session.commit()
+
+    return ok(
+        {
+            "id": str(asset.id),
+            "name": asset.name,
+            "size_bytes": asset.size_bytes,
+            "extension": asset.extension,
+            "status": asset.status,
+        }
+    )
+
+
 @assets_router.post("/upload", dependencies=[Depends(_rate_limit)])
 async def upload_endpoint(
     files: Annotated[list[UploadFile], File()],
@@ -269,6 +361,45 @@ async def asset_metadata_endpoint(
 ) -> dict:
     """US-208: the pipeline metadata bag."""
     return ok(await get_asset_metadata(session, auth.organization, asset_id))
+
+
+@assets_router.get("/{asset_id}/download", dependencies=[Depends(_rate_limit)])
+async def asset_download_endpoint(
+    asset_id: uuid.UUID,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db, scope="function"),
+):
+    """Stream one stored asset back to its owning organization.
+
+    Generated reports and charts are written to disk as KnowledgeAssets, but
+    until now nothing could read the bytes back out: the list endpoint returns
+    metadata only, so a report the agent produced was unreachable from the UI.
+    This is the other half of report generation.
+
+    The path is read from the row, which was written by our own storage layer
+    under the organization's directory. It is re-checked against that directory
+    before the file is opened anyway, because a path column is still input.
+    """
+    from pathlib import Path
+
+    from backend.knowledge.assets import _storage_dir
+
+    asset = await get_asset(session, auth.organization, asset_id)
+    if asset is None:
+        raise ApiError(404, "ASSET_NOT_FOUND", "The asset does not exist.")
+
+    directory = Path(_storage_dir(auth.organization.id)).resolve()
+    target = Path(asset.storage_path or "").resolve()
+    # Containment check: an asset row must never be able to point at a file
+    # outside the organization's own directory.
+    if target.parent != directory or not target.is_file():
+        raise ApiError(404, "ASSET_FILE_MISSING", "The asset file is not available.")
+
+    return FileResponse(
+        target,
+        filename=asset.name or target.name,
+        media_type="application/octet-stream",
+    )
 
 
 @assets_router.delete("/{asset_id}", dependencies=[Depends(_rate_limit)])

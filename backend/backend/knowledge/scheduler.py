@@ -140,3 +140,26 @@ async def stop_scheduler(app) -> None:
             await task
         except asyncio.CancelledError:
             pass
+    await dispose_engine()
+
+
+async def dispose_engine() -> None:
+    """Drop the cached engine and its pool.
+
+    The engine is cached for the process lifetime, and its pooled asyncpg
+    connections belong to the loop that opened them. Nothing released them
+    before, so the pool outlived the loop: on shutdown the connections were
+    finalised against a closed loop and the interpreter died with an access
+    violation instead of exiting 0. That surfaced as a non-zero pytest exit on
+    Windows even though every test had passed, which would have failed CI.
+
+    Disposing here is also the correct production behaviour - the pool is
+    closed deliberately rather than left to the garbage collector - and it makes
+    the next call to _engine() build a fresh pool bound to the current loop.
+    """
+    global _ENGINE, _ENGINE_LOOP
+    engine = _ENGINE
+    _ENGINE = None
+    _ENGINE_LOOP = None
+    if engine is not None:
+        await engine.dispose()

@@ -79,9 +79,21 @@ def test_brain_initialize_success(client):
     assert brain.embedding_provider == "fastembed-local" and brain.embedding_model == "bge-m3"
     assert brain.default_language == "fa-IR"  # inherited from workspace settings (FR-005)
     assert repo == "ready" and index.backend == "pgvector" and index.status == "created"
-    # US-005 FR-005: the prompt is the rendered US-1609 template
-    assert "هوش سازمان" in prompt and "قواعد پاسخ‌گویی" in prompt
+    # US-005 FR-005: the prompt is the rendered US-1609 template.
+    #
+    # The section heading asserted here used to be "قواعد پاسخ‌گویی". The
+    # template was rewritten (PO request) into named sections - identity,
+    # grounding, style, format, language, confidentiality - so the old heading
+    # no longer exists. Pinning a heading is what made that rewrite look like a
+    # regression; asserting the rules themselves survives an edit that keeps
+    # the behaviour, which is what this test is actually about.
+    assert "هوش سازمان" in prompt
+    assert "مبنای پاسخ" in prompt  # the grounding rules section
     assert "{business_description}" not in prompt  # placeholder was replaced
+    # The template is multi-section, not the old one-liner fallback. A prompt
+    # that lost its sections would still contain the organization name, so the
+    # count is the assertion that catches a collapse back to a single sentence.
+    assert prompt.count("\n") > 10
     assert len(set(events)) == 5  # every story event exactly once
 
 

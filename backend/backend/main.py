@@ -13,6 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from backend.admin import router as admin_router
+
+# Explicit module path: 'from backend.agent import router' resolves to the
+# submodule, not to the APIRouter object inside it.
+from backend.agent.router import router as agent_router
 from backend.api_errors import install_error_handlers
 from backend.brain import router as brain_router
 from backend.chat import router as chat_router
@@ -80,6 +84,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(execution_router, prefix="/v1")
     api.include_router(wallet_router, prefix="/v1")
     api.include_router(admin_router, prefix="/v1")
+    # PO 2026-09: per-user agent surface (my agent, my memory, my tools, my
+    # trace). Mounted last so it cannot shadow an earlier path.
+    api.include_router(agent_router, prefix="/v1")
     app.include_router(api)
 
     return app

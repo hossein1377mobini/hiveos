@@ -1,9 +1,10 @@
-import { CircleAlert, FileText, FolderOpen, RefreshCw, Search, UploadCloud, X } from "lucide-react";
+import { CircleAlert, Download, FileText, FolderOpen, RefreshCw, Search, UploadCloud, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, api } from "../api/client";
+import { API_BASE, ApiError, api, getToken } from "../api/client";
 import { persianError } from "../api/errors";
 import { DomainStatus } from "../components/ui/domain-status";
 import { Banner } from "../components/ui/banner";
+import { Button } from "../components/ui/button";
 import { LoadingButton } from "../components/ui/button-loading";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { DialogBody } from "../components/ui/dialog-body";
@@ -210,6 +211,38 @@ export default function Knowledge() {
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "دسته‌بندی ناموفق بود.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Fetch the bytes and hand them to the browser.
+   *
+   * The download route is authenticated, so a plain <a href> would arrive
+   * without the bearer token. Fetching through the api client and turning the
+   * response into an object URL keeps the request authenticated and still ends
+   * in the browser's own download UI, with the server's filename.
+   */
+  async function download(assetId: string, name: string) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const token = getToken();
+      const response = await fetch(`${API_BASE}/knowledge-assets/${assetId}/download`, {
+        headers: token ? { Authorization: "Bearer " + token } : {},
+      });
+      if (!response.ok) throw new Error("دانلود فایل ناموفق بود.");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "دانلود فایل ناموفق بود.");
     } finally {
       setBusy(false);
     }
@@ -447,6 +480,17 @@ export default function Knowledge() {
                     <AssetProgress asset={a} />
                   </TableCell>
                   <TableCell className="p-3 pe-5 text-end">
+                    {a.status === "ready" && (
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={`دانلود ${a.name}`}
+                        disabled={busy}
+                        onClick={() => void download(a.id, a.name)}
+                      >
+                        <Download className="size-4" aria-hidden />
+                      </Button>
+                    )}
                     {a.status === "queued" && (
                       <LoadingButton variant="secondary" size="xs" onClick={() => classify(a.id)} disabled={busy}>
                         دسته‌بندی

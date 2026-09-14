@@ -7,6 +7,7 @@ real reasoning/retrieval/output steps land with T-S3-4.
 """
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -15,9 +16,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend import llm
 from backend.api_errors import ApiError
-from backend.audit import record_audit
+from backend.audit import record_audit, record_audit_durable
 from backend.config import get_settings
-from backend.models import AgentExecution, ChatMessage, ChatSession, Organization
+from backend.models import (
+    AgentExecution,
+    AgentToolInvocation,
+    ChatMessage,
+    ChatSession,
+    Organization,
+)
+
+logger = logging.getLogger(__name__)
 
 CANCELLABLE = ("PENDING", "STARTING", "RUNNING")
 TERMINAL = ("CANCELLED", "COMPLETED", "FAILED")
@@ -204,10 +213,10 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         execution.error_message = "The execution cycle exceeded its time budget."
         execution.status = "FAILED"
         execution.completed_at = _utc_now()
-        await record_audit(
-            session,
+        await record_audit_durable(
             "execution.failed",
             organization_id=organization_id,
+            actor_user_id=execution.requested_by,
             entity_type="agent_execution",
             entity_id=execution.id,
             detail={"error_code": "EXECUTION_TIMEOUT"},
@@ -218,10 +227,10 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         execution.error_message = error.message
         execution.status = "FAILED"
         execution.completed_at = _utc_now()
-        await record_audit(
-            session,
+        await record_audit_durable(
             "execution.failed",
             organization_id=organization_id,
+            actor_user_id=execution.requested_by,
             entity_type="agent_execution",
             entity_id=execution.id,
             detail={"error_code": error.code},
@@ -252,36 +261,124 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         if chat is not None:
             requested_model = (chat.settings or {}).get("model")
     model = await llm.aroute_model(session, requested_model)
+
+    # --- Per-user agent (PO 2026-09) ---------------------------------------
+    # Everything below is additive: this user's agent, their recalled memories,
+    # and the tool loop. If any of it fails the answer is still produced, because
+    # a memory lookup is an enhancement and must never be the reason a user's
+    # question goes unanswered.
+    from backend.agent import memory as agent_memory
+    from backend.agent.tools import registry as tool_registry
+    from backend.agent.tools.registry import ToolContext
+
+    user_id = execution.requested_by
+    agent = await agent_memory.ensure_agent(session, organization_id, user_id)
+
+    recalled: list = []
+    memory_block = ""
     try:
-        generated = await llm.agenerate(session, model, prompt=query, context=context)
+        recalled = await agent_memory.recall(session, organization_id, user_id, query)
+        memory_block = agent_memory.render_memories(recalled)
+        await agent_memory.mark_recalled(session, [memory.id for memory in recalled])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("memory recall failed for %s: %s", execution.id, exc)
+
+    from backend.agent.tools import chart_tool, report_tool  # noqa: F401  (registration)
+
+    tool_ctx = ToolContext(
+        session=session,
+        organization_id=organization_id,
+        user_id=user_id,
+        execution_id=execution.id,
+        chat_session_id=execution.chat_session_id,
+    )
+    # The agent's allowlist is authoritative: a tool not listed is not sent to
+    # the provider at all, so the model cannot call it by hallucinating a name.
+    allowed = set(agent.allowed_tools or [])
+    if not allowed:
+        allowed = {spec.name for spec in tool_registry.all_specs()}
+    active_schemas = [spec for spec in tool_registry.all_specs() if spec.name in allowed]
+
+    # context_snapshot was created for exactly this and had never been written:
+    # it records what the agent saw, so a surprising answer can be traced to the
+    # memories that produced it.
+    execution.context_snapshot = {
+        "memories": [{"id": str(m.id), "kind": m.kind, "content": m.content} for m in recalled],
+        "tools_available": [spec.name for spec in active_schemas],
+        "agent_id": str(agent.id),
+    }
+    try:
+        generated = await llm.agenerate(
+            session,
+            model,
+            prompt=query,
+            context=context,
+            organization_id=organization_id,
+            tool_ctx=tool_ctx if active_schemas else None,
+            persona=agent.persona or "",
+            extra_system=memory_block,
+        )
     except ApiError as error:
         # US-313: aggregator/provider failures fail the execution cleanly.
         execution.error_code = error.code
         execution.error_message = error.message
         execution.status = "FAILED"
         execution.completed_at = _utc_now()
-        await record_audit(
-            session,
+        await record_audit_durable(
             "execution.failed",
             organization_id=organization_id,
+            actor_user_id=execution.requested_by,
             entity_type="agent_execution",
             entity_id=execution.id,
             detail={"error_code": error.code},
         )
         return _payload(execution)
 
-    if hits:
-        text = llm.mask_pii(f"بر اساس دانش سازمان:\n\n{context}\n\n{generated['text']}")
-    else:
-        text = llm.mask_pii("در دانش سازمان سند قابل‌استنادی یافت نشد؛ پاسخ بدون منبع است.\n\n" + generated["text"])
-
+    # The answer text is the model's answer, and nothing else.
+    #
+    # This used to prepend the retrieved passages, and separately prepend a
+    # "no source found" note, to whatever the model produced. The chat pane
+    # already renders provenance from the structured `citations` field, so the
+    # user read the same passages twice: once as the opening block of the
+    # assistant bubble, and again in the source list directly under it. On a
+    # long answer the duplicated block was the majority of the message, which
+    # is what the PO reported as "the AI text repeats one part at the start".
+    #
+    # Grounding belongs in the prompt (already sent as `context`); provenance
+    # belongs in `citations` (a field the UI renders as UI). Neither belongs
+    # concatenated into prose the user must scroll past. An answer with no hits
+    # still reports its provenance through an empty citation list.
+    text = llm.mask_pii(generated["text"])
     # US-1201/1202 metering: usage rides on the execution row.
     execution.usage = {
         "provider": generated["provider"],
         "model": generated["model"],
         "tokens_in": generated["tokens_in"],
         "tokens_out": generated["tokens_out"],
+        "tool_rounds": generated.get("tool_rounds", 0),
+        "tool_calls": len(generated.get("tool_calls") or []),
     }
+
+    # Trace every tool call the model made. This is the PO's "every action must
+    # be logged": the audit row says a generation happened, this says the agent
+    # actually built a chart, with which arguments, and how long it took.
+    for call in generated.get("tool_calls") or []:
+        session.add(
+            AgentToolInvocation(
+                organization_id=organization_id,
+                user_id=user_id,
+                agent_id=agent.id,
+                execution_id=execution.id,
+                tool_name=call.get("name") or "",
+                arguments=_truncate_json(call.get("arguments") or {}),
+                ok=bool(call.get("ok")),
+                error_message=None if call.get("ok") else "tool reported failure",
+                result_preview=None,
+                asset_id=_as_uuid((call.get("meta") or {}).get("asset_id")),
+                duration_ms=int(call.get("duration_ms") or 0),
+                round_index=int(call.get("round") or 0),
+            )
+        )
     # US-1203: atomic deduction after a successful online-model cycle.
     from backend import wallet as wallet_service
 
@@ -311,7 +408,51 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
             text,
             citations=citations,
         )
+
+    # Remember the exchange for this user's agent. After the reply is persisted
+    # so a memory can point at the message it came from, and wrapped because a
+    # failure here must not retroactively fail a completed answer.
+    try:
+        await agent_memory.remember_exchange(
+            session,
+            organization_id=organization_id,
+            user_id=user_id,
+            agent=agent,
+            question=query,
+            answer=text,
+            execution_id=execution.id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("memory extraction failed for %s: %s", execution.id, exc)
+
     return _payload(execution)
+
+
+def _truncate_json(value: Any, limit: int = 2000) -> Any:
+    """Keep a tool trace bounded. A chart tool can be handed thousands of rows
+    and the trace must not grow larger than the data it describes."""
+    import json
+
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return {"_unserialisable": True}
+    if len(encoded) <= limit:
+        return value
+    return {"_truncated": True, "_preview": encoded[:limit]}
+
+
+def _as_uuid(value: Any):
+    """Asset ids arrive from tool meta as strings; a malformed one must not
+    abort the trace write."""
+    import uuid as _uuid
+
+    if value is None:
+        return None
+    try:
+        return _uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 async def cancel_execution(

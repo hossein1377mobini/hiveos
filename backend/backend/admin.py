@@ -449,12 +449,87 @@ _ACTOR_UUID_RE = re.compile(
 )
 
 
+def _log_clauses(
+    *,
+    level: str,
+    q: str | None,
+    since: datetime | None,
+    until: datetime | None,
+    event: str | None,
+    event_prefix: str | None,
+    actor_username: str | None,
+    organization_id: str | None,
+    entity_type: str | None,
+    entity_id: str | None,
+    has_detail: bool | None,
+) -> tuple[list[str], dict]:
+    """Build the WHERE clauses and bound params for the audit query.
+
+    Shared by /logs and /logs/facets on purpose: a facet count that is computed
+    from a different predicate than the rows would offer the operator a filter
+    that returns a different set than the count promised, which is worse than
+    no facet at all.
+    """
+    clauses = ["1 = 1"]
+    params: dict = {}
+    if since is not None:
+        clauses.append("l.created_at >= :since")
+        params["since"] = since
+    if until is not None:
+        clauses.append("l.created_at <= :until")
+        params["until"] = until
+    # The level is derived, not stored: there is no severity column, so the
+    # event name is the only signal. Keep the two branches exact mirrors of each
+    # other or a row can satisfy neither and vanish from both filters.
+    if level == "error":
+        clauses.append("(l.event LIKE '%.failed%' OR l.event LIKE '%.error%')")
+    elif level == "activity":
+        clauses.append("NOT (l.event LIKE '%.failed%' OR l.event LIKE '%.error%')")
+    if q and q.strip():
+        clauses.append(
+            "(l.event ILIKE :q OR coalesce(o.name, '') ILIKE :q"
+            " OR coalesce(u.username, '') ILIKE :q)"
+        )
+        params["q"] = f"%{q.strip()}%"
+    if event and event.strip():
+        clauses.append("l.event = :event")
+        params["event"] = event.strip()
+    if event_prefix and event_prefix.strip():
+        clauses.append("l.event LIKE :event_prefix")
+        params["event_prefix"] = event_prefix.strip() + "%"
+    if actor_username and actor_username.strip():
+        clauses.append("u.username = :actor_username")
+        params["actor_username"] = actor_username.strip()
+    if organization_id and organization_id.strip():
+        clauses.append("l.organization_id = CAST(:organization_id AS uuid)")
+        params["organization_id"] = organization_id.strip()
+    if entity_type and entity_type.strip():
+        clauses.append("l.entity_type = :entity_type")
+        params["entity_type"] = entity_type.strip()
+    if entity_id and entity_id.strip():
+        clauses.append("l.entity_id = CAST(:entity_id AS uuid)")
+        params["entity_id"] = entity_id.strip()
+    if has_detail is True:
+        clauses.append("l.detail IS NOT NULL")
+    elif has_detail is False:
+        clauses.append("l.detail IS NULL")
+    return clauses, params
+
+
 @router.get("/logs", dependencies=[Depends(_rate_limit)])
 async def system_logs(
     level: str = Query(default="all", pattern="^(all|activity|error)$"),
     q: str | None = Query(default=None, max_length=200),
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
+    event: str | None = Query(default=None, max_length=100),
+    event_prefix: str | None = Query(default=None, max_length=100),
+    actor_username: str | None = Query(default=None, max_length=150),
+    organization_id: str | None = Query(default=None, max_length=64),
+    entity_type: str | None = Query(default=None, max_length=50),
+    entity_id: str | None = Query(default=None, max_length=64),
+    has_detail: bool | None = Query(default=None),
+    sort: str = Query(default="desc", pattern="^(asc|desc)$"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     authorization: str = Header(default=""),
@@ -466,27 +541,30 @@ async def system_logs(
     "what happened last week", and answering it client-side would only filter
     the current page of results - the matches on the next page would disappear
     silently, which is the worst possible behaviour for an audit trail.
+
+    The exact-value filters (event, actor, organization, entity, has_detail)
+    exist because an audit trail is read to answer "what did THIS actor do to
+    THIS object", and a substring search over a page of results cannot answer
+    that. All of them are applied server-side, so a filtered export covers the
+    whole matching set rather than one page.
     """
     await _authorized(authorization)
-    clauses = ["1 = 1"]
-    params: dict = {"limit": limit, "offset": offset}
-    if since is not None:
-        clauses.append("l.created_at >= :since")
-        params["since"] = since
-    if until is not None:
-        clauses.append("l.created_at <= :until")
-        params["until"] = until
-    if level == "error":
-        clauses.append("(l.event LIKE '%.failed%' OR l.event LIKE '%.error%')")
-    elif level == "activity":
-        clauses.append("NOT (l.event LIKE '%.failed%' OR l.event LIKE '%.error%')")
-    if q and q.strip():
-        clauses.append(
-            "(l.event ILIKE :q OR coalesce(o.name, '') ILIKE :q"
-            " OR coalesce(u.username, '') ILIKE :q)"
-        )
-        params["q"] = f"%{q.strip()}%"
+    clauses, params = _log_clauses(
+        level=level,
+        q=q,
+        since=since,
+        until=until,
+        event=event,
+        event_prefix=event_prefix,
+        actor_username=actor_username,
+        organization_id=organization_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        has_detail=has_detail,
+    )
+    params.update({"limit": limit, "offset": offset})
     where = " AND ".join(clauses)
+    direction = "ASC" if sort == "asc" else "DESC"
 
     _, factory = _shared_engine()
     async with factory() as session:
@@ -498,6 +576,12 @@ async def system_logs(
                     " LEFT JOIN hiveos.users u ON u.id = l.actor_user_id"
                     f" WHERE {where}"
                 ),
+                # The same params dict as the row query, including limit/offset,
+                # which a count never references. This is what the endpoint
+                # already did before the filter params were added, and the
+                # existing tests exercise it, so the behaviour is unchanged -
+                # keeping one dict is what guarantees the count and the rows are
+                # selected by an identical predicate.
                 params,
             )
         ).scalar_one()
@@ -509,7 +593,7 @@ async def system_logs(
                     " FROM hiveos.audit_logs l"
                     " LEFT JOIN hiveos.organizations o ON o.id = l.organization_id"
                     " LEFT JOIN hiveos.users u ON u.id = l.actor_user_id"
-                    f" WHERE {where} ORDER BY l.created_at DESC LIMIT :limit OFFSET :offset"
+                    f" WHERE {where} ORDER BY l.created_at {direction} LIMIT :limit OFFSET :offset"
                 ),
                 params,
             )
@@ -543,6 +627,292 @@ async def system_logs(
     )
 
 
+@router.get("/logs/facets", dependencies=[Depends(_rate_limit)])
+async def log_facets(
+    level: str = Query(default="all", pattern="^(all|activity|error)$"),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    actor_username: str | None = Query(default=None, max_length=150),
+    organization_id: str | None = Query(default=None, max_length=64),
+    authorization: str = Header(default=""),
+) -> dict:
+    """Distinct event names, actors and organizations within the active range.
+
+    The log view needs "which events exist" as a question, and answering it from
+    the current page of rows would only ever offer the events that happen to be
+    on that page. These counts are computed over the whole filtered set so the
+    dropdown is complete.
+
+    Each facet is computed with the OTHER filters applied but its own dimension
+    removed, which is the standard behaviour: once you have picked an actor,
+    the event list should still show every event that actor produced rather than
+    collapsing to the events that also match the event filter you have already
+    chosen. That is why the clause builder is called once per dimension here
+    instead of once for the whole query.
+
+    Capped at 100 per dimension. An audit trail with more distinct event names
+    than that is not something a dropdown should attempt to render, and the
+    free-text search stays available for the long tail.
+    """
+    await _authorized(authorization)
+
+    def _facet_clauses(**overrides):
+        merged = {
+            "level": level,
+            "q": None,
+            "since": since,
+            "until": until,
+            "event": None,
+            "event_prefix": None,
+            "actor_username": actor_username,
+            "organization_id": organization_id,
+            "entity_type": None,
+            "entity_id": None,
+            "has_detail": None,
+        }
+        merged.update(overrides)
+        return _log_clauses(**merged)
+
+    _, factory = _shared_engine()
+    async with factory() as session:
+        async def _dimension(column: str, **overrides) -> list[dict]:
+            clauses, params = _facet_clauses(**overrides)
+            where = " AND ".join(clauses)
+            rows = (
+                await session.execute(
+                    text(
+                        f"SELECT {column} AS value, count(*) AS count"
+                        " FROM hiveos.audit_logs l"
+                        " LEFT JOIN hiveos.organizations o ON o.id = l.organization_id"
+                        " LEFT JOIN hiveos.users u ON u.id = l.actor_user_id"
+                        f" WHERE {where} AND {column} IS NOT NULL"
+                        f" GROUP BY {column} ORDER BY count(*) DESC, {column} ASC LIMIT 100"
+                    ),
+                    params,
+                )
+            ).mappings().all()
+            return [{"value": row["value"], "count": int(row["count"])} for row in rows]
+
+        # The three list dimensions. Kept sequential rather than gathered
+        # because they share one AsyncSession, and an AsyncSession is not safe
+        # for concurrent use.
+        events = await _dimension("l.event")
+        actors = await _dimension("u.username", actor_username=None)
+        organizations = await _dimension("o.name", organization_id=None)
+
+    return ok({"events": events, "actors": actors, "organizations": organizations})
+
+
+
+
+@router.get("/agents", dependencies=[Depends(_rate_limit)])
+async def agents_overview(
+    status: str = Query(default="all", pattern="^(all|active|paused|archived)$"),
+    organization_id: str | None = Query(default=None, max_length=64),
+    limit: int = Query(default=100, ge=1, le=500),
+    authorization: str = Header(default=""),
+) -> dict:
+    """Every per-user agent, with what it knows and how much it has been used.
+
+    PO 2026-09: the product ships one agent per user, so the admin question is
+    "how many exist, are they used, and is any hoarding memory".
+
+    The memory and tool counts are LEFT JOIN aggregates rather than correlated
+    subqueries: a correlated subquery runs once per agent row, and the list is
+    sorted by recency, so a 500-seat organization would re-scan the memory
+    table five hundred times per page.
+    """
+    await _authorized(authorization)
+
+    clauses = ["1=1"]
+    params: dict = {"limit": limit}
+    if status != "all":
+        clauses.append("a.status = :status")
+        params["status"] = status
+    if organization_id:
+        clauses.append("a.organization_id = CAST(:organization_id AS uuid)")
+        params["organization_id"] = organization_id
+    where = " AND ".join(clauses)
+
+    _, factory = _shared_engine()
+    async with factory() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT a.id, a.organization_id, a.user_id, a.display_name,"
+                    "       a.status, a.version, a.allowed_tools, a.last_active_at,"
+                    "       a.created_at, o.name AS organization_name, u.username,"
+                    "       COALESCE(m.total, 0) AS memory_count,"
+                    "       COALESCE(m.active_count, 0) AS active_memory_count,"
+                    "       COALESCE(t.total, 0) AS tool_calls,"
+                    "       COALESCE(t.failures, 0) AS tool_failures,"
+                    "       t.last_tool_at"
+                    " FROM hiveos.user_agents a"
+                    " LEFT JOIN hiveos.organizations o ON o.id = a.organization_id"
+                    " LEFT JOIN hiveos.users u ON u.id = a.user_id"
+                    " LEFT JOIN ("
+                    "   SELECT agent_id, count(*) AS total,"
+                    "          count(*) FILTER (WHERE active) AS active_count"
+                    "   FROM hiveos.agent_memories GROUP BY agent_id"
+                    " ) m ON m.agent_id = a.id"
+                    " LEFT JOIN ("
+                    "   SELECT agent_id, count(*) AS total,"
+                    "          count(*) FILTER (WHERE NOT ok) AS failures,"
+                    "          max(created_at) AS last_tool_at"
+                    "   FROM hiveos.agent_tool_invocations GROUP BY agent_id"
+                    " ) t ON t.agent_id = a.id"
+                    f" WHERE {where}"
+                    " ORDER BY a.last_active_at DESC NULLS LAST, a.created_at DESC"
+                    " LIMIT :limit"
+                ),
+                params,
+            )
+        ).mappings().all()
+
+        totals = (
+            await session.execute(
+                text(
+                    "SELECT count(*) AS agents,"
+                    "       count(*) FILTER (WHERE status = 'active') AS active,"
+                    "       count(DISTINCT organization_id) AS organizations"
+                    " FROM hiveos.user_agents"
+                )
+            )
+        ).mappings().one()
+
+    return ok(
+        {
+            "agents": [
+                {
+                    "id": str(row["id"]),
+                    "organization_id": str(row["organization_id"]),
+                    "organization_name": row["organization_name"],
+                    "user_id": str(row["user_id"]),
+                    "username": row["username"],
+                    "display_name": row["display_name"],
+                    "status": row["status"],
+                    "version": int(row["version"]),
+                    "allowed_tools": row["allowed_tools"] or [],
+                    "memory_count": int(row["memory_count"]),
+                    "active_memory_count": int(row["active_memory_count"]),
+                    "tool_calls": int(row["tool_calls"]),
+                    "tool_failures": int(row["tool_failures"]),
+                    "last_tool_at": row["last_tool_at"],
+                    "last_active_at": row["last_active_at"],
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ],
+            "totals": {
+                "agents": int(totals["agents"]),
+                "active": int(totals["active"]),
+                "organizations": int(totals["organizations"]),
+            },
+        }
+    )
+
+
+@router.get("/agents/{agent_id}", dependencies=[Depends(_rate_limit)])
+async def agent_detail(
+    agent_id: str,
+    memory_limit: int = Query(default=50, ge=1, le=200),
+    authorization: str = Header(default=""),
+) -> dict:
+    """One agent in full: its memories, tool usage, and recent calls.
+
+    The debugging view. When a user reports that their agent "remembers
+    something wrong", the memory list with weights and hit counts is the
+    evidence - not the answer text.
+    """
+    await _authorized(authorization)
+
+    _, factory = _shared_engine()
+    async with factory() as session:
+        agent = (
+            await session.execute(
+                text(
+                    "SELECT a.*, o.name AS organization_name, u.username"
+                    " FROM hiveos.user_agents a"
+                    " LEFT JOIN hiveos.organizations o ON o.id = a.organization_id"
+                    " LEFT JOIN hiveos.users u ON u.id = a.user_id"
+                    " WHERE a.id = CAST(:agent_id AS uuid)"
+                ),
+                {"agent_id": agent_id},
+            )
+        ).mappings().one_or_none()
+        if agent is None:
+            raise ApiError(404, "AGENT_NOT_FOUND", "No such agent.")
+
+        memories = (
+            await session.execute(
+                text(
+                    "SELECT id, kind, content, weight, active, hits, misses, created_at"
+                    " FROM hiveos.agent_memories"
+                    " WHERE agent_id = CAST(:agent_id AS uuid)"
+                    " ORDER BY weight DESC, created_at DESC LIMIT :limit"
+                ),
+                {"agent_id": agent_id, "limit": memory_limit},
+            )
+        ).mappings().all()
+
+        by_tool = (
+            await session.execute(
+                text(
+                    "SELECT tool_name, count(*) AS calls,"
+                    "       count(*) FILTER (WHERE NOT ok) AS failures,"
+                    "       round(avg(duration_ms)) AS avg_ms, max(duration_ms) AS max_ms"
+                    " FROM hiveos.agent_tool_invocations"
+                    " WHERE agent_id = CAST(:agent_id AS uuid)"
+                    " GROUP BY tool_name ORDER BY calls DESC"
+                ),
+                {"agent_id": agent_id},
+            )
+        ).mappings().all()
+
+        recent = (
+            await session.execute(
+                text(
+                    "SELECT id, tool_name, ok, duration_ms, round_index,"
+                    "       asset_id, error_message, created_at"
+                    " FROM hiveos.agent_tool_invocations"
+                    " WHERE agent_id = CAST(:agent_id AS uuid)"
+                    " ORDER BY created_at DESC LIMIT 50"
+                ),
+                {"agent_id": agent_id},
+            )
+        ).mappings().all()
+
+    return ok(
+        {
+            "agent": {
+                "id": str(agent["id"]),
+                "organization_id": str(agent["organization_id"]),
+                "organization_name": agent["organization_name"],
+                "user_id": str(agent["user_id"]),
+                "username": agent["username"],
+                "display_name": agent["display_name"],
+                "persona": agent["persona"],
+                "allowed_tools": agent["allowed_tools"] or [],
+                "status": agent["status"],
+                "version": int(agent["version"]),
+                "last_active_at": agent["last_active_at"],
+                "created_at": agent["created_at"],
+            },
+            "memories": [
+                dict(row) | {"id": str(row["id"])} for row in memories
+            ],
+            "tools": [dict(row) for row in by_tool],
+            "recent_invocations": [
+                dict(row)
+                | {
+                    "id": str(row["id"]),
+                    "asset_id": str(row["asset_id"]) if row["asset_id"] else None,
+                }
+                for row in recent
+            ],
+        }
+    )
+
 def _tail_server_log(max_chars: int = 20000) -> dict:
     """The tail of the service log file, when the deployment writes one
     (uvicorn --log-config / systemd redirect). Never fatal if it is missing."""
@@ -569,7 +939,23 @@ async def get_setting(key: str, authorization: str = Header(default="")) -> dict
     await _authorized(authorization)
     if key not in SETTINGS_KEYS:
         raise ApiError(404, "SETTING_NOT_FOUND", "Unknown settings key.")
-    return ok({"key": key, "value": await _read_setting(key)})
+    payload: dict = {"key": key, "value": await _read_setting(key)}
+    if key == "prompt_template":
+        # The suggested text ships with the product, so the panel can offer
+        # "restore the suggested prompt" without hardcoding a copy in the
+        # frontend. A copy there would drift from the one the runtime actually
+        # falls back to (backend/brain/prompt_template.py), and the operator
+        # would be restoring a prompt the model never sees.
+        from backend.brain.prompt_template import (
+            DEFAULT_SYSTEM_PROMPT_TEMPLATE,
+            DEFAULT_USER_TEMPLATE,
+        )
+
+        payload["default"] = {
+            "system": DEFAULT_SYSTEM_PROMPT_TEMPLATE,
+            "user_template": DEFAULT_USER_TEMPLATE,
+        }
+    return ok(payload)
 
 
 async def _read_setting(key: str) -> dict:

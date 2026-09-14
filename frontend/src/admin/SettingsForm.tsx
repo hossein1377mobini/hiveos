@@ -1,5 +1,5 @@
 import * as React from "react"
-import { PlusIcon, Trash2Icon } from "lucide-react"
+import { PlusIcon, RotateCcwIcon, Trash2Icon } from "lucide-react"
 
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -134,10 +134,20 @@ function FieldControl({
   field,
   value,
   onChange,
+  defaults,
+  onRestoreDefault,
 }: {
   field: SettingField
   value: unknown
   onChange: (next: unknown) => void
+  /**
+   * Server-supplied shipped values, keyed by field name. Fetched rather than
+   * imported so the "suggested" text the panel restores is byte-identical to
+   * the one the runtime falls back to - a copy in the frontend would drift and
+   * the operator would be restoring a prompt the model never sees.
+   */
+  defaults: Record<string, string>
+  onRestoreDefault?: (fieldName: string) => void
 }) {
   const id = "setting-" + field.name
 
@@ -157,18 +167,40 @@ function FieldControl({
       </Select>
     )
   }
-
   if (field.kind === "multiline") {
     return (
-      <Textarea
-        id={id}
-        value={String(value ?? "")}
-        onChange={(event) => onChange(event.target.value)}
-        rows={5}
-        placeholder={field.placeholder}
-        className={cn("text-caption leading-relaxed", field.ltr && "mono")}
-        dir={field.ltr ? "ltr" : "rtl"}
-      />
+      <div className="grid gap-2">
+        <Textarea
+          id={id}
+          value={String(value ?? "")}
+          onChange={(event) => onChange(event.target.value)}
+          rows={field.rows ?? 5}
+          placeholder={field.placeholder}
+          className={cn("text-caption leading-relaxed", field.ltr && "mono")}
+          dir={field.ltr ? "ltr" : "rtl"}
+        />
+        {field.defaultFrom && onRestoreDefault && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-micro text-muted-foreground">
+              {String(value ?? "").trim() ? "متن سفارشی فعال است." : "متن پیشنهادی محصول فعال است."}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="rounded-control"
+              disabled={!defaults[field.defaultFrom]}
+              onClick={() => {
+                const suggested = defaults[field.defaultFrom!]
+                if (suggested) onChange(suggested)
+              }}
+            >
+              <RotateCcwIcon aria-hidden className="size-3.5" />
+              بازگرداندن متن پیشنهادی
+            </Button>
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -185,7 +217,6 @@ function FieldControl({
       />
     )
   }
-
   if (field.kind === "numberMap") {
     const rows = Array.isArray(value) ? (value as Array<{ key: string; value: string }>) : []
     return (
@@ -264,10 +295,13 @@ export function SettingsForm({
   definition,
   values,
   onChange,
+  defaults = {},
 }: {
   definition: SettingDefinition
   values: SettingsValues
   onChange: (next: SettingsValues) => void
+  /** Shipped values from the settings GET, used by "restore suggested". */
+  defaults?: Record<string, string>
 }) {
   // Preserve the declared order while grouping: a settings page that jumps
   // around is harder to scan than one that follows the schema.
@@ -299,6 +333,12 @@ export function SettingsForm({
                 field={field}
                 value={values[field.name]}
                 onChange={(next) => onChange({ ...values, [field.name]: next })}
+                defaults={defaults}
+                onRestoreDefault={
+                  field.defaultFrom
+                    ? () => onChange({ ...values, [field.name]: defaults[field.defaultFrom!] ?? "" })
+                    : undefined
+                }
               />
               {field.hint && (
                 <p className="text-micro leading-relaxed text-muted-foreground">{field.hint}</p>

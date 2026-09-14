@@ -8,7 +8,7 @@ machine, cancel/retry, and the read API until then.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
@@ -184,11 +184,23 @@ async def cancel_job(session: AsyncSession, organization: Organization, job_id) 
 
 
 async def count_active_jobs(session: AsyncSession, organization_id) -> int:
-    """Small helper for onboarding-status/dashboard consumers."""
-    rows = await session.execute(
-        select(ProcessingJob.id).where(
-            ProcessingJob.organization_id == organization_id,
-            ProcessingJob.status.in_(ACTIVE_STATUSES),
-        )
+    """Small helper for onboarding-status/dashboard consumers.
+
+    Counted in the database rather than by materializing rows: the previous
+    version selected every matching job id and took len() in Python, so the cost
+    grew with the backlog - worst exactly when the queue was backed up and the
+    dashboard was polled most often.
+    """
+    return int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(ProcessingJob)
+                .where(
+                    ProcessingJob.organization_id == organization_id,
+                    ProcessingJob.status.in_(ACTIVE_STATUSES),
+                )
+            )
+        ).scalar()
+        or 0
     )
-    return len(rows.scalars().all())

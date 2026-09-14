@@ -111,6 +111,7 @@ def test_the_listing_is_scoped_to_the_callers_organization(client, tmp_path):
 
     first_listing = client.get(f"{KA}", headers=first["headers"]).json()["data"]["assets"]
     assert [a["name"] for a in first_listing] == ["mine.txt"]
+
     # Not classified yet, so the honest answer is zero chunks.
     assert all(a["chunks"] == 0 for a in first_listing)
 
@@ -134,7 +135,6 @@ def test_the_listing_is_scoped_to_the_callers_organization(client, tmp_path):
     other_listing = client.get(f"{KA}", headers=other_headers)
     assert other_listing.status_code == 200, other_listing.text
     assert other_listing.json()["data"]["assets"] == []
-
 
 def test_upload_rejects_bad_format_and_oversize_but_continues(client, tmp_path):
     ctx = _with_source(client, tmp_path)
@@ -207,3 +207,182 @@ def test_soft_delete_uploaded_asset(client, tmp_path):
     # US-241: idempotent soft delete
     again = client.delete(f"{KA}/{asset_id}", headers=ctx["headers"])
     assert again.status_code == 200
+# --- PO request: report generation -------------------------------------------
+
+REPORT = {"title": "گزارش هفتگی", "format": "html", "sections": [
+    {"heading": "رویدادهای پرتکرار", "kind": "bars", "label_key": "event",
+     "value_key": "count",
+     "rows": [{"event": "execution.completed", "count": 42},
+              {"event": "chat.message.sent", "count": 7}]},
+]}
+
+
+def test_report_is_written_to_disk_and_joins_the_users_files(client, tmp_path):
+    """The PO asked for the generated report to be added to the user's files and
+    produced inside the system. Both halves are asserted here: a real file under
+    the storage root, and a row the asset listing returns."""
+    ctx = _with_source(client, tmp_path)
+    response = client.post(f"{KA}/reports", json=REPORT, headers=ctx["headers"])
+    assert response.status_code == 200, response.text
+    created = response.json()["data"]
+    assert created["extension"] == "html"
+    assert created["status"] == "ready"
+
+    import os
+
+    from backend.config import get_settings
+
+    found = [
+        os.path.join(root, name)
+        for root, _dirs, names in os.walk(get_settings().storage_root)
+        for name in names
+        if name == created["name"]
+    ]
+    assert found, "report file not written under the storage root"
+
+    listing = client.get(f"{KA}", headers=ctx["headers"]).json()["data"]["assets"]
+    assert created["name"] in [asset["name"] for asset in listing]
+
+
+def test_report_is_self_contained_and_escapes_its_content(client, tmp_path):
+    """A report is downloaded and opened away from the app, so it must carry its
+    own styling, and its labels are organization data - an unescaped heading
+    would be stored XSS in a file the operator opens from disk."""
+    ctx = _with_source(client, tmp_path)
+    payload = {
+        "title": "گزارش <script>alert(1)</script>",
+        "format": "html",
+        "sections": [
+            {"heading": "<img src=x onerror=alert(1)>", "kind": "table",
+             "rows": [{"a": "<b>bold</b>"}]}
+        ],
+    }
+    body = client.post(f"{KA}/reports", json=payload, headers=ctx["headers"]).json()["data"]
+    assert body["extension"] == "html"
+    # The filename is built from a sanitized stem, so nothing from the title's
+    # markup survives into the path.
+    assert "<" not in body["name"] and ">" not in body["name"]
+
+    # The escaping itself is asserted where the content is produced, because
+    # reading the file back through the API would test the transport instead.
+    from datetime import UTC, datetime
+
+    from backend.knowledge.reporting import render_html_report
+
+    html = render_html_report(
+        title="<script>alert(1)</script>",
+        organization_name="org",
+        sections=[{"heading": "<img src=x onerror=alert(1)>", "kind": "table",
+                   "rows": [{"a": "<b>bold</b>"}]}],
+        generated_at=datetime.now(UTC),
+    )
+    assert "<script>alert(1)</script>" not in html
+    assert "<img src=x" not in html
+    assert "&lt;script&gt;" in html
+
+
+def test_report_csv_carries_the_first_table(client, tmp_path):
+    ctx = _with_source(client, tmp_path)
+    response = client.post(
+        f"{KA}/reports",
+        json={
+            "title": "گزارش CSV",
+            "format": "csv",
+            "sections": [{"heading": "سازمان‌ها", "kind": "table",
+                          "rows": [{"org": "الف", "assets": 3}]}],
+        },
+        headers=ctx["headers"],
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["extension"] == "csv"
+
+
+def test_a_csv_report_without_a_table_is_rejected(client, tmp_path):
+    """A CSV of nothing is a corrupt file, not an empty report."""
+    ctx = _with_source(client, tmp_path)
+    response = client.post(
+        f"{KA}/reports",
+        json={"title": "خالی", "format": "csv",
+              "sections": [{"heading": "بدون داده", "kind": "table", "rows": []}]},
+        headers=ctx["headers"],
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "REPORT_EMPTY"
+
+
+def test_report_requires_auth(client):
+    response = client.post(f"{KA}/reports", json=REPORT)
+    assert response.status_code == 401
+
+
+def test_report_download_returns_the_generated_bytes(client, tmp_path):
+    """The other half of report generation.
+
+    A report was written to disk and listed among the user's files, but no
+    endpoint could read the bytes back out, so the file the agent produced was
+    unreachable from the product. This walks the whole path: generate, list,
+    then download the listed id and assert the body is the real report.
+    """
+    ctx = _with_source(client, tmp_path)
+    created = client.post(f"{KA}/reports", json=REPORT, headers=ctx["headers"])
+    assert created.status_code == 200, created.text
+    asset = created.json()["data"]
+
+    response = client.get(f"{KA}/{asset['id']}/download", headers=ctx["headers"])
+    assert response.status_code == 200, response.text
+    assert b"<!doctype html>" in response.content
+    # The report carries its own styling, which is the property that makes the
+    # download meaningful rather than an empty 200.
+    assert b"<style" in response.content
+
+
+def test_download_404s_for_an_unknown_asset(client, tmp_path):
+    ctx = _with_source(client, tmp_path)
+    response = client.get(
+        f"{KA}/00000000-0000-0000-0000-000000000000/download", headers=ctx["headers"]
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ASSET_NOT_FOUND"
+
+
+def test_download_refuses_another_organizations_asset(client, tmp_path):
+    """Tenant isolation on a file read.
+
+    The row is looked up scoped to the caller's organization, so an id that
+    belongs to someone else is answered exactly like an id that does not exist -
+    a distinguishable 403 would confirm the asset exists.
+    """
+    ctx = _with_source(client, tmp_path)
+    created = client.post(f"{KA}/reports", json=REPORT, headers=ctx["headers"])
+    asset_id = created.json()["data"]["id"]
+
+    # A second, fully separate organization: _bootstrap_org mints the org and
+    # _register_owner's session token is scoped to it.
+    from tests.test_organization_api import _bootstrap_org, _register_owner
+
+    # The shared OWNER_BODY carries a fixed username and mobile, so the second
+    # registration has to override both or it collides with the first owner.
+    org_id = _bootstrap_org(client)
+    registered = _register_owner(
+        client,
+        org_id,
+        username="owner.two",
+        mobile="9129998877",
+        password="Str0ng!Pass2",
+        confirm_password="Str0ng!Pass2",
+    )
+    assert registered.status_code == 200, registered.text
+    other = registered.json()["data"]
+    headers = {"Authorization": f"Bearer {other['session']['token']}"}
+
+    response = client.get(f"{KA}/{asset_id}/download", headers=headers)
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ASSET_NOT_FOUND"
+
+
+def test_download_requires_auth(client, tmp_path):
+    ctx = _with_source(client, tmp_path)
+    created = client.post(f"{KA}/reports", json=REPORT, headers=ctx["headers"])
+    asset_id = created.json()["data"]["id"]
+    response = client.get(f"{KA}/{asset_id}/download")
+    assert response.status_code == 401

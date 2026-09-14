@@ -64,11 +64,72 @@ const HOST = {
   top_processes: [{ pid: 1, name: "x", rss_bytes: 1, cpu_percent: 1 }],
 };
 
+/**
+ * «ایجنت من» payloads.
+ *
+ * The page reads agent.memory.total and maps memories/tools without guards, so
+ * the generic list fallback below would throw and the route would be scanning
+ * an error boundary rather than the page.
+ */
+const AGENT = {
+  id: "00000000-0000-0000-0000-000000000001",
+  display_name: "دستیار من",
+  persona: "کوتاه و رسمی پاسخ بده.",
+  status: "active",
+  version: 2,
+  allowed_tools: ["build_chart"],
+  memory: { total: 1, by_kind: { preference: { count: 1, avg_weight: 1 } } },
+};
+const AGENT_MEMORY = {
+  memories: [
+    {
+      id: "00000000-0000-0000-0000-000000000002",
+      kind: "preference",
+      content: "خروجی را همیشه فارسی بنویس.",
+      weight: 1,
+      hits: 3,
+      misses: 0,
+      active: true,
+      created_at: "2026-09-14T00:00:00Z",
+    },
+  ],
+};
+const AGENT_TOOLS = {
+  tools: [
+    { name: "build_chart", description: "ساخت نمودار از داده", enabled: true, writes: true },
+    { name: "build_report", description: "ساخت گزارش", enabled: false, writes: true },
+  ],
+};
+const ADMIN_AGENTS = {
+  agents: [
+    {
+      id: "00000000-0000-0000-0000-000000000001",
+      organization_id: "00000000-0000-0000-0000-00000000000a",
+      organization_name: "شرکت آریا",
+      user_id: "00000000-0000-0000-0000-00000000000b",
+      username: "manager.ar",
+      display_name: "",
+      status: "active",
+      version: 2,
+      allowed_tools: [],
+      memory_count: 4,
+      active_memory_count: 3,
+      tool_calls: 7,
+      tool_failures: 1,
+      last_tool_at: "2026-09-14T00:00:00Z",
+      last_active_at: "2026-09-14T00:00:00Z",
+      created_at: "2026-09-01T00:00:00Z",
+    },
+  ],
+  totals: { agents: 1, active: 1, organizations: 1 },
+};
+
 /** Envelope a real handler returns; the panel is unforgiving about its shape. */
 const ENVELOPE = (data: unknown) => JSON.stringify({ success: true, data, message: null });
 
 const ROUTES = [
   "/chat",
+  "/agent",
   "/knowledge",
   "/wallet",
   "/usage",
@@ -78,6 +139,7 @@ const ROUTES = [
   "/admin/billing",
   "/admin/operations",
   "/admin/ai",
+  "/admin/agents",
   "/admin/events",
   "/admin/system",
 ];
@@ -98,7 +160,15 @@ for (const route of ROUTES) {
           ? HOST
           : path.endsWith("/auth/onboarding-status")
             ? READY
-            : { items: [], total: 0, total_count: 0, page: 1, page_size: 50, has_more: false, usage: [], balance: 0 };
+            : path.endsWith("/agent/memory")
+              ? AGENT_MEMORY
+              : path.endsWith("/agent/tools")
+                ? AGENT_TOOLS
+                : path.endsWith("/agent")
+                  ? AGENT
+                  : path.endsWith("/admin/agents")
+                    ? ADMIN_AGENTS
+                    : { items: [], total: 0, total_count: 0, page: 1, page_size: 50, has_more: false, usage: [], balance: 0 };
       await route_.fulfill({ status: 200, contentType: "application/json", body: ENVELOPE(data) });
     });
 

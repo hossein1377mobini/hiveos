@@ -4,12 +4,31 @@ Two regressions live here. The loop used to build and dispose a database
 engine on every tick, so a 60-second poll opened a fresh pool forever. And
 nothing stopped two workers scanning the same source at once, which
 double-queues the same files.
+
+The module-scoped fixture is load-bearing, not tidiness. The cached engine's
+pooled connections belong to the event loop that opened them, and the cache
+kept them past the end of this module's loop. At interpreter shutdown they were
+finalised against a closed loop and the process died with an access violation
+(0xC0000005) *after* every test had passed - so the suite reported success and
+still exited non-zero, which fails CI. Disposing the cache at the end of this
+module is what makes the exit code match the result.
 """
 
+import asyncio
 
 import pytest
 
 from backend.knowledge import scheduler
+
+
+@pytest.fixture(autouse=True)
+def _release_cached_engine():
+    """Hand the cached pool back before this module's loop closes."""
+    yield
+    # create_async_engine cannot be disposed synchronously, and dispose_engine
+    # is a coroutine; run it in a loop of its own that is then allowed to close
+    # after the pool is gone.
+    asyncio.run(scheduler.dispose_engine())
 
 
 def test_engine_is_reused_across_ticks():

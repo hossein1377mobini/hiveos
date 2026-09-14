@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from "react"
 import {
+  BotIcon,
   BuildingIcon,
   CreditCardIcon,
   GaugeIcon,
@@ -19,6 +20,7 @@ import { Field } from "../components/auth/parts"
 import { Input } from "../components/ui/input"
 import { CommandPalette, useCommandPalette, type CommandItem } from "../components/ui/command-palette"
 import { RouteFallback } from "../components/RouteFallback"
+import { Toaster } from "../components/ui/sonner"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -113,6 +115,14 @@ export const ADMIN_WORKSPACES: AdminWorkspace[] = [
     keywords: ["مدل", "درگاه", "کلید", "اعتبار", "پرامپت"],
   },
   {
+    id: "agents",
+    path: "/admin/agents",
+    label: "ایجنت‌ها",
+    description: "ایجنت هر کاربر، حافظه و ابزارهایش",
+    icon: BotIcon,
+    keywords: ["ایجنت", "حافظه", "ابزار", "نمودار", "گزارش", "شخصیت"],
+  },
+  {
     id: "events",
     path: "/admin/events",
     label: "رویدادها",
@@ -142,6 +152,7 @@ const BillingView = lazy(() => import("./views/BillingView"))
 const OperationsView = lazy(() => import("./views/OperationsView"))
 const AiView = lazy(() => import("./views/AiView"))
 const EventsView = lazy(() => import("./views/EventsView"))
+const AgentsView = lazy(() => import("./views/AgentsView"))
 const SystemView = lazy(() => import("./views/SystemView"))
 
 export default function AdminApp() {
@@ -150,11 +161,22 @@ export default function AdminApp() {
   return (
     <AdminGate>
       {(token) => (
-        <AdminFrame pathname={location.pathname} token={token}>
-          <Suspense fallback={<RouteFallback />}>
-            <AdminRoutes token={token} />
-          </Suspense>
-        </AdminFrame>
+        <>
+          <AdminFrame pathname={location.pathname} token={token}>
+            <Suspense fallback={<RouteFallback />}>
+              <AdminRoutes token={token} />
+            </Suspense>
+          </AdminFrame>
+          {/* The toast surface lives here rather than in main.tsx on purpose.
+              Every toast call site is inside the admin panel (AiView,
+              BillingView, OrganizationsView), yet mounting <Toaster/> at the
+              app root pulled sonner into the entry chunk - 47.5 kB minified /
+              13.4 kB gzipped on the critical path for every visitor, including
+              the login page, which can never raise a toast. AdminApp is already
+              lazily imported, so mounting it here moves that cost to the only
+              users who can trigger it. [perf audit] */}
+          <Toaster />
+        </>
       )}
     </AdminGate>
   )
@@ -173,6 +195,8 @@ function AdminRoutes({ token }: { token: string }) {
       return <OperationsView token={token} />
     case "ai":
       return <AiView token={token} />
+    case "agents":
+      return <AgentsView token={token} />
     case "events":
       return <EventsView token={token} />
     case "system":

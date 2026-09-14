@@ -27,14 +27,23 @@ const ASSETS = join(ROOT, "dist", "assets");
 
 /** Utility -> a substring the fully-resolved value must contain. */
 const EXPECTED = {
-  "shadow-card": "0 1px 2px",
-  "shadow-raised": "0 8px 20px",
-  "shadow-pop": "0 12px 32px",
-  // Resolves to the navy hex, not to var(--color-navy-400): Tailwind inlines
+  // Cursor's system is hairline-only: "Don't add drop shadows. Hairlines +
+  // ink-on-cream contrast carry the depth." Card and raised elevation are
+  // therefore intentionally "none", and this gate asserts that rather than a
+  // pixel value - the point of the check is that a token resolves to something
+  // deliberate, and "none" is deliberate here. A regression that made these
+  // empty would resolve to "", which is still caught.
+  "shadow-card": "none",
+  "shadow-raised": "none",
+  // The one surviving elevation: a dialog or dropdown floats above arbitrary
+  // content where a hairline cannot separate it.
+  "shadow-pop": "0 10px 28px",
+  // Resolves to the accent hex, not to var(--color-accent-400): Tailwind inlines
   // the colour into --tw-shadow-color, which is exactly the healthy outcome.
   "shadow-focus": "0 0 0 1px",
-  "rounded-card": "14px",
-  "rounded-control": "9px",
+  // Cursor radius scale: md 8 for CTAs/inputs, lg 12 for cards.
+  "rounded-card": "12px",
+  "rounded-control": "8px",
   "rounded-xs": "6px",
 };
 

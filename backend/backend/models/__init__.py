@@ -7,6 +7,7 @@ organization-scoped table carries organization_id.
 """
 
 from backend.models.admin_session import AdminSession
+from backend.models.agent import AgentMemory, AgentToolInvocation, UserAgent
 from backend.models.audit import AuditLog
 from backend.models.base import Base, TimestampMixin
 from backend.models.brain import KnowledgeRepository, OrganizationBrain, VectorIndex
@@ -38,6 +39,8 @@ from backend.models.workspace_settings import WorkspaceSettings
 __all__ = [
     "AdminSession",
     "AgentExecution",
+    "AgentMemory",
+    "AgentToolInvocation",
     "AuditLog",
     "Base",
     "ChatMessage",
@@ -64,6 +67,7 @@ __all__ = [
     "Session",
     "TimestampMixin",
     "User",
+    "UserAgent",
     "UserStatus",
     "VectorIndex",
     "Workspace",

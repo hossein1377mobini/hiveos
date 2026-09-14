@@ -377,6 +377,21 @@ async def get_asset_metadata(
     return {"id": asset.id, "metadata": metadata}
 
 
+async def get_asset(
+    session: AsyncSession, organization: Organization, asset_id
+) -> KnowledgeAsset | None:
+    """Fetch one live asset, scoped to the caller's organization.
+
+    Returns None rather than raising so the caller decides the status code: the
+    download route answers 404 for "no such row" and 404 for "row exists but
+    the bytes are gone", and those are different messages to the user.
+    """
+    asset = await session.get(KnowledgeAsset, asset_id)
+    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+        return None
+    return asset
+
+
 async def get_classification(
     session: AsyncSession, organization: Organization, asset_id
 ) -> dict:

@@ -51,7 +51,15 @@ MODEL_TABLES = (
     "knowledge_sources",
     "organization_brains",
     "admin_sessions",
+    # Per-user agent layer (0028). CASCADE from users/organizations would clear
+    # them anyway, but listing them explicitly means a test that creates rows
+    # without a parent cannot leak them into the next test.
+    "user_agents",
+    "agent_memories",
+    "agent_tool_invocations",
 )
+
+MODEL_TABLES_SET = frozenset(MODEL_TABLES)
 
 
 def _database_reachable() -> bool:

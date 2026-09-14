@@ -1,6 +1,7 @@
 import {
   BellIcon,
   BookOpenIcon,
+  BotIcon,
   CalendarClockIcon,
   ChevronRightIcon,
   HouseIcon,
@@ -65,7 +66,7 @@ import { cn } from "../lib/utils"
  *  - type sizes come from the seven-step scale. [B1]
  */
 
-export type NavId = "chat" | "knowledge" | "usage" | "wallet" | "subscription"
+export type NavId = "chat" | "agent" | "knowledge" | "usage" | "wallet" | "subscription"
 
 type NavItem = { id: NavId; label: string; icon: LucideIcon; path: string; keyword: string }
 
@@ -79,6 +80,16 @@ const NAV_GROUPS: ReadonlyArray<{ section: string; items: readonly NavItem[] }> 
         icon: MessageCircleIcon,
         path: "/chat",
         keyword: "هوش مصنوعی پرسش پاسخ گفتگو",
+      },
+      {
+        // PO 2026-09: every user has their own agent. It gets its own page
+        // because what it remembers and which tools it may reach are the user's
+        // to see and change — not settings buried behind a gear icon.
+        id: "agent",
+        label: "ایجنت من",
+        icon: BotIcon,
+        path: "/agent",
+        keyword: "ایجنت حافظه ابزار شخصیت نمودار گزارش",
       },
     ],
   },
@@ -124,6 +135,7 @@ const NAV_GROUPS: ReadonlyArray<{ section: string; items: readonly NavItem[] }> 
 
 export const NAV_LABEL: Record<NavId, string> = {
   chat: "گفتگو",
+  agent: "ایجنت من",
   knowledge: "دانش سازمان",
   usage: "اعتبار و مصرف",
   wallet: "کیف پول",
@@ -132,6 +144,7 @@ export const NAV_LABEL: Record<NavId, string> = {
 
 const PATH_LABEL: Record<string, string> = {
   "/chat": "گفتگو",
+  "/agent": "ایجنت من",
   "/knowledge": "دانش سازمان",
   "/usage": "اعتبار و مصرف",
   "/wallet": "کیف پول",

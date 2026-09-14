@@ -32,11 +32,20 @@ export interface SettingField {
   max?: number
   /** For select. The first entry is the backend default when the value is unset. */
   options?: Array<{ value: string; label: string }>
-  /** For numberMap: label of the "add row" action. */
+  /** For numberMap: the noun used by the "add row" action. */
   rowsLabel?: string
   /** Group heading — long settings pages get scannable sections. */
   group?: string
   tone?: StatusTone
+  /**
+   * For multiline: the API field under `default` that holds the shipped value.
+   * When set, the control offers "restore the suggested text". The default is
+   * fetched from the server rather than copied here, so it cannot drift from
+   * the prompt the runtime actually falls back to.
+   */
+  defaultFrom?: string
+  /** Row count for a multiline control. Larger for the prompt editor. */
+  rows?: number
 }
 
 export interface SettingDefinition {
@@ -206,15 +215,21 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
         name: "system",
         label: "دستور سیستمی",
         kind: "multiline",
-        rowsLabel: "خط",
-        hint: "نقش و محدودیت‌های دستیار را تعیین می‌کند.",
+        rows: 22,
+        defaultFrom: "system",
+        hint:
+          "نقش، قواعد پاسخ‌گویی، لحن و قالب‌بندی دستیار. اگر خالی بماند متن پیشنهادی خود محصول استفاده می‌شود. " +
+          "جای‌نگهدار {business_description} با توصیف کسب‌وکار سازمان پر می‌شود؛ اگر حذفش کنید دستیار نمی‌داند در چه کسب‌وکاری پاسخ می‌دهد.",
       },
       {
         name: "user_template",
         label: "قالب پرسش کاربر",
         kind: "multiline",
         required: true,
-        hint: "باید شامل {question} و {context} باشد.",
+        rows: 6,
+        defaultFrom: "user_template",
+        hint:
+          "چیدمان پرسش کاربر و متن بازیابی‌شده. باید شامل {question} و {context} باشد.",
       },
     ],
   },

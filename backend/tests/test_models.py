@@ -44,6 +44,12 @@ EXPECTED_TABLES = {
     "hiveos.system_settings",
     "hiveos.charge_requests",
     "hiveos.admin_sessions",
+    # Per-user agent layer (migration 0028, PO 2026-09). Listed explicitly so a
+    # table that is declared but never migrated - or migrated but never
+    # declared - fails here rather than at runtime.
+    "hiveos.user_agents",
+    "hiveos.agent_memories",
+    "hiveos.agent_tool_invocations",
 }
 
 

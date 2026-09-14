@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangleIcon, DatabaseIcon, HardDriveIcon, RefreshCwIcon, ServerIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  CpuIcon,
+  DatabaseIcon,
+  HardDriveIcon,
+  NetworkIcon,
+  RefreshCwIcon,
+  ServerIcon,
+} from "lucide-react"
 
+import { BarChart } from "../../components/ui/chart"
 import { Button } from "../../components/ui/button"
 import { DomainStatus } from "../../components/ui/domain-status"
 import { Surface } from "../../components/ui/surface"
@@ -82,7 +91,11 @@ export default function OperationsView({ token }: { token: string }) {
           percent={data.memory.percent}
           hint={humanSize(data.memory.used_bytes) + " از " + humanSize(data.memory.total_bytes)}
         />
-        {data.disk.mounts.slice(0, 2).map((mount) => (
+        {/* Every mount, not the first two: a full /var or /tmp is exactly the
+            kind of disk problem this page exists to surface, and it is rarely
+            the first entry in the list. The grid wraps, so a long list reads as
+            another row of gauges rather than a cramped strip. */}
+        {data.disk.mounts.map((mount) => (
           <GaugeCard
             key={mount.path}
             label={"فضای دیسک — " + mount.path}
@@ -93,6 +106,107 @@ export default function OperationsView({ token }: { token: string }) {
       </div>
 
       <BackupCard state={backup.data} error={backup.error} onRetry={() => void backup.reload()} />
+
+      {/* The endpoint has always returned per-core load, swap, disk I/O and the
+          network interfaces; none of it was rendered, so a saturated single core
+          or a machine swapping hard looked identical to a healthy one. Each of
+          these is shown only when the server reports it - an empty section is
+          worse than an absent one. */}
+      {data.memory.swap_total_bytes > 0 && (
+        <Surface>
+          <h2 className="flex items-center gap-2 text-subheading">
+            <HardDriveIcon aria-hidden className="size-4 text-muted-foreground" />
+            حافظهٔ مبادله (Swap)
+          </h2>
+          <div className="mt-3">
+            <BarChart
+              valueLabel=""
+              data={[
+                { label: "استفاده‌شده", value: Math.round(data.memory.swap_used_bytes / 1024 / 1024) },
+                {
+                  label: "آزاد",
+                  value: Math.round(
+                    Math.max(0, data.memory.swap_total_bytes - data.memory.swap_used_bytes) / 1024 / 1024,
+                  ),
+                },
+              ]}
+            />
+          </div>
+          <p className="mt-2 text-micro text-muted-foreground">
+            مقدار بر حسب مگابایت. مصرف مداوم swap یعنی حافظهٔ اصلی کافی نیست.
+          </p>
+        </Surface>
+      )}
+
+      {data.network.interfaces.length > 0 && (
+        <Surface>
+          <h2 className="flex items-center gap-2 text-subheading">
+            <NetworkIcon aria-hidden className="size-4 text-muted-foreground" />
+            شبکه
+          </h2>
+          <p className="mt-1 text-micro text-muted-foreground">
+            مجموع ترافیک دریافت و ارسال از زمان روشن شدن سرور.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-caption">
+              <thead>
+                <tr className="border-b border-border text-micro text-muted-foreground">
+                  <th className="py-2 text-start font-bold">رابط</th>
+                  <th className="py-2 text-end font-bold">دریافت</th>
+                  <th className="py-2 text-end font-bold">ارسال</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.network.interfaces.map((entry) => (
+                  <tr key={entry.name} className="border-b border-border last:border-0">
+                    <td className="mono py-2" dir="ltr">
+                      {entry.name}
+                    </td>
+                    <td data-numeric className="py-2 text-end text-muted-foreground">
+                      {humanSize(entry.rx)}
+                    </td>
+                    <td data-numeric className="py-2 text-end text-muted-foreground">
+                      {humanSize(entry.tx)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Surface>
+      )}
+
+      {data.cpu.per_core.length > 1 && (
+        <Surface>
+          <h2 className="flex items-center gap-2 text-subheading">
+            <CpuIcon aria-hidden className="size-4 text-muted-foreground" />
+            بار هر هسته
+          </h2>
+          <p className="mt-1 text-micro text-muted-foreground">
+            میانگین کل می‌تواند پنهان کند که یک هسته اشباع شده است.
+          </p>
+          <div className="mt-3 flex h-24 items-end gap-1">
+            {data.cpu.per_core.map((core, index) => (
+              <div key={index} className="flex h-full flex-1 flex-col justify-end gap-1">
+                <div
+                  role="progressbar"
+                  aria-label={"هستهٔ " + faNum(index + 1)}
+                  aria-valuenow={Math.round(core)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  className="w-full overflow-hidden rounded-xs bg-secondary"
+                  style={{ height: Math.max(3, Math.min(100, core)) + "%" }}
+                >
+                  <div className={cn("h-full w-full rounded-xs", toneFor(core))} />
+                </div>
+                <span data-numeric className="text-center text-micro text-muted-foreground">
+                  {faNum(Math.round(core))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Surface>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Surface>

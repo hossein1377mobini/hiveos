@@ -58,10 +58,32 @@ export function useLive<T>(token: string, path: string, everyMs: number) {
   // the poll whenever the token or path changes, which is what made the old
   // disable comment dangerous — a stale closure kept polling the previous
   // endpoint after an operator switched organisation.
+  //
+  // PO request (performance): the poll used to run regardless of whether anyone
+  // was looking. A panel tab left open in the background kept issuing 4-7
+  // requests a minute indefinitely, and each /system-status poll is two round
+  // trips running nineteen scalar counts. Nobody can read a dashboard they are
+  // not looking at, so a hidden tab now stops polling and refetches once when it
+  // becomes visible again - which is exactly the moment the stale numbers would
+  // otherwise be read.
   useEffect(() => {
+    const tick = () => {
+      if (typeof document !== "undefined" && document.hidden) return
+      void load()
+    }
+
     void load()
-    const id = setInterval(() => void load(), everyMs)
-    return () => clearInterval(id)
+    const id = setInterval(tick, everyMs)
+
+    const onVisible = () => {
+      if (!document.hidden) void load()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+
+    return () => {
+      clearInterval(id)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
   }, [load, everyMs])
 
   return { data, error, loading, updatedAt, reload: load }

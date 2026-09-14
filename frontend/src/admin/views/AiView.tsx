@@ -74,6 +74,7 @@ function SettingPanel({
   definition: SettingDefinition
 }) {
   const [values, setValues] = useState<SettingsValues>({})
+  const [defaults, setDefaults] = useState<Record<string, string>>({})
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -90,12 +91,18 @@ function SettingPanel({
       // undefined and render empty - and because PUT replaces the whole stored
       // value, saving that blank form would have overwritten the live provider
       // credentials with defaults.
-      const stored = await adminApi<{ key: string; value: SettingsValues }>(
-        token,
-        "GET",
-        "/settings/" + definition.key,
-      )
+      // The response carries an extra "default" object for settings whose
+      // shipped text lives in the backend (currently the prompt template). It
+      // feeds the "restore the suggested text" action, so the operator never
+      // has to paste a prompt back in by hand - and never restores a stale
+      // copy, because it comes from the same constant the runtime falls back to.
+      const stored = await adminApi<{
+        key: string
+        value: SettingsValues
+        default?: Record<string, string>
+      }>(token, "GET", "/settings/" + definition.key)
       setValues(toFormValues(definition, stored?.value ?? {}))
+      setDefaults(stored?.default ?? {})
       setError(null)
     } catch (err) {
       if (err instanceof AdminSessionExpired) return
@@ -140,7 +147,12 @@ function SettingPanel({
         </p>
       </div>
       {loaded ? (
-        <SettingsForm definition={definition} values={values} onChange={setValues} />
+        <SettingsForm
+          definition={definition}
+          values={values}
+          onChange={setValues}
+          defaults={defaults}
+        />
       ) : (
         <p className="text-caption text-muted-foreground">در حال بارگذاری…</p>
       )}
