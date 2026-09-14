@@ -195,7 +195,7 @@ export default function OtpVerify({
               aria-label={`رقم ${faDigit(i + 1)}`}
               disabled={busy}
               className={cn(
-                "size-[52px] rounded-[12px] border bg-card p-0 text-center text-2xl font-bold text-foreground transition-[border-color,box-shadow]",
+                "size-[52px] rounded-card border bg-card p-0 text-center text-2xl font-bold text-foreground transition-[border-color,box-shadow]",
                 "focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-ring/20",
                 d && "border-primary bg-accent",
                 error && "border-error focus:ring-error-bg",

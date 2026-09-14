@@ -18,12 +18,12 @@ export function AuthBrand({ title, subtitle }: { title: string; subtitle: string
     <div className="mb-5 flex flex-col items-center gap-3 text-center">
       <span
         aria-hidden
-        className="inline-flex size-[52px] items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-card"
+        className="inline-flex size-[52px] items-center justify-center rounded-card bg-primary text-primary-foreground shadow-card"
       >
         <HouseLogo className="size-[26px]" />
       </span>
       <div className="flex flex-col gap-1">
-        <h1 className="text-title font-extrabold text-foreground">{title}</h1>
+        <h1 className="text-title font-bold text-foreground">{title}</h1>
         <p className="text-caption text-muted-foreground">{subtitle}</p>
       </div>
     </div>
@@ -47,7 +47,7 @@ export function Stepper({ current }: { current: number }) {
       role="group"
       aria-label="مراحل راه‌اندازی"
       data-slot="stepper"
-      className="mb-[22px] flex items-center gap-0.5 overflow-hidden rounded-xl border bg-card p-3 shadow-card"
+      className="mb-[22px] flex items-center gap-0.5 overflow-hidden rounded-card border bg-card p-3 shadow-card"
     >
       {STEPS.map((label, i) => {
         const n = i + 1
@@ -114,10 +114,10 @@ export function PanelHead({
 }) {
   return (
     <div className={cn("mb-5 flex items-center gap-3", center && "justify-center")}>
-      <span aria-hidden className={cn("inline-flex size-[38px] shrink-0 items-center justify-center rounded-lg", TONE_CLASS[tone])}>
+      <span aria-hidden className={cn("inline-flex size-[38px] shrink-0 items-center justify-center rounded-control", TONE_CLASS[tone])}>
         <Icon className="size-[19px]" />
       </span>
-      <h2 className="text-heading font-extrabold text-foreground">{title}</h2>
+      <h2 className="text-heading font-bold text-foreground">{title}</h2>
       {hint && <span className="ms-auto whitespace-nowrap text-micro text-muted-foreground">{hint}</span>}
     </div>
   )

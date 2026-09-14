@@ -67,10 +67,10 @@ export default function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="auth-page w-full">
       <div className="brand mb-5 text-center">
-        <span className="logo-box inline-flex h-[52px] w-[52px] items-center justify-center rounded-[14px] bg-primary text-primary-foreground shadow-[0_8px_20px_rgba(43,58,115,0.25)] [&>svg]:h-[26px] [&>svg]:w-[26px]">
+        <span className="logo-box inline-flex h-[52px] w-[52px] items-center justify-center rounded-card bg-primary text-primary-foreground shadow-raised [&>svg]:h-[26px] [&>svg]:w-[26px]">
           {HOUSE_SVG}
         </span>
-        <h1 className="mt-3.5 text-title font-extrabold">ورود به HiveOS</h1>
+        <h1 className="mt-3.5 text-title font-bold">ورود به HiveOS</h1>
         <p className="mt-1 text-caption text-muted-foreground">با نام کاربری و رمز عبور حساب خود وارد شوید.</p>
       </div>
 
@@ -118,7 +118,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
                 type="button"
                 aria-label="نمایش رمز"
                 onClick={() => setShowPw((v) => !v)}
-                className="absolute end-3 top-1/2 -translate-y-1/2 rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                className="absolute end-3 top-1/2 -translate-y-1/2 rounded-xs p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 <span className="block h-5 w-5 [&>svg]:h-5 [&>svg]:w-5">{EYE_SVG}</span>
               </button>
@@ -127,7 +127,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
 
           {error && (
             <div
-              className="mb-4 flex items-start gap-2.5 rounded-[10px] border border-error bg-error-bg p-3 text-caption text-error"
+              className="mb-4 flex items-start gap-2.5 rounded-control border border-error bg-error-bg p-3 text-caption text-error"
               role="alert"
             >
               <span className="mt-0.5 block h-[18px] w-[18px] shrink-0 [&>svg]:h-[18px] [&>svg]:w-[18px]">{ALERT_SVG}</span>
@@ -136,7 +136,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
                     `error` state was computed but never rendered, so a rate
                     limit or a downed API was reported as "wrong password" —
                     exactly the substitution the PO asked to avoid. */}
-                <div className="font-extrabold">{error}</div>
+                <div className="font-bold">{error}</div>
                 <div className="mt-1 text-muted-foreground">
                   {locked
                     ? "۱۵ دقیقه بعد دوباره تلاش کنید."
@@ -149,7 +149,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-[10px] px-5 py-3 text-body font-bold shadow-[0_3px_12px_rgba(43,58,115,0.28)] transition-all hover:shadow-[0_6px_18px_rgba(43,58,115,0.34)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none bg-primary text-primary-foreground hover:bg-primary/90"
+            className="w-full rounded-control px-5 py-3 text-body font-bold shadow-raised transition-shadow hover:shadow-pop disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {busy ? "در حال ورود…" : "ورود"}
           </button>

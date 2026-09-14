@@ -138,7 +138,7 @@ export default function OwnerAccount({
             <div className="flex" dir="ltr">
               <span
                 aria-hidden
-                className="flex select-none items-center justify-center rounded-[10px] border border-border border-e-0 bg-secondary px-3 text-sm font-bold text-muted-foreground"
+                className="flex select-none items-center justify-center rounded-control border border-border border-e-0 bg-secondary px-3 text-sm font-bold text-muted-foreground"
               >
                 +۹۸
               </span>
@@ -187,7 +187,7 @@ export default function OwnerAccount({
                 type="button"
                 onClick={() => setShowPwd((v) => !v)}
                 aria-label={showPwd ? "پنهان‌کردن رمز" : "نمایش رمز"}
-                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-[6px] p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                className="absolute end-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-xs p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               >
                 {showPwd ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
               </button>

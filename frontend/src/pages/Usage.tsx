@@ -93,7 +93,7 @@ export default function Usage() {
   return (
     <section className="mx-auto max-w-3xl space-y-4" aria-label="اعتبار و مصرف">
       <div>
-        <h1 className="text-heading font-extrabold text-foreground">اعتبار و مصرف</h1>
+        <h1 className="text-heading font-bold text-foreground">اعتبار و مصرف</h1>
         <p className="mt-[3px] text-caption text-muted-foreground">
           موجودی، مصرف و درخواست‌های شارژ سازمان شما.
         </p>
@@ -113,7 +113,7 @@ export default function Usage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-black" data-testid="usage-balance">{faNum(state.balance)}</p>
+            <p className="text-display" data-testid="usage-balance">{faNum(state.balance)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -123,7 +123,7 @@ export default function Usage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-black text-success" data-testid="usage-charged">{faNum(totals.charged)}</p>
+            <p className="text-display text-success" data-testid="usage-charged">{faNum(totals.charged)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -133,7 +133,7 @@ export default function Usage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-black text-error" data-testid="usage-spent">{faNum(totals.spent)}</p>
+            <p className="text-display text-error" data-testid="usage-spent">{faNum(totals.spent)}</p>
           </CardContent>
         </Card>
       </div>

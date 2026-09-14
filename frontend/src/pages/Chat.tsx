@@ -251,7 +251,7 @@ export default function Chat() {
               onChange={(e) => setFilter(e.target.value)}
               placeholder="جستجو در گفتگوها…"
               aria-label="جستجوی گفتگو"
-              className="rounded-[9px] py-2 ps-9 pe-[11px] text-caption"
+              className="rounded-control py-2 ps-9 pe-[11px] text-caption"
             />
           </div>
         </div>
@@ -265,7 +265,7 @@ export default function Chat() {
           )}
           {grouped.map((group) => (
             <div key={group.label}>
-              <div className="px-2 pb-1 pt-2.5 text-micro font-extrabold tracking-[0.4px] text-muted-foreground">
+              <div className="px-2 pb-1 pt-2.5 text-micro font-bold tracking-[0.4px] text-muted-foreground">
                 {group.label}
               </div>
               {group.items.map((s) => (
@@ -275,7 +275,7 @@ export default function Chat() {
                   onClick={() => openSession(s.id)}
                   aria-current={activeId === s.id ? "true" : undefined}
                   className={
-                    "relative mb-0.5 block w-full cursor-pointer rounded-[10px] p-2.5 pe-16 text-start " +
+                    "relative mb-0.5 block w-full cursor-pointer rounded-control p-2.5 pe-16 text-start " +
                     (activeId === s.id ? "bg-accent" : "hover:bg-secondary")
                   }
                 >
@@ -319,11 +319,11 @@ export default function Chat() {
             <div className="flex h-full flex-col items-center justify-center px-[30px] text-center">
               <span
                 aria-hidden
-                className="mb-[18px] flex size-16 items-center justify-center rounded-[20px] bg-primary text-primary-foreground shadow-[0_10px_26px_rgba(43,58,115,0.25)]"
+                className="mb-[18px] flex size-16 items-center justify-center rounded-card bg-primary text-primary-foreground shadow-raised"
               >
                 <House className="size-[30px]" />
               </span>
-              <h2 className="text-heading font-extrabold text-foreground">هوش سازمان آماده است</h2>
+              <h2 className="text-heading font-bold text-foreground">هوش سازمان آماده است</h2>
               <p className="mt-2 max-w-[440px] text-caption text-muted-foreground">
                 سوال خود را درباره سازمان یا اسناد آن بپرسید. پاسخ‌ها با ارجاع به منابع داده می‌شوند.
               </p>
@@ -333,7 +333,7 @@ export default function Chat() {
                     key={s.text}
                     type="button"
                     onClick={() => setInput(s.text)}
-                    className="cursor-pointer rounded-[13px] border border-border bg-card p-[13px] pe-[15px] text-start text-caption font-semibold text-foreground shadow-card transition-colors hover:border-primary/40 hover:text-primary"
+                    className="cursor-pointer rounded-control border border-border bg-card p-[13px] pe-[15px] text-start text-caption font-semibold text-foreground shadow-card transition-colors hover:border-primary/40 hover:text-primary"
                   >
                     {s.text}
                     <span className="mt-[3px] block text-micro font-normal text-muted-foreground">{s.hint}</span>
@@ -354,7 +354,7 @@ export default function Chat() {
                 <span
                   aria-hidden
                   className={
-                    "flex size-8 shrink-0 items-center justify-center rounded-[10px] text-micro font-extrabold " +
+                    "flex size-8 shrink-0 items-center justify-center rounded-control text-micro font-bold " +
                     (isUser
                       ? "border border-border bg-secondary text-muted-foreground"
                       : "bg-primary text-primary-foreground")
@@ -363,13 +363,13 @@ export default function Chat() {
                   {isUser ? "م" : <House className="size-[17px]" />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-2 text-micro font-extrabold text-muted-foreground">
+                  <div className="mb-1 flex items-center gap-2 text-micro font-bold text-muted-foreground">
                     {isUser ? "شما" : "هوش سازمان"}
                     {m.created_at && <span className="font-normal">{faTime(m.created_at)}</span>}
                   </div>
                   <div
                     className={
-                      "rounded-[14px] border px-4 py-3.5 text-sm leading-[1.9] shadow-[0_1px_2px_rgba(28,28,25,0.04)] " +
+                      "rounded-card border px-4 py-3.5 text-sm leading-[1.9] shadow-card " +
                       (isUser ? "border-primary/40 bg-accent" : "border-border bg-card")
                     }
                   >
@@ -383,7 +383,7 @@ export default function Chat() {
                             // same document, so the pair is the identity — the
                             // list index is not.
                             key={(c.document_id ?? "") + ":" + (c.locator ?? c.title ?? "")}
-                            className="flex max-w-full cursor-pointer items-start gap-2 rounded-[9px] border border-border bg-secondary px-2.5 py-[7px] text-xs transition-colors hover:bg-accent"
+                            className="flex max-w-full cursor-pointer items-start gap-2 rounded-control border border-border bg-secondary px-2.5 py-[7px] text-xs transition-colors hover:bg-accent"
                           >
                             <FileText aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                             <span className="min-w-0">
@@ -399,7 +399,7 @@ export default function Chat() {
                     <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
                         type="button"
-                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-[7px] border border-transparent px-2 py-[3px] text-micro font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-xs border border-transparent px-2 py-[3px] text-micro font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                         onClick={() => void navigator.clipboard?.writeText(messageText(m))}
                         aria-label="کپی پیام"
                       >
@@ -417,11 +417,11 @@ export default function Chat() {
             <div role="status" aria-live="polite" className="flex gap-3" data-testid="thinking">
               <span
                 aria-hidden
-                className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground"
+                className="flex size-8 shrink-0 items-center justify-center rounded-control bg-primary text-primary-foreground"
               >
                 <House className="size-[17px]" />
               </span>
-              <div className="rounded-[14px] border border-border bg-card px-4 py-3.5 text-sm text-muted-foreground">
+              <div className="rounded-card border border-border bg-card px-4 py-3.5 text-sm text-muted-foreground">
                 در حال پاسخ‌گویی…
               </div>
             </div>
@@ -468,7 +468,7 @@ export default function Chat() {
         </div>
 
         <form onSubmit={send} aria-label="ارسال پیام" className="border-t border-border bg-card px-[8%] pb-[18px] pt-3.5">
-          <div className="flex items-end gap-2.5 rounded-[16px] border border-border bg-card px-3 py-2.5 transition-shadow focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/20">
+          <div className="flex items-end gap-2.5 rounded-card border border-border bg-card px-3 py-2.5 transition-shadow focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/20">
             <textarea
               rows={1}
               placeholder={blocked ? "برای ادامه، حساب خود را شارژ کنید…" : "سوال خود را بپرسید…"}
@@ -487,7 +487,7 @@ export default function Chat() {
             <button
               type="submit"
               disabled={busy || blocked || input.trim().length === 0}
-              className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-[12px] transition-colors disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-muted-foreground bg-primary text-primary-foreground hover:bg-primary/90"
+              className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-control transition-colors disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-muted-foreground bg-primary text-primary-foreground hover:bg-primary/90"
               data-testid="send"
               aria-label="ارسال"
             >

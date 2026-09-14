@@ -250,7 +250,7 @@ export default function Knowledge() {
       {/* page-head (mockup) */}
       <div className="mb-5 flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-heading font-extrabold text-foreground">دانش سازمان</h1>
+          <h1 className="text-heading font-bold text-foreground">دانش سازمان</h1>
           <p className="mt-[3px] text-caption text-muted-foreground">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
         </div>
         <div className="ms-auto flex items-center gap-2">
@@ -294,12 +294,12 @@ export default function Knowledge() {
             <div className="flex items-center gap-3">
               <span
                 aria-hidden
-                className="flex size-11 shrink-0 items-center justify-center rounded-[12px] bg-amber-soft text-amber"
+                className="flex size-11 shrink-0 items-center justify-center rounded-control bg-amber-soft text-amber"
               >
                 <FolderOpen className="size-5" />
               </span>
               <div>
-                <div className="text-body font-extrabold text-foreground">پوشه اسناد سازمان</div>
+                <div className="text-body font-bold text-foreground">پوشه اسناد سازمان</div>
                 <div className="mt-1 font-mono text-caption text-muted-foreground" dir="ltr">
                   {source.path}
                 </div>
@@ -414,7 +414,7 @@ export default function Knowledge() {
                     {a.name}
                   </TableCell>
                   <TableCell className="p-3">
-                    <span className="inline-block rounded-[6px] border border-border bg-secondary px-2 py-0.5 font-mono text-micro text-muted-foreground" dir="ltr">
+                    <span className="inline-block rounded-xs border border-border bg-secondary px-2 py-0.5 font-mono text-micro text-muted-foreground" dir="ltr">
                       {(a.extension ?? "").toUpperCase()}
                     </span>
                   </TableCell>
@@ -451,11 +451,11 @@ export default function Knowledge() {
                   <div className="px-5 py-12 text-center">
                     <span
                       aria-hidden
-                      className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-[16px] border border-border bg-secondary text-muted-foreground"
+                      className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-card border border-border bg-secondary text-muted-foreground"
                     >
                       <FileText className="size-[26px]" />
                     </span>
-                    <h3 className="text-body font-extrabold text-foreground">هنوز سندی نیست.</h3>
+                    <h3 className="text-body font-bold text-foreground">هنوز سندی نیست.</h3>
                     <p className="mx-auto mt-1.5 max-w-[380px] text-caption text-muted-foreground">
                       {search || tab !== "all" || format !== "all"
                         ? "سندی مطابق جستجو یا فیلتر پیدا نشد."
@@ -541,7 +541,7 @@ export default function Knowledge() {
             {picked.length > 0 && (
               <ul className="mt-3 space-y-2">
                 {picked.map((f, i) => (
-                  <li key={f.name + i} className="flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-2">
+                  <li key={f.name + i} className="flex items-center gap-3 rounded-control border border-border bg-card px-3 py-2">
                     <FileText aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate text-caption font-semibold text-foreground">{f.name}</span>
                     <span className="font-mono text-micro text-muted-foreground" dir="ltr">
@@ -550,7 +550,7 @@ export default function Knowledge() {
                     <button
                       type="button"
                       aria-label={"حذف " + f.name}
-                      className="cursor-pointer rounded-[7px] p-1 text-muted-foreground transition-colors hover:bg-error-bg hover:text-error"
+                      className="cursor-pointer rounded-xs p-1 text-muted-foreground transition-colors hover:bg-error-bg hover:text-error"
                       onClick={() => setPicked((p) => p.filter((_, idx) => idx !== i))}
                     >
                       <X className="size-4" />
@@ -594,7 +594,7 @@ function StatCard({
   return (
     <div
       className={cn(
-        "rounded-[16px] border border-border bg-card p-[18px] shadow-card",
+        "rounded-card border border-border bg-card p-[18px] shadow-card",
         tone === "info" && "border-primary/40 bg-accent/60",
         tone === "danger" && "border-error bg-error-bg",
       )}
@@ -603,7 +603,7 @@ function StatCard({
         {tone === "danger" && <CircleAlert aria-hidden className="size-[15px] text-error" />}
         {label}
       </div>
-      <div className="mt-2 text-2xl font-extrabold tracking-[-0.5px] text-foreground">{value}</div>
+      <div className="mt-2 text-2xl font-bold tracking-[-0.5px] text-foreground">{value}</div>
     </div>
   );
 }

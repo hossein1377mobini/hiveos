@@ -294,10 +294,10 @@ export default function Onboarding({ onStatus }: { onStatus: (status: Status) =>
             required
             hint={desktop ? "با دکمهٔ انتخاب پوشه، مسیر به‌طور خودکار پر می‌شود" : "مثلاً /srv/hive-docs"}
           >
-            <div className="flex flex-wrap items-center gap-3 rounded-[12px] border border-border bg-card p-2.5 ps-3">
+            <div className="flex flex-wrap items-center gap-3 rounded-control border border-border bg-card p-2.5 ps-3">
               <span
                 aria-hidden
-                className="flex size-10 shrink-0 items-center justify-center rounded-[11px] bg-amber-soft text-amber"
+                className="flex size-10 shrink-0 items-center justify-center rounded-control bg-amber-soft text-amber"
               >
                 <FolderOpen className="size-5" />
               </span>

@@ -109,7 +109,7 @@ export default function Wallet() {
     <section className="mx-auto max-w-3xl space-y-4" aria-label="کیف پول">
       <div className="flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-heading font-extrabold text-foreground">کیف پول</h1>
+          <h1 className="text-heading font-bold text-foreground">کیف پول</h1>
           <p className="mt-[3px] text-caption text-muted-foreground">اعتبار هوش سازمان و تراکنش‌های شارژ.</p>
         </div>
         <div className="ms-auto flex items-center gap-2">
@@ -125,10 +125,10 @@ export default function Wallet() {
       <ZeroCreditBanner visible={blocked} />
 
       {/* wallet-hero (mockup §۲۱) */}
-      <div className="relative overflow-hidden rounded-[20px] bg-primary px-7 py-[26px] text-primary-foreground shadow-[0_14px_34px_rgba(43,58,115,0.3)]">
+      <div className="relative overflow-hidden rounded-card bg-primary px-7 py-[26px] text-primary-foreground shadow-pop">
         <span aria-hidden className="absolute -end-[30px] -top-[30px] size-40 rounded-full bg-white/[0.06]" />
         <div className="text-xs font-bold opacity-75">اعتبار فعلی</div>
-        <div className="mt-1.5 text-display font-extrabold tracking-[-1px]" data-testid="balance">
+        <div className="mt-1.5 text-display font-bold tracking-[-1px]" data-testid="balance">
           {faNum(state.balance)} <small className="text-sm font-semibold opacity-80">اعتبار</small>
         </div>
         <div className="mt-3.5 flex flex-wrap items-center gap-3.5 text-xs opacity-85">
@@ -160,7 +160,7 @@ export default function Wallet() {
         className="rounded-card border border-border bg-card p-6 shadow-card"
         aria-label="درخواست شارژ"
       >
-        <h2 className="text-body font-extrabold text-foreground">شارژ حساب</h2>
+        <h2 className="text-body font-bold text-foreground">شارژ حساب</h2>
         <p className="mt-1 text-caption text-muted-foreground">
           مبلغ را انتخاب کنید؛ پس از تأیید مدیر سامانه، اعتبار به کیف پول اضافه می‌شود.
         </p>
@@ -172,13 +172,13 @@ export default function Wallet() {
               aria-pressed={amount === a}
               onClick={() => setAmount(a)}
               className={cn(
-                "cursor-pointer rounded-[12px] border px-4 py-2.5 text-center transition-colors",
+                "cursor-pointer rounded-control border px-4 py-2.5 text-center transition-colors",
                 amount === a
                   ? "border-primary bg-accent text-primary"
                   : "border-border bg-card hover:border-primary/40 hover:bg-accent/50",
               )}
             >
-              <b className="block text-sm font-extrabold">{faNum(a)}</b>
+              <b className="block text-sm font-bold">{faNum(a)}</b>
               <small className="mt-0.5 block text-micro text-muted-foreground">اعتبار</small>
             </button>
           ))}
@@ -187,13 +187,13 @@ export default function Wallet() {
             aria-pressed={amount === "custom"}
             onClick={() => setAmount("custom")}
             className={cn(
-              "cursor-pointer rounded-[12px] border px-4 py-2.5 text-center transition-colors",
+              "cursor-pointer rounded-control border px-4 py-2.5 text-center transition-colors",
               amount === "custom"
                 ? "border-primary bg-accent text-primary"
                 : "border-border bg-card hover:border-primary/40 hover:bg-accent/50",
             )}
           >
-            <b className="block text-sm font-extrabold">مبلغ دلخواه</b>
+            <b className="block text-sm font-bold">مبلغ دلخواه</b>
             <small className="mt-0.5 block text-micro text-muted-foreground">تعداد اعتبار</small>
           </button>
         </div>
@@ -234,7 +234,7 @@ export default function Wallet() {
 
       {/* تراکنش‌ها (mockup §۲۱ .txn) */}
       <Surface className="p-6">
-        <h2 className="mb-3 text-body font-extrabold text-foreground">تراکنش‌ها</h2>
+        <h2 className="mb-3 text-body font-bold text-foreground">تراکنش‌ها</h2>
         <div className="relative mb-3">
           <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -257,7 +257,7 @@ export default function Wallet() {
                 <span
                   aria-hidden
                   className={cn(
-                    "flex size-[34px] shrink-0 items-center justify-center rounded-[10px]",
+                    "flex size-[34px] shrink-0 items-center justify-center rounded-control",
                     isCharge ? "bg-success-bg text-success" : "border border-border bg-secondary text-muted-foreground",
                   )}
                 >
@@ -269,7 +269,7 @@ export default function Wallet() {
                   </div>
                   <div className="text-micro text-muted-foreground">{faDateTime(t.created_at)}</div>
                 </div>
-                <div className={cn("whitespace-nowrap text-caption font-extrabold", isCharge ? "text-success" : "text-muted-foreground")}>
+                <div className={cn("whitespace-nowrap text-caption font-bold", isCharge ? "text-success" : "text-muted-foreground")}>
                   {isCharge ? "+" : "−"}
                   {faNum(t.amount)}
                 </div>
@@ -280,11 +280,11 @@ export default function Wallet() {
             <div className="px-5 py-10 text-center">
               <span
                 aria-hidden
-                className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-[16px] border border-border bg-secondary text-muted-foreground"
+                className="mx-auto mb-3.5 flex size-14 items-center justify-center rounded-card border border-border bg-secondary text-muted-foreground"
               >
                 <WalletIcon className="size-[26px]" />
               </span>
-              <h3 className="text-body font-extrabold text-foreground">تراکنشی ثبت نشده است</h3>
+              <h3 className="text-body font-bold text-foreground">تراکنشی ثبت نشده است</h3>
               <p className="mt-1.5 text-caption text-muted-foreground">
                 {search ? "تراکنشی مطابق جستجو پیدا نشد." : "با اولین گفتگو یا شارژ، تراکنش‌ها اینجا نمایش داده می‌شوند."}
               </p>

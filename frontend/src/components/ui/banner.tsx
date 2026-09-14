@@ -53,11 +53,11 @@ export function Banner({
       data-slot="banner"
       data-tone={tone}
       role={tone === "error" ? "alert" : "status"}
-      className={cn("gap-x-2.5 gap-y-1 rounded-lg px-3 py-3 text-caption", TONE_CLASS[tone], className)}
+      className={cn("gap-x-2.5 gap-y-1 rounded-card px-3 py-3 text-caption", TONE_CLASS[tone], className)}
       {...props}
     >
       {Icon ? <Icon /> : null}
-      {title ? <AlertTitle className="font-extrabold">{title}</AlertTitle> : null}
+      {title ? <AlertTitle className="font-bold">{title}</AlertTitle> : null}
       {actions ? (
         <AlertDescription className="col-start-2 flex gap-2 text-current">{actions}</AlertDescription>
       ) : null}

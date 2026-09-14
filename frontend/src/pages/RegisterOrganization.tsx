@@ -183,7 +183,7 @@ export default function RegisterOrganization({
             <PanelHead icon={Building2} tone="violet" title="دسترسی هوش سازمان" hint="گام ۳ از ۳" />
             <Field label="نوع دسترسی هوش" required>
               <div className="flex flex-wrap gap-3">
-                <div className="relative min-w-[140px] flex-1 rounded-[13px] border border-primary/40 bg-accent p-3.5 shadow-[0_0_0_1px_var(--focus-border)]">
+                <div className="relative min-w-[140px] flex-1 rounded-control border border-primary/40 bg-accent p-3.5 shadow-focus">
                   <span
                     aria-hidden
                     className="absolute end-2.5 top-2.5 flex size-[17px] items-center justify-center rounded-full bg-primary text-primary-foreground"
@@ -197,7 +197,7 @@ export default function RegisterOrganization({
                     اتصال به هوش از طریق سرویس ابری؛ اتصال و کلیدها سمت HiveOS مدیریت می‌شود.
                   </div>
                 </div>
-                <div className="relative min-w-[140px] flex-1 rounded-[13px] border border-border bg-card p-3.5 opacity-55">
+                <div className="relative min-w-[140px] flex-1 rounded-control border border-border bg-card p-3.5 opacity-55">
                   <span className="absolute end-2 top-2 rounded-full border border-warning bg-warning-bg px-2 py-px text-micro font-bold text-warning">
                     به‌زودی (نسخه ۰.۳)
                   </span>

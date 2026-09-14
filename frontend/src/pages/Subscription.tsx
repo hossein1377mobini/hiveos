@@ -68,7 +68,7 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
     <section className="mx-auto max-w-3xl space-y-4" aria-label="اشتراک">
       <div className="flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-heading font-extrabold text-foreground">اشتراک</h1>
+          <h1 className="text-heading font-bold text-foreground">اشتراک</h1>
           <p className="mt-[3px] text-caption text-muted-foreground">
             دسترسی به خود برنامه از طریق اشتراک دوره‌ای — مستقل از اعتبار مصرف هوش سازمان.
           </p>
@@ -87,10 +87,10 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
       )}
 
       {/* وضعیت اشتراک — الگوی wallet-hero (mockup §۲۱) */}
-      <div className="relative overflow-hidden rounded-[20px] bg-primary px-7 py-[26px] text-primary-foreground shadow-[0_14px_34px_rgba(43,58,115,0.3)]">
+      <div className="relative overflow-hidden rounded-card bg-primary px-7 py-[26px] text-primary-foreground shadow-pop">
         <span aria-hidden className="absolute -end-[30px] -top-[30px] size-40 rounded-full bg-white/[0.06]" />
         <div className="text-xs font-bold opacity-75">وضعیت اشتراک</div>
-        <div className="mt-1.5 text-title font-extrabold" data-testid="plan">
+        <div className="mt-1.5 text-title font-bold" data-testid="plan">
           {sub.expired ? "منقضی شده" : `فعال — بسته‌ی ${planFa}`}
         </div>
         <div className="mt-2 text-xs opacity-85" data-testid="expiry">
@@ -106,7 +106,7 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
 
       {/* اشتراک و اعتبار — تفاوت‌ها (setting-row, mockup) */}
       <Surface className="p-6">
-        <h2 className="mb-3 text-body font-extrabold text-foreground">اشتراک و اعتبار — تفاوت‌ها</h2>
+        <h2 className="mb-3 text-body font-bold text-foreground">اشتراک و اعتبار — تفاوت‌ها</h2>
         <div className="border-b border-border py-3.5 last:border-b-0">
           <div className="text-caption font-bold text-foreground">اشتراک فعال</div>
           <div className="mt-0.5 max-w-[520px] text-xs text-muted-foreground">

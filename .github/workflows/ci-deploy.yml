@@ -46,6 +46,13 @@ jobs:
       # npm test, executed separately so the job log names which gate failed.
       - run: npm run test:a11y
       - run: npm run budget
+      # The design-token pass removed 131 bypasses; ungated they drift back one
+      # rounded-[12px] at a time. Fails on the first violation, naming file+line.
+      - run: npm run audit:ui
+      # ui-audit and every class-name grep passed while all elevation rendered
+      # box-shadow:none (a circular var() resolves to empty, not an error).
+      # This asserts the RESOLVED values in the stylesheet the step above built.
+      - run: npm run test:css
       # F3: unit tests run in jsdom, which has no layout, no navigation and no
       # real page - so a whole class of defect (a page with no landmark, a CDN
       # request, a redirect that never fires) was invisible to them.

@@ -144,6 +144,9 @@
 
   /* Elevation — three levels, all subtle. v0.1 had a 28px navy bloom on every
      card, which flattened the hierarchy because everything floated equally. */
+  --color-shadow-focus: var(--shadow-focus);
+  --color-shadow-focus-strong: var(--shadow-focus-strong);
+
   --shadow-card: 0 1px 2px rgba(28, 28, 25, 0.04), 0 1px 3px rgba(28, 28, 25, 0.03);
   --shadow-raised: 0 2px 4px rgba(28, 28, 25, 0.05), 0 8px 20px rgba(27, 38, 77, 0.06);
   --shadow-pop: 0 12px 32px rgba(28, 28, 25, 0.14), 0 2px 6px rgba(28, 28, 25, 0.06);
@@ -152,6 +155,13 @@
   --ease-out-standard: cubic-bezier(0.22, 1, 0.36, 1);
   --duration-fast: 140ms;
   --duration-base: 240ms;
+
+  /* Focus — a soft navy halo for forms and selected cards. It lives here as a
+     token because --color-* entries are exported to Tailwind by @theme while a
+     bare `:root` variable is not: inlining var(--focus-border) in a utility
+     yields an empty value and the ring silently disappears. */
+  --shadow-focus: 0 0 0 1px var(--color-navy-400);
+  --shadow-focus-strong: 0 0 0 3px rgb(43 58 115 / 0.14);
 }
 
 /* --- 3. Semantic tokens (shadcn contract) ----------------------------------- */
@@ -248,9 +258,14 @@
   --radius-xl: calc(var(--radius) * 1.25);
   --radius-2xl: calc(var(--radius) * 1.6);
 
-  --shadow-card: var(--shadow-card);
-  --shadow-raised: var(--shadow-raised);
-  --shadow-pop: var(--shadow-pop);
+  /* The --shadow-* tokens are deliberately NOT repeated here. Redeclaring one
+     in this block would shadow the literal declared in @theme above with a
+     self-reference, and a circular var() resolves to the empty string rather
+     than failing loudly: the utility still compiles, but every shadow-card /
+     shadow-raised / shadow-pop renders box-shadow: none. That is what used to
+     happen here, so all elevation in the product was invisible while the class
+     names looked correct. --radius-card is the working precedent: declared in
+     @theme only, never repeated. */
 
   --ease-standard: var(--ease-out-standard);
 }
