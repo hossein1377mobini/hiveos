@@ -200,20 +200,26 @@ def _extract_spreadsheet(path: Path) -> str:
         workbook.close()
 
 
-# Tesseract resolves text reliably around a 1400px page width, and accuracy
-# falls away on both sides of that band. Measured on a Persian page scored
-# character-for-character against ground truth:
+# Small images are scaled up before OCR; large ones are left alone.
 #
-#   render width   1x      2x      3x
-#   1400px         0.956   0.936   0.912   <- upscaling a large page hurts
-#    560px         0.911   0.964   0.890
-#    300px         0.717   0.848   0.882   <- a small page badly needs it
+# Tesseract needs a certain pixel height per glyph, and a pasted crop or a phone
+# screenshot is far below it: a 260px-wide page scored 0.292 at native size, and
+# scaling it recovered 0.906. Upscaling is not free in the other direction - a
+# 1400px screenshot scored 0.956 untouched and 0.912 at 3x - so this is a band,
+# not an unconditional resize.
 #
-# So small images are scaled up into the band and large ones are left alone.
-# Upscaling everything to a fixed 300 DPI - the usual advice - scored *worse*
-# than the untouched image on every screenshot tested, because these are
+# The target was chosen by scoring each candidate across eight source widths,
+# character-for-character against known Persian text, and taking the largest mean
+# gain over the untouched image:
+#
+#   target   900     1000    1200    1400
+#   gain    +0.109  +0.106  +0.122  +0.092
+#
+# 1200 wins, and the smallest sources drive it - they are the ones with the most
+# to recover. Scaling everything to a fixed 300 DPI, the usual advice, scored
+# *worse* than the untouched image on every screenshot tested, because these are
 # already-crisp UI renders rather than scanned paper.
-_OCR_TARGET_WIDTH = 1400
+_OCR_TARGET_WIDTH = 1200
 _OCR_MIN_WIDTH = 1000
 
 
