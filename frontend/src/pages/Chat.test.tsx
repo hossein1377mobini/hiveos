@@ -55,14 +55,16 @@ describe("Chat page (RG-14)", () => {
       },
       "GET /chat/sessions/s1/messages": {
         items: [
-          { id: "m1", role: "USER", body: { text: "سلام" }, created_at: "" },
+          // The real server contract, copied from a live GET: "content" is an
+          // object holding the text, not a string. The fixtures used to mirror
+          // the client's wrong "body" shape, so the suite passed while the page
+          // crashed on live data.
+          { id: "m1", role: "USER", content: { text: "سلام" }, citations: [], created_at: "" },
           {
             id: "m2",
             role: "ASSISTANT",
-            body: {
-              text: "پاسخ با منبع",
-              citations: [{ title: "دستورالعمل.pdf", locator: "صفحه ۳" }],
-            },
+            content: { text: "پاسخ با منبع" },
+            citations: [{ title: "دستورالعمل.pdf", locator: "صفحه ۳" }],
             created_at: "",
           },
         ],
@@ -94,8 +96,8 @@ describe("Chat page (RG-14)", () => {
       },
       "GET /chat/sessions/new-session/messages": {
         items: [
-          { id: "m1", role: "USER", body: { text: "سوال من" }, created_at: "" },
-          { id: "m2", role: "ASSISTANT", body: { text: "پاسخ سرور" }, created_at: "" },
+          { id: "m1", role: "USER", content: { text: "سوال من" }, citations: [], created_at: "" },
+          { id: "m2", role: "ASSISTANT", content: { text: "پاسخ سرور" }, citations: [], created_at: "" },
         ],
       },
     });
@@ -130,5 +132,73 @@ describe("Chat page (RG-14)", () => {
     const box = await screen.findByTestId("chat-error");
     expect(box).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("renders a transcript shaped exactly like the API's response", async () => {
+    // Regression: the component read "m.body.text" while the server sends a
+    // flat "content", so opening any conversation with history threw
+    // "Cannot read properties of undefined (reading 'text')" and the whole
+    // chat view blanked. The fixtures in this file shared the component's
+    // mistake, so nothing caught it. These payloads are copied from
+    // chat/service.py:_message_payload, nulls included.
+    mockApi({
+      "GET /chat/sessions": {
+        items: [{ id: "s1", title: null, status: "ACTIVE", created_at: "" }],
+        total_count: 1,
+        page: 1,
+        page_size: 20,
+        has_more: false,
+      },
+      "GET /chat/sessions/s1/messages": {
+        items: [
+          { id: "m1", role: "USER", content: { text: "سؤال قدیمی" }, citations: [], created_at: "" },
+          {
+            id: "m2",
+            role: "ASSISTANT",
+            content: { text: "پاسخ قدیمی" },
+            // A real turn with no retrieved sources stores null, not [].
+            citations: null,
+            tokens: 12,
+            sequence: 2,
+            created_at: "",
+          },
+        ],
+      },
+      "GET /wallet": { balance: 500, blocked: false },
+    });
+    render(<Chat />);
+
+    expect(await screen.findByText("سؤال قدیمی")).toBeInTheDocument();
+    expect(await screen.findByText("پاسخ قدیمی")).toBeInTheDocument();
+    // "منابع:" is derived from citations, so a null list must not paint it.
+    expect(screen.queryByText("منابع:")).not.toBeInTheDocument();
+  });
+
+  it("survives a message whose content or text is missing", async () => {
+    // The column is a JSON blob, so neither the object nor its "text" key is
+    // guaranteed: a SYSTEM/TOOL row or an older row can carry {}. Reading
+    // straight through would crash the transcript on data, not on a bug in
+    // this component.
+    mockApi({
+      "GET /chat/sessions": {
+        items: [{ id: "s1", title: null, status: "ACTIVE", created_at: "" }],
+        total_count: 1,
+        page: 1,
+        page_size: 20,
+        has_more: false,
+      },
+      "GET /chat/sessions/s1/messages": {
+        items: [
+          { id: "m1", role: "SYSTEM", content: null, citations: null, created_at: "" },
+          { id: "m2", role: "ASSISTANT", content: {}, citations: null, created_at: "" },
+          { id: "m3", role: "USER", content: { text: "پیام سالم" }, citations: [], created_at: "" },
+        ],
+      },
+      "GET /wallet": { balance: 500, blocked: false },
+    });
+    render(<Chat />);
+
+    // The good row still renders; the two degraded rows render empty.
+    expect(await screen.findByText("پیام سالم")).toBeInTheDocument();
   });
 });

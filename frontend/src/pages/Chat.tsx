@@ -18,11 +18,31 @@ interface SessionItem {
   created_at: string;
 }
 
+/**
+ * The transcript row exactly as GET /chat/sessions/{id}/messages returns it.
+ *
+ * The property is "content" and it is an OBJECT carrying the text, not a
+ * string: hiveos.chat_messages.content is a JSON column (models/chat.py) and
+ * _message_payload passes it through untouched, so the wire shape is
+ * {"content": {"text": "..."}}. The client read "body.text" instead, which
+ * dereferenced undefined and threw "Cannot read properties of undefined
+ * (reading 'text')" on the first paint of any conversation.
+ *
+ * Verified against the running API, not the ORM:
+ *   GET /chat/sessions/{id}/messages
+ *   {"id":"ac63...","role":"USER","content":{"text":"salam"},"citations":[],...}
+ */
 interface ChatMessage {
   id: string;
   role: string;
-  body: { text?: string; citations?: Array<{ title?: string; locator?: string }> };
+  content: { text?: string } | null;
+  citations?: Citation[] | null;
   created_at: string;
+}
+
+/** The text of a message, tolerating a null content or a missing text key. */
+function messageText(message: ChatMessage): string {
+  return message.content?.text ?? "";
 }
 
 interface WalletMini {
@@ -172,7 +192,7 @@ export default function Chat() {
       await api("POST", "/chat/sessions/" + sessionId + "/messages", { text });
       setMessages((m) => [
         ...m,
-        { id: "local-" + Date.now(), role: "USER", body: { text }, created_at: "" },
+        { id: "local-" + Date.now(), role: "USER", content: { text }, created_at: "" },
       ]);
       const created = await api<{ id: string }>("POST", "/executions", {
         input: { text },
@@ -353,11 +373,11 @@ export default function Chat() {
                       (isUser ? "border-primary/40 bg-accent" : "border-border bg-card")
                     }
                   >
-                    <p className="whitespace-pre-wrap">{m.body.text}</p>
-                    {m.body.citations && m.body.citations.length > 0 && (
+                    <p className="whitespace-pre-wrap">{messageText(m)}</p>
+                    {m.citations && m.citations.length > 0 && (
                       <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-dashed border-border pt-2.5" aria-label="منابع">
                         <span className="text-micro font-bold text-muted-foreground">منابع:</span>
-                        {m.body.citations.map((c: Citation) => (
+                        {m.citations.map((c: Citation) => (
                           <span
                             // Two citations can point at the same locator in the
                             // same document, so the pair is the identity — the
@@ -380,7 +400,7 @@ export default function Chat() {
                       <button
                         type="button"
                         className="inline-flex cursor-pointer items-center gap-[5px] rounded-[7px] border border-transparent px-2 py-[3px] text-micro font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                        onClick={() => void navigator.clipboard?.writeText(m.body.text ?? "")}
+                        onClick={() => void navigator.clipboard?.writeText(messageText(m))}
                         aria-label="کپی پیام"
                       >
                         <Copy aria-hidden className="size-[13px] rtl:-scale-x-100" />

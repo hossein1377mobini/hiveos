@@ -8,7 +8,7 @@ import { DomainStatus } from "../../components/ui/domain-status"
 import { EmptyState } from "../../components/ui/empty-state"
 import { SettingsIcon } from "lucide-react"
 import { ErrorText } from "../../components/ui/error-text"
-import { faNum } from "../../lib/dates"
+import { faDateTime, faNum } from "../../lib/dates"
 import { persianError } from "../../api/errors"
 import { adminApi, AdminSessionExpired } from "../api"
 import { Retry, useLive } from "../useLive"
@@ -167,7 +167,21 @@ interface AiSnapshot {
   credit?: { remaining_irt: number; account_tier: number } | null
   usage?: { transactions: number; tokens_total: number; cost_unit: number } | null
   usage_by_model?: Array<{ model: string; transactions: number; tokens: number }>
-  packages?: Array<{ name: string; remaining_irt: number; days_left: number }>
+  /**
+   * One row per active provider package. The backend already sends all of
+   * this (ai_monitor._packages); the panel only ever read name and days_left,
+   * so an operator could not see what was actually bought, how much of it was
+   * left, or which models it covers.
+   */
+  packages?: Array<{
+    name: string | null
+    description?: string | null
+    remaining_irt: number
+    amount_irt?: number
+    end_date?: string | null
+    days_left: number | null
+    models?: string[]
+  }>
   covered_models?: string[]
 }
 
@@ -296,7 +310,11 @@ function MonitoringSection({ token }: { token: string }) {
     )
   }
 
-  const expiring = (data.packages ?? []).filter((pkg) => pkg.days_left <= 3)
+  const packages = data.packages ?? []
+  // days_left is null when the provider sent an end_date we could not parse;
+  // such a package is not "expiring", it is "unknown", and treating null as a
+  // small number would raise a false alarm.
+  const expiring = packages.filter((pkg) => pkg.days_left !== null && pkg.days_left <= 3)
 
   return (
     <div className="grid gap-4">
@@ -317,10 +335,12 @@ function MonitoringSection({ token }: { token: string }) {
       </div>
       {expiring.length > 0 && (
         <Surface data-testid="ai-credit-warning" className="border-warning-border bg-warning-bg">
-          {expiring.map((pkg) => (
-            <p key={pkg.name} className="text-caption">
-              بستهٔ «{pkg.name}» تا {faNum(Math.round(pkg.days_left))} روز دیگر به پایان می‌رسد. پیش از
-              آن اعتبار تازه تهیه کنید تا پاسخ‌دهی متوقف نشود.
+          {expiring.map((pkg, index) => (
+            <p key={(pkg.name ?? "package") + index} className="text-caption">
+              {pkg.days_left !== null && pkg.days_left < 1
+                ? `بستهٔ «${pkg.name ?? "بی‌نام"}» کمتر از یک روز دیگر به پایان می‌رسد.`
+                : `بستهٔ «${pkg.name ?? "بی‌نام"}» تا ${faNum(Math.round(pkg.days_left ?? 0))} روز دیگر به پایان می‌رسد.`}{" "}
+              پیش از آن اعتبار تازه تهیه کنید تا پاسخ‌دهی متوقف نشود.
             </p>
           ))}
         </Surface>
@@ -350,6 +370,8 @@ function MonitoringSection({ token }: { token: string }) {
           API key {data.api_key_masked}
         </p>
       )}
+      <PackagesPanel packages={packages} />
+
       <div className="flex flex-wrap gap-2">
         {Object.entries(data.configured_models ?? {}).map(([role, model]) => (
           <span key={role} className="flex items-center gap-1.5">
@@ -361,5 +383,126 @@ function MonitoringSection({ token }: { token: string }) {
         ))}
       </div>
     </div>
+  )
+}
+
+/**
+ * The active packages, itemised.
+ *
+ * The account total alone is not actionable: AvalAI scopes credit per package
+ * and per model allowlist, so an operator looking at "۱٬۳۴۴٬۰۱۳ تومان باقی
+ * مانده" still cannot tell whether the model they configured is covered, nor
+ * which package is about to lapse. Each row therefore carries the remaining
+ * amount against what was bought, the expiry in both Jalali and "in N days",
+ * and the models that package still covers.
+ */
+function PackagesPanel({ packages }: { packages: NonNullable<AiSnapshot["packages"]> }) {
+  if (packages.length === 0) {
+    return (
+      <Surface data-testid="ai-packages-empty">
+        <h2 className="text-subheading">بسته‌های فعال</h2>
+        <p className="mt-1 text-caption text-muted-foreground">
+          درگاه هیچ بستهٔ فعالی برای این حساب گزارش نکرد. اگر تازه اعتبار خریده‌اید،
+          «تازه‌سازی اعتبار» را بزنید.
+        </p>
+      </Surface>
+    )
+  }
+
+  return (
+    <Surface data-testid="ai-packages">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <h2 className="text-subheading">بسته‌های فعال</h2>
+        <span className="text-micro text-muted-foreground">
+          {faNum(packages.length)} بسته
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3">
+        {packages.map((pkg, index) => {
+          const days = pkg.days_left
+          // Three bands rather than two: a package can be paid-up but nearly
+          // over, and that is the case worth flagging before it stops answering.
+          const tone =
+            days === null
+              ? "border-border"
+              : days <= 1
+                ? "border-error-border bg-error-bg"
+                : days <= 3
+                  ? "border-warning-border bg-warning-bg"
+                  : "border-border"
+          return (
+            <div
+              key={(pkg.name ?? "package") + index}
+              className={"rounded-control border px-4 py-3 " + tone}
+              data-testid="ai-package-row"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-caption font-bold">{pkg.name ?? "بستهٔ بی‌نام"}</span>
+                {days !== null && (
+                  <span
+                    className={
+                      "rounded-pill px-2 py-0.5 text-micro font-bold " +
+                      (days <= 1
+                        ? "bg-error text-white"
+                        : days <= 3
+                          ? "bg-warning text-white"
+                          : "bg-secondary text-muted-foreground")
+                    }
+                    data-testid="ai-package-days"
+                  >
+                    {days < 1
+                      ? "کمتر از یک روز مانده"
+                      : faNum(Math.round(days)) + " روز مانده"}
+                  </span>
+                )}
+              </div>
+              {pkg.description && (
+                <p className="mt-1 text-micro text-muted-foreground">{pkg.description}</p>
+              )}
+              <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+                <div>
+                  <dt className="text-micro text-muted-foreground">باقی‌ماندهٔ بسته</dt>
+                  <dd data-numeric className="text-caption font-bold">
+                    {faNum(Math.round(pkg.remaining_irt ?? 0))} تومان
+                  </dd>
+                </div>
+                {pkg.amount_irt !== undefined && pkg.amount_irt !== null && (
+                  <div>
+                    <dt className="text-micro text-muted-foreground">مبلغ خرید</dt>
+                    <dd data-numeric className="text-caption">
+                      {faNum(Math.round(pkg.amount_irt))} تومان
+                    </dd>
+                  </div>
+                )}
+                {pkg.end_date && (
+                  <div>
+                    <dt className="text-micro text-muted-foreground">تاریخ پایان</dt>
+                    <dd className="text-caption">{faDateTime(pkg.end_date)}</dd>
+                  </div>
+                )}
+              </dl>
+              {(pkg.models ?? []).length > 0 && (
+                <details className="mt-2.5">
+                  <summary className="cursor-pointer text-micro font-bold text-muted-foreground">
+                    مدل‌های تحت پوشش ({faNum((pkg.models ?? []).length)})
+                  </summary>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {(pkg.models ?? []).map((model) => (
+                      <span
+                        key={model}
+                        className="mono rounded-pill border border-border bg-secondary px-2 py-0.5 text-micro"
+                        dir="ltr"
+                      >
+                        {model}
+                      </span>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </Surface>
   )
 }
