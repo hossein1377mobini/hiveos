@@ -55,6 +55,87 @@ def test_upload_stores_files_and_creates_queued_assets(client, tmp_path):
         assert found, f"{item['name']} not stored under storage root"
 
 
+def test_listing_reports_the_pipeline_stage_of_each_asset(client, tmp_path):
+    """H2: the document table needed a progress column and this endpoint reported
+    only a coarse status, so a file waiting its turn and one that had been read
+    but not split into knowledge units looked identical. The stage fields come
+    from the row; nothing is computed or estimated here."""
+    ctx = _with_source(client, tmp_path)
+    client.post(
+        f"{KA}/upload",
+        headers=ctx["headers"],
+        files=[("files", ("policy.txt", "سیاست بازگشت کالا. ".encode() * 40))],
+    )
+
+    asset = client.get(f"{KA}", headers=ctx["headers"]).json()["data"]["assets"][0]
+
+    # Uploaded but not yet classified: honest zeros, not absent keys.
+    assert asset["text_length"] == 0
+    assert asset["chunks"] == 0
+    assert asset["asset_type"] is None
+    assert asset["classified_at"] is None
+
+
+def test_listing_counts_chunks_for_a_classified_asset(client, tmp_path):
+    """The count is what makes the column useful: a ready asset that produced no
+    knowledge units is a real failure mode and must not read like success."""
+    ctx = _with_source(client, tmp_path)
+    uploaded = client.post(
+        f"{KA}/upload",
+        headers=ctx["headers"],
+        files=[("files", ("policy.txt", "سیاست بازگشت کالا تا سی روز. ".encode() * 40))],
+    ).json()["data"]["stored"][0]
+
+    # POST runs the classification; GET only reads back a previous run.
+    classified = client.post(f"{KA}/{uploaded['id']}/classify", headers=ctx["headers"])
+    assert classified.status_code == 200, classified.text
+
+    asset = client.get(f"{KA}", headers=ctx["headers"]).json()["data"]["assets"][0]
+    assert asset["text_length"] > 0
+    # A classified text asset is chunked as part of the same call.
+    assert asset["chunks"] >= 1
+    assert asset["asset_type"] is not None
+
+
+def test_the_listing_is_scoped_to_the_callers_organization(client, tmp_path):
+    """The chunk count is a join against knowledge_chunks, so it is exactly the
+    kind of read that can quietly leak another tenant's rows. Scoped like every
+    other read: a fresh tenant sees none of the first tenant's documents."""
+    first = _with_source(client, tmp_path)
+    first_upload = client.post(
+        f"{KA}/upload",
+        headers=first["headers"],
+        files=[("files", ("mine.txt", b"only mine"))],
+    )
+    assert first_upload.status_code == 200, first_upload.text
+
+    first_listing = client.get(f"{KA}", headers=first["headers"]).json()["data"]["assets"]
+    assert [a["name"] for a in first_listing] == ["mine.txt"]
+    # Not classified yet, so the honest answer is zero chunks.
+    assert all(a["chunks"] == 0 for a in first_listing)
+
+    # A brand-new organization, through its own registration + owner flow.
+    other_org = client.post(
+        "/api/v1/auth/register-organization",
+        json={"name": "سازمان دیگر", "industry": "fintech", "size": "10_50"},
+    ).json()["data"]["organization_id"]
+    other_owner = client.post(
+        "/api/v1/auth/owner",
+        json={
+            "organization_id": other_org,
+            "username": "owner.other",
+            "mobile": "9127776655",
+            "password": "Str0ng!Pass",
+            "confirm_password": "Str0ng!Pass",
+        },
+    ).json()["data"]
+    other_headers = {"Authorization": f"Bearer {other_owner['session']['token']}"}
+
+    other_listing = client.get(f"{KA}", headers=other_headers)
+    assert other_listing.status_code == 200, other_listing.text
+    assert other_listing.json()["data"]["assets"] == []
+
+
 def test_upload_rejects_bad_format_and_oversize_but_continues(client, tmp_path):
     ctx = _with_source(client, tmp_path)
     from backend.config import get_settings

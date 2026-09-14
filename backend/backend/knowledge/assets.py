@@ -23,7 +23,7 @@ from backend.config import get_settings
 from backend.knowledge.chunking import build_metadata, list_chunks, normalize_text, replace_chunks
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.processing import enqueue_job
-from backend.models import KnowledgeAsset, KnowledgeSource, Organization
+from backend.models import KnowledgeAsset, KnowledgeChunk, KnowledgeSource, Organization
 
 # US-205 classification table, v0.1 active formats; HTML is explicitly banned.
 ALLOWED_EXTENSIONS = frozenset(
@@ -256,6 +256,13 @@ async def list_assets(
             .order_by(KnowledgeAsset.created_at.desc())
         )
     ).scalars().all()
+    # H2: the document table had no progress column because this endpoint
+    # reported nothing but a coarse status, so "queued" looked identical for a
+    # file waiting its turn and one that had been OCR'd but not chunked. The
+    # pipeline stage and text length are already on the row - they were simply
+    # never read. Reported as-is, not as a percentage: a percentage here would
+    # be invented, and an invented progress bar is worse than an honest label.
+    chunk_counts = await _chunk_counts(session, organization.id, [row.id for row in rows])
     return [
         {
             "id": row.id,
@@ -265,9 +272,32 @@ async def list_assets(
             "extension": row.extension,
             "origin": "upload" if row.source_id is None else "folder_scan",
             "deleted_at": row.deleted_at,
+            "asset_type": row.asset_type,
+            "pipeline": row.pipeline,
+            # 0 for a file whose text has not been extracted yet.
+            "text_length": len(row.extracted_text or ""),
+            "chunks": chunk_counts.get(row.id, 0),
+            "classified_at": row.classified_at,
         }
         for row in rows
     ]
+
+
+async def _chunk_counts(
+    session: AsyncSession, organization_id, asset_ids: list
+) -> dict:
+    """Chunk count per asset, in one query rather than one per row."""
+    if not asset_ids:
+        return {}
+    rows = await session.execute(
+        select(KnowledgeChunk.asset_id, func.count())
+        .where(
+            KnowledgeChunk.organization_id == organization_id,
+            KnowledgeChunk.asset_id.in_(asset_ids),
+        )
+        .group_by(KnowledgeChunk.asset_id)
+    )
+    return {asset_id: int(count) for asset_id, count in rows.all()}
 
 
 async def classify_single_asset(

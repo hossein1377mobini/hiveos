@@ -453,15 +453,29 @@ _ACTOR_UUID_RE = re.compile(
 async def system_logs(
     level: str = Query(default="all", pattern="^(all|activity|error)$"),
     q: str | None = Query(default=None, max_length=200),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     authorization: str = Header(default=""),
 ) -> dict:
     """E (PO request): the audit trail in the panel - who did what, to which
-    organization, and when. 'error' keys are the operational failures."""
+    organization, and when. 'error' keys are the operational failures.
+
+    since/until bound the range on the server. The panel's Jalali picker asks
+    "what happened last week", and answering it client-side would only filter
+    the current page of results - the matches on the next page would disappear
+    silently, which is the worst possible behaviour for an audit trail.
+    """
     await _authorized(authorization)
     clauses = ["1 = 1"]
     params: dict = {"limit": limit, "offset": offset}
+    if since is not None:
+        clauses.append("l.created_at >= :since")
+        params["since"] = since
+    if until is not None:
+        clauses.append("l.created_at <= :until")
+        params["until"] = until
     if level == "error":
         clauses.append("(l.event LIKE '%.failed%' OR l.event LIKE '%.error%')")
     elif level == "activity":

@@ -59,6 +59,59 @@ def test_admin_logs_carry_the_audit_trail(client, tmp_path):
     assert all("knowledge-source" in row["event"] for row in searched["logs"])
 
 
+def test_admin_logs_can_be_bounded_to_a_time_range(client, tmp_path):
+    """The panel's Jalali picker sends since/until; the bound must be applied by
+    the server, because filtering a page client-side would silently drop matches
+    that live on the next page - the one failure an audit trail cannot have."""
+    ctx = _bootstrap_full(client)
+    _register_folder(client, ctx, tmp_path)
+    admin = _login(client)
+
+    everything = client.get(f"{ADMIN}/logs?limit=50", headers=admin).json()["data"]
+    assert everything["total"] >= 1
+
+    # The panel sends UTC instants from toISOString(), which end in "Z" and carry
+    # no "+". The test passes them as params rather than by string interpolation
+    # so httpx percent-encodes them: a raw "+00:00" in a query string decodes to
+    # a space and would fail for a reason that has nothing to do with the filter.
+    future = "2099-01-01T00:00:00Z"
+    past = "2000-01-01T00:00:00Z"
+
+    # A window that starts after the events were written must be empty.
+    empty = client.get(
+        f"{ADMIN}/logs", params={"since": future}, headers=admin
+    ).json()["data"]
+    assert empty["total"] == 0
+    assert empty["logs"] == []
+
+    # A window that ends before them must be empty too.
+    before = client.get(
+        f"{ADMIN}/logs", params={"until": past}, headers=admin
+    ).json()["data"]
+    assert before["total"] == 0
+
+    # A window that contains them returns the same rows, so the bound is a
+    # filter and not a truncation.
+    wide = client.get(
+        f"{ADMIN}/logs", params={"since": past, "until": future}, headers=admin
+    ).json()["data"]
+    assert wide["total"] == everything["total"]
+
+    # An offset form must work too: the panel may send a local-time range in a
+    # future iteration, and "+00:00" must not silently become a space.
+    offset_form = client.get(
+        f"{ADMIN}/logs", params={"since": "2099-01-01T00:00:00+00:00"}, headers=admin
+    ).json()["data"]
+    assert offset_form["total"] == 0, "an explicit UTC offset must parse, not become a space"
+
+    # A malformed timestamp is rejected as a bad request, not a 500. The
+    # project's error envelope maps request-shape failures to 400 (api-standards
+    # §errors), so that is the contract asserted here.
+    bad = client.get(f"{ADMIN}/logs", params={"since": "not-a-date"}, headers=admin)
+    assert bad.status_code == 400
+    assert bad.json()["error"]["code"]
+
+
 def test_organization_detail_lists_related_operations(client, tmp_path):
     ctx = _bootstrap_full(client)
     folder = _register_folder(client, ctx, tmp_path)
