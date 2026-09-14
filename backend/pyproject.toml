@@ -22,6 +22,11 @@ dependencies = [
     "psycopg[binary]>=3.3.5",
     "pydantic-settings>=2.15.0",
     "pypdf>=6.18.0",
+    # US-205 image pipeline: classify.py imports this at extraction time. The
+    # binary comes from the image (infrastructure/api.Dockerfile); this is only
+    # the binding, and without it every image asset fails with
+    # ModuleNotFoundError instead of OCR_UNAVAILABLE.
+    "pytesseract>=0.3.13",
     "python-docx>=1.2.0",
     "python-multipart>=0.0.32",
     "python-pptx>=1.0.2",

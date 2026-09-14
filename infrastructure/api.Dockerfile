@@ -1,6 +1,19 @@
 # HiveOS backend image (v0.1) - uv-based, Python 3.11
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
+# OCR engine for the image pipeline (US-205). The six image formats are part of
+# the supported set, but classify.py refuses to run without the binary and
+# raises OCR_UNAVAILABLE - so without this every image asset stayed queued
+# forever and never became searchable. The Persian pack is required: extracted
+# text is almost entirely Persian here, and eng alone returns nothing usable.
+# Installed before the unprivileged user is created, as apt needs root.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-fas \
+        tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 # Review round 2: run as unprivileged user, not root (uid 10001).
 RUN useradd --system --uid 10001 --no-create-home hiveos
 
