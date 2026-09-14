@@ -75,7 +75,7 @@ jobs:
             nginx:1.27-alpine sh /check.sh
 
   deploy-staging:
-    needs: backend
+    needs: [backend, frontend]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -84,6 +84,24 @@ jobs:
       - name: Build backend image
         run: docker build -f infrastructure/api.Dockerfile -t hiveos/api:ci-$GITHUB_SHA .
 
+      # The web app is a separate artifact: it is static files served by the
+      # host nginx, not something inside the API image. It was previously left
+      # out of the pipeline entirely, so each frontend change needed a manual
+      # copy and the live site could silently lag the repo.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npm run audit:ui
+          npm run test:css
+
       - name: Package image + deploy assets
         run: |
           mkdir -p dist
@@ -91,6 +109,10 @@ jobs:
           tar -czf dist/hiveos-deploy.tgz \
             -C infrastructure docker-compose.staging.yml \
             -C ../scripts deploy
+          # -C dist . keeps paths relative, so the server extracts the same
+          # layout it currently serves from /var/www/hiveos/dist.
+          tar -czf dist/hiveos-web.tgz -C frontend/dist .
+          ls -la dist/
 
       - name: Copy artifacts to staging
         uses: appleboy/scp-action@v0.1.7
@@ -117,4 +139,11 @@ jobs:
             sudo tar -xzf /home/ubuntu/deploy/hiveos-deploy.tgz -C /opt/hiveos/app
             sudo docker load -i /home/ubuntu/deploy/hiveos-api.tgz
             sudo chmod +x /opt/hiveos/app/deploy/*.sh
+            # API first: the new frontend may call endpoints the old image does
+            # not have, so shipping it first would serve a client against a
+            # backend that cannot answer it. remote-deploy.sh exits non-zero on
+            # a failed healthcheck and rolls back, which stops the run here.
             sudo bash /opt/hiveos/app/deploy/remote-deploy.sh "ci-$GIT_SHA"
+            # Then the static web app, from the same commit.
+            sudo bash /opt/hiveos/app/deploy/remote-deploy-web.sh \
+              /home/ubuntu/deploy/hiveos-web.tgz "ci-$GIT_SHA"
