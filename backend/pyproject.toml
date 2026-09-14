@@ -48,6 +48,12 @@ local-ml = [
 dev = [
   "pytest>=8.3",
   "ruff>=0.9",
+  # tests/test_onnx_batching.py builds fake (batch, seq_len, hidden) arrays to
+  # reproduce a padding bug that reached production as EMBEDDING_UNAVAILABLE.
+  # numpy otherwise only arrives with the local-ml extra, which CI does not
+  # install, so the test failed to import there. Skipping it would have been
+  # wrong: it is the only guard on that padding path.
+  "numpy>=2.0",
 ]
 
 [tool.ruff]
