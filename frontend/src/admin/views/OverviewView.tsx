@@ -33,7 +33,11 @@ export default function OverviewView({ token }: { token: string }) {
   if (!data) return <p className="text-caption text-muted-foreground">در حال دریافت وضعیت…</p>
 
   const counters = data.counters ?? {}
-  const attention = data.jobs.open > 0 || data.health !== "green"
+  // jobs is optional in the /system-status payload and every other read of it
+  // in this file already defaults (line below: data.jobs.open ?? 0, and
+  // SystemView). This one did not, so a response without the jobs block crashed
+  // the whole landing view through the ErrorBoundary instead of degrading.
+  const attention = (data.jobs?.open ?? 0) > 0 || data.health !== "green"
 
   return (
     <div className="grid gap-5">
@@ -61,7 +65,7 @@ export default function OverviewView({ token }: { token: string }) {
         />
         <StatCard
           label="کارهای در جریان"
-          value={faNum(data.jobs.open ?? 0)}
+          value={faNum(data.jobs?.open ?? 0)}
           hint={faNum(counters.pending_charge_requests ?? 0) + " درخواست شارژ در انتظار"}
           icon={attention ? TriangleAlertIcon : ActivityIcon}
           tone={attention ? "warning" : "success"}

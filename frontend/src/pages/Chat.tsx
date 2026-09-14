@@ -1,7 +1,16 @@
-import { AlertCircle, Copy, FileText, House, Plus, Search, Send } from "lucide-react";
+import { AlertCircle, ArrowRight, Copy, FileText, History, House, Plus, Search, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { Button } from "../components/ui/button";
 import { LoadingButton } from "../components/ui/button-loading";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { ZeroCreditBanner } from "../components/ZeroCreditBanner";
 import { faDate, faTime, norm } from "../utils/format";
@@ -79,6 +88,40 @@ function sessionBucket(createdAt: string): string {
 
 const BUCKET_ORDER = ["امروز", "دیروز", "۷ روز اخیر", "قدیمی‌تر"];
 
+/**
+ * Where the transcript was scrolled to, and which conversation was open.
+ *
+ * The transcript lives in an overflow-y-auto pane inside a route, so leaving
+ * /chat unmounts it and React destroys both pieces of state. The PO asked to
+ * come back to where they left off instead of re-scrolling by hand. sessionStorage
+ * is the right scope: it is per-tab, survives a route change and a refresh, and
+ * is discarded when the tab closes, so a new visit starts clean.
+ */
+const CHAT_STATE_KEY = "hiveos.chat.view";
+
+function loadChatView(): { sessionId: string | null; scrollTop: number } {
+  try {
+    const raw = sessionStorage.getItem(CHAT_STATE_KEY);
+    if (!raw) return { sessionId: null, scrollTop: 0 };
+    const parsed = JSON.parse(raw) as { sessionId?: unknown; scrollTop?: unknown };
+    return {
+      sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : null,
+      scrollTop: typeof parsed.scrollTop === "number" && parsed.scrollTop >= 0 ? parsed.scrollTop : 0,
+    };
+  } catch {
+    // A corrupt or unavailable sessionStorage must never block the chat itself.
+    return { sessionId: null, scrollTop: 0 };
+  }
+}
+
+function saveChatView(sessionId: string | null, scrollTop: number): void {
+  try {
+    sessionStorage.setItem(CHAT_STATE_KEY, JSON.stringify({ sessionId, scrollTop }));
+  } catch {
+    /* storage full or blocked: the page still works, it just forgets. */
+  }
+}
+
 export default function Chat() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -96,8 +139,27 @@ export default function Chat() {
    * until some unrelated state change happened to re-render the tree.
    */
   const [lastSent, setLastSent] = useState("");
+  /** The transcript pane; owns the scroll position this page restores. */
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  /** Guards the restore so a later send still scrolls to the newest message. */
+  const restoredRef = useRef(false);
+  /**
+   * Whether the transcript should follow new content.
+   *
+   * Only a message this tab just sent (or a brand-new conversation) may move
+   * the scroll position. Driving it off [messages] alone meant the smooth
+   * scrollIntoView re-fired on every remount and dragged the pane to the end,
+   * cancelling the restored offset a moment after it was applied - the user
+   * was thrown to the bottom anyway.
+   */
+  const followRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeIdRef = useRef<string | null>(null);
+  /** Below md the history rail is a dialog, not a column. */
+  const [railOpen, setRailOpen] = useState(false);
+  /** Set when a different conversation is opened, to reset its scroll to top. */
+  const [openingSession, setOpeningSession] = useState(false);
+  const navigate = useNavigate();
 
   // The chat list endpoint is paginated: it answers {items, total_count, page,
   // page_size, has_more}, not {sessions}. Reading the wrong key yielded [] every
@@ -108,7 +170,16 @@ export default function Chat() {
     return data.items ?? [];
   }, []);
 
-  const openSession = useCallback(async (id: string) => {
+  /**
+   * Load a conversation's transcript.
+   *
+   * resetScroll separates the two callers. A click in the rail means "show me
+   * this conversation from the top"; the bootstrap path is a restore, and must
+   * keep the offset that was remembered for the conversation being returned to.
+   * Without the distinction the mount restore and the reset raced, and the
+   * remembered offset was always wiped back to zero.
+   */
+  const openSession = useCallback(async (id: string, resetScroll = false) => {
     activeIdRef.current = id;
     setActiveId(id);
     try {
@@ -121,6 +192,8 @@ export default function Chat() {
       if (activeIdRef.current !== id) return;
       setMessages(data.items ?? []);
       setError(null);
+      // Only a deliberate selection resets the pane; a bootstrap restore does not.
+      if (resetScroll) setOpeningSession(true);
     } catch (e) {
       if (activeIdRef.current !== id) return;
       setError(e instanceof Error ? e.message : "دریافت پیام‌های گفتگو ناموفق بود.");
@@ -132,7 +205,12 @@ export default function Chat() {
   const bootstrap = useCallback(async () => {
     try {
       const list = await loadSessions();
-      if (list.length > 0) await openSession(list[0].id);
+      // Reopen the conversation that was open when the user last left /chat,
+      // not simply the newest one. The id is validated against the server's own
+      // list first, so a session deleted in another tab cannot 404 here.
+      const remembered = loadChatView().sessionId;
+      const target = list.find((s) => s.id === remembered) ?? list[0];
+      if (target) await openSession(target.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "دریافت گفتگوها ناموفق بود.");
     }
@@ -150,9 +228,67 @@ export default function Chat() {
     void bootstrap();
   }, [bootstrap]);
 
+  /**
+   * Scroll policy for the transcript.
+   *
+   * The first paint after a remount restores the remembered offset instead of
+   * jumping to the bottom; every later change still follows the newest message.
+   * A saved offset beyond the current content (messages added elsewhere, or a
+   * shorter conversation) is clamped by the browser, so the pane lands at its
+   * own end rather than overflowing.
+   */
   useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    if (!restoredRef.current) {
+      // Nothing to restore into until the transcript has actually arrived;
+      // scrolling here would also be pointless on an empty pane.
+      if (messages.length === 0) return;
+      restoredRef.current = true;
+      const { scrollTop } = loadChatView();
+      if (scrollTop > 0) {
+        // Instant, not smooth: an animated scroll through a long transcript
+        // reads as a glitch when the user expected to already be there.
+        el.scrollTop = scrollTop;
+        return;
+      }
+    }
+    // Following is opt-in, so returning to the page never yanks the view down.
+    if (!followRef.current) return;
     bottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [messages, busy]);
+
+  // Selecting another conversation scrolls that transcript to its beginning.
+  // Declared before the persistence effect so the offset is republished only
+  // after the pane has actually moved.
+  useEffect(() => {
+    if (!openingSession) return;
+    restoredRef.current = true;
+    followRef.current = false;
+    if (transcriptRef.current) transcriptRef.current.scrollTop = 0;
+    setOpeningSession(false);
+  }, [openingSession]);
+
+  /** Remember the open conversation and the transcript offset for the next visit. */
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const remember = () => {
+      // Ignore the final scroll event the browser fires while the route is
+      // being torn down. As the pane collapses its scrollTop is clamped to 0,
+      // and that event used to overwrite the offset the user had actually
+      // scrolled to - so returning to /chat always landed at the bottom.
+      // A detached or zero-height pane can only report that clamped value.
+      if (!el.isConnected || el.clientHeight === 0) return;
+      saveChatView(activeIdRef.current, el.scrollTop);
+    };
+    // scroll fires continuously; the listener only keeps the latest offset and
+    // does not re-render anything.
+    el.addEventListener("scroll", remember, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", remember);
+    };
+  }, []);
 
   async function newChat() {
     try {
@@ -161,6 +297,12 @@ export default function Chat() {
       activeIdRef.current = data.id;
       setActiveId(data.id);
       setMessages([]);
+      // A new conversation starts at the top of an empty pane, and must not
+      // inherit the previous conversation's remembered offset.
+      restoredRef.current = true;
+      followRef.current = true;
+      saveChatView(data.id, 0);
+      if (transcriptRef.current) transcriptRef.current.scrollTop = 0;
     } catch (e) {
       setError(e instanceof Error ? e.message : "ساخت گفتگو ناموفق بود.");
     }
@@ -176,6 +318,8 @@ export default function Chat() {
     // which made the send button look broken. Create the session on demand
     // instead - typing a question should never require a separate click.
     if (!text || busy) return;
+    // This send is the one case that should move the transcript.
+    followRef.current = true;
     setLastSent(text);
     setInput("");
     setBusy(true);
@@ -230,13 +374,18 @@ export default function Chat() {
 
   const blocked = wallet?.blocked === true;
 
-  return (
-    <div className="flex min-h-0 flex-1" aria-label="گفتگو">
-      {/* — chat-list (mockup §۲۰) — */}
-      <aside
-        className="hidden w-[280px] shrink-0 flex-col border-e border-border bg-card md:flex"
-        aria-label="فهرست گفتگوها"
-      >
+  /**
+   * The conversation rail.
+   *
+   * Rendered twice on purpose: as the sticky column at md and up, and inside a
+   * dialog below md. It used to be "hidden … md:flex" with no counterpart, so
+   * on a phone the entire history was unreachable - the PO's report. The body
+   * sits in one function so the two presentations cannot drift apart; only the
+   * scrolling wrapper differs.
+   */
+  function renderRail(bodyClassName: string) {
+    return (
+      <>
         <div className="flex gap-2 border-b border-border p-3.5">
           <LoadingButton size="sm" className="flex-1" onClick={newChat}>
             <Plus aria-hidden />
@@ -255,7 +404,7 @@ export default function Chat() {
             />
           </div>
         </div>
-        <div className="flex-1 overflow-auto p-2" aria-label="گفتگوها">
+        <div className={bodyClassName} aria-label="گفتگوها">
           {grouped.length === 0 && (
             <div className="px-4 py-10 text-center">
               <p className="text-caption leading-[1.9] text-muted-foreground">
@@ -272,7 +421,12 @@ export default function Chat() {
                 <button
                   key={s.id}
                   type="button"
-                  onClick={() => openSession(s.id)}
+                  onClick={() => {
+                    void openSession(s.id, true);
+                    // On a phone the rail is an overlay: pick a conversation and
+                    // get out of the way, the same as any mobile drawer.
+                    setRailOpen(false);
+                  }}
                   aria-current={activeId === s.id ? "true" : undefined}
                   className={
                     "relative mb-0.5 block w-full cursor-pointer rounded-control p-2.5 pe-16 text-start " +
@@ -295,10 +449,72 @@ export default function Chat() {
             </div>
           ))}
         </div>
+      </>
+    );
+  }
+
+  return (
+    // A real <section> landmark, not an aria-label on a plain div: a label on a
+    // div does nothing, so the whole chat surface was unlandmarked and had no
+    // level-one heading (axe: region, page-has-heading-one). The heading is
+    // visually hidden because the transcript is the page's content and a visible
+    // title would push it down on the one screen that is all content.
+    <section className="flex min-h-0 flex-1" aria-label="گفتگو">
+      <h1 className="sr-only">گفتگو</h1>
+      {/* — chat-list (mockup §۲۰) — */}
+      <aside
+        className="hidden w-[280px] shrink-0 flex-col border-e border-border bg-card md:flex"
+        aria-label="فهرست گفتگوها"
+      >
+        {renderRail("flex-1 overflow-auto p-2")}
       </aside>
+
+      {/* Mobile equivalent of the rail above. Radix owns the focus trap, Escape
+          and the overlay, so this does not reimplement dialog behaviour. */}
+      <Dialog open={railOpen} onOpenChange={setRailOpen}>
+        <DialogContent
+          className="flex max-h-[80dvh] flex-col gap-0 p-0 md:hidden"
+          aria-label="فهرست گفتگوها"
+        >
+          <DialogHeader className="border-b border-border px-4 py-3 text-start">
+            <DialogTitle className="text-subheading font-bold">گفتگوها</DialogTitle>
+            <DialogDescription className="sr-only">
+              فهرست گفتگوهای پیشین؛ برای باز کردن هر گفتگو روی آن بزنید.
+            </DialogDescription>
+          </DialogHeader>
+          {renderRail("min-h-0 flex-1 overflow-auto p-2")}
+        </DialogContent>
+      </Dialog>
 
       {/* — chat-main — */}
       <section className="flex min-w-0 flex-1 flex-col bg-secondary" aria-label="پیام‌ها">
+        {/* Below md there is no rail column, so this is the only way into the
+            conversation history. */}
+        <div className="flex items-center gap-2 border-b border-border px-[8%] py-2 md:hidden">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="rounded-control"
+            onClick={() => setRailOpen(true)}
+          >
+            <History aria-hidden className="size-4" />
+            گفتگوها
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="rounded-control"
+            onClick={() => navigate("/")}
+          >
+            <ArrowRight aria-hidden className="size-4" />
+            بازگشت
+          </Button>
+          <span className="truncate text-caption font-bold text-foreground">
+            {sessions.find((s) => s.id === activeId)?.title ?? "گفتگوی جدید"}
+          </span>
+        </div>
         <div className="px-[8%] pt-4">
           <ZeroCreditBanner visible={blocked} />
         </div>
@@ -311,6 +527,7 @@ export default function Chat() {
           announced while the request is in flight. [E5]
         */}
         <div
+          ref={transcriptRef}
           aria-live="polite"
           aria-busy={busy}
           className="min-h-0 flex-1 space-y-[18px] overflow-y-auto px-[8%] py-[26px]"
@@ -399,7 +616,7 @@ export default function Chat() {
                     <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
                         type="button"
-                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-xs border border-transparent px-2 py-[3px] text-micro font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                        className="inline-flex cursor-pointer items-center gap-[5px] rounded-xs border border-transparent px-2 py-[3px] text-micro font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground min-h-11 md:min-h-0"
                         onClick={() => void navigator.clipboard?.writeText(messageText(m))}
                         aria-label="کپی پیام"
                       >
@@ -499,6 +716,6 @@ export default function Chat() {
           </div>
         </form>
       </section>
-    </div>
+    </section>
   );
 }

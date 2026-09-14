@@ -45,11 +45,25 @@ export default function Subscription({ onNavigate }: { onNavigate?: (id: NavId) 
     void load();
   }, [load]);
 
+  // Both early returns keep the page's <h1>. Without it the loading and
+  // failure states were the only screens in the product with no level-one
+  // heading, so a screen-reader user lost the page title exactly when they
+  // most needed to know which page had failed (axe: page-has-heading-one).
   if (!sub) {
     if (error) {
-      return <RetryNotice message={error} onRetry={() => void load()} testId="subscription-retry" />;
+      return (
+        <section className="mx-auto max-w-3xl space-y-4" aria-label="اشتراک">
+          <h1 className="text-heading font-bold text-foreground">اشتراک</h1>
+          <RetryNotice message={error} onRetry={() => void load()} testId="subscription-retry" />
+        </section>
+      );
     }
-    return <p className="text-sm text-muted-foreground">در حال بارگذاری…</p>;
+    return (
+      <section className="mx-auto max-w-3xl space-y-4" aria-label="اشتراک">
+        <h1 className="text-heading font-bold text-foreground">اشتراک</h1>
+        <p className="text-sm text-muted-foreground">در حال بارگذاری…</p>
+      </section>
+    );
   }
 
   // Date.now() during render is impure: two renders of the same data would

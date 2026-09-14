@@ -37,8 +37,13 @@ export class ErrorBoundary extends React.Component<Props, State> {
     const { error } = this.state
     if (!error) return this.props.children
 
+    // A <main>, not a <div>: this screen replaces the whole surface, so the
+    // <main> the shell normally renders is gone with it. Without this the one
+    // screen a user reaches when something is already broken was also the one
+    // screen with no main landmark and no region (axe: landmark-one-main,
+    // region). The recovery buttons then had nowhere to be found from.
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-secondary p-6">
+      <main className="flex min-h-dvh items-center justify-center bg-secondary p-6">
         <div className="w-full max-w-md rounded-card border border-border bg-card p-6 text-center shadow-card">
           <span
             aria-hidden
@@ -69,7 +74,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             </Button>
           </div>
         </div>
-      </div>
+      </main>
     )
   }
 }

@@ -139,7 +139,17 @@ function SidebarProvider({
             } as React.CSSProperties
           }
           className={cn(
-            "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+            // h-svh, not min-h-svh. A minimum-height shell is free to grow
+            // past the viewport, and it did: <main> stretched to the full
+            // transcript height, so the document itself became the scroller
+            // (scrollHeight 5671 vs 720 visible), the inner overflow-y-auto
+            // transcript never constrained (clientHeight === scrollHeight), and
+            // the sidebar - a sibling in the flex row - stretched to 5670px of
+            // mostly empty rail and scrolled out of view. Pinning the shell to
+            // the viewport moves the scroll back inside the transcript pane.
+            // min-h-0 releases the automatic minimum size on the main axis, and
+            // h-dvh is used over h-svh alone for the same reason as the shell.
+            "group/sidebar-wrapper flex h-svh min-h-0 w-full has-data-[variant=inset]:bg-sidebar",
             className
           )}
           {...props}
@@ -167,8 +177,9 @@ function Sidebar({
 
   if (collapsible === "none") {
     return (
-      <div
+      <nav
         data-slot="sidebar"
+        aria-label="ناوبری اصلی"
         className={cn(
           "flex h-full w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground",
           className
@@ -176,7 +187,7 @@ function Sidebar({
         {...props}
       >
         {children}
-      </div>
+      </nav>
     )
   }
 
@@ -251,13 +262,19 @@ function Sidebar({
         )}
         {...props}
       >
-        <div
+        {/* A <nav> landmark, not a <div>: the nine primary destinations lived
+            outside every landmark, so a screen-reader user could not jump to the
+            navigation and a "region" audit found every link orphaned (axe:
+            region, 9 nodes on every route). The mobile branch below gets the
+            same effect from SheetContent's dialog role. */}
+        <nav
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
+          aria-label="ناوبری اصلی"
           className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-card group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-card"
         >
           {children}
-        </div>
+        </nav>
       </div>
     </div>
   )
@@ -276,7 +293,10 @@ function SidebarTrigger({
       data-slot="sidebar-trigger"
       variant="ghost"
       size="icon"
-      className={cn("size-7", className)}
+      // 44px on touch widths, compact on a pointer device. A flat size-7 was
+      // 28x28 - under the 44px minimum touch target (WCAG 2.5.8) on the one
+      // control that opens the navigation on a phone.
+      className={cn("size-11 md:size-7", className)}
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
@@ -284,7 +304,7 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">نمایش یا پنهان کردن ناوبری</span>
     </Button>
   )
 }
@@ -296,10 +316,10 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
     <button
       data-sidebar="rail"
       data-slot="sidebar-rail"
-      aria-label="Toggle Sidebar"
+      aria-label="نمایش یا پنهان کردن ناوبری"
       tabIndex={-1}
       onClick={toggleSidebar}
-      title="Toggle Sidebar"
+      title="نمایش یا پنهان کردن ناوبری"
       className={cn(
         // Physical, matching the prop and the container above. The drag edge
         // sits on the inner side of the panel - a right-hand panel's rail runs
@@ -320,9 +340,18 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
   )
 }
 
-function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
+/**
+ * The content column beside the sidebar.
+ *
+ * Deliberately a <div>, not a <main>: every screen already renders its own
+ * <main> landmark inside this, and the two together produced a nested,
+ * duplicate main landmark on all eleven routes (axe: landmark-main-is-top-level,
+ * landmark-no-duplicate-main, landmark-unique). This element is layout only.
+ * The inner <main> keeps the role, the accessible name and the focus target.
+ */
+function SidebarInset({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <main
+    <div
       data-slot="sidebar-inset"
       className={cn(
         "relative flex w-full flex-1 flex-col bg-background",
@@ -364,7 +393,9 @@ function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sidebar-footer"
       data-sidebar="footer"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      // shrink-0: now that the wrapper is a fixed-height flex row, the footer
+      // is the one row that must never give up space to the scrolling content.
+      className={cn("flex shrink-0 flex-col gap-2 p-2", className)}
       {...props}
     />
   )

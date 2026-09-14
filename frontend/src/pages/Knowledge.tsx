@@ -8,7 +8,6 @@ import { LoadingButton } from "../components/ui/button-loading";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { DialogBody } from "../components/ui/dialog-body";
 import { Input } from "../components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { RetryNotice } from "../components/ui/retry";
@@ -333,32 +332,40 @@ export default function Knowledge() {
         <StatCard label="ناموفق" value={faNum(counts.failed)} tone={counts.failed > 0 ? "danger" : undefined} />
       </div>
 
-      {/* tabs + search (mockup §۱۷) */}
+      {/* Status filters (mockup §۱۷).
+          These were Tabs, which was the wrong control and also broken: Radix
+          gives every trigger an aria-controls pointing at a matching
+          TabsContent panel, and there were no panels at all, so all five
+          triggers referenced elements that do not exist (axe:
+          aria-valid-attr-value, critical). They do not switch between panels
+          either — they narrow one table — so they are a pressed-state filter
+          group, the pattern Wallet and EventsView already use. */}
       <Surface className="mb-4 p-4">
-        <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setPage(0); }}>
-          <TabsList>
-            <TabsTrigger value="all">
-              همه
-              <CountChip value={counts.all} />
-            </TabsTrigger>
-            <TabsTrigger value="ready">
-              تکمیل شد
-              <CountChip value={counts.ready} />
-            </TabsTrigger>
-            <TabsTrigger value="processing">
-              در حال پردازش
-              <CountChip value={counts.processing} />
-            </TabsTrigger>
-            <TabsTrigger value="queued">
-              در صف
-              <CountChip value={counts.queued} />
-            </TabsTrigger>
-            <TabsTrigger value="failed">
-              ناموفق
-              <CountChip value={counts.failed} />
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div role="group" aria-label="فیلتر وضعیت سند" className="flex flex-wrap items-center gap-1.5">
+          {([
+            ["all", "همه", counts.all],
+            ["ready", "تکمیل شد", counts.ready],
+            ["processing", "در حال پردازش", counts.processing],
+            ["queued", "در صف", counts.queued],
+            ["failed", "ناموفق", counts.failed],
+          ] as Array<[TabKey, string, number]>).map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={tab === key}
+              onClick={() => { setTab(key); setPage(0); }}
+              className={cn(
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-control border px-2.5 py-1 text-sm font-semibold transition-colors",
+                tab === key
+                  ? "border-primary bg-accent text-primary"
+                  : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:bg-accent/50",
+              )}
+            >
+              {label}
+              <CountChip value={count} />
+            </button>
+          ))}
+        </div>
         <div className="mt-3 flex flex-wrap gap-3">
           <div className="relative min-w-[220px] flex-1">
             <Search aria-hidden className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -400,7 +407,11 @@ export default function Knowledge() {
               <TableHead className="p-3 font-bold">حجم</TableHead>
               <TableHead className="p-3 font-bold">وضعیت</TableHead>
               <TableHead className="p-3 font-bold">پیشرفت</TableHead>
-              <TableHead className="p-3 pe-5 font-bold"></TableHead>
+              {/* The action column still needs a name: an empty <th> leaves the
+                  cell unlabelled for screen readers (axe: empty-table-header). */}
+              <TableHead className="p-3 pe-5 font-bold">
+                <span className="sr-only">اقدام</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -455,7 +466,10 @@ export default function Knowledge() {
                     >
                       <FileText className="size-[26px]" />
                     </span>
-                    <h3 className="text-body font-bold text-foreground">هنوز سندی نیست.</h3>
+                    {/* h2, not h3: the page's only other heading is the h1 above,
+                        so an h3 skipped a level and axe flagged the outline as
+                        broken for anyone navigating by heading. */}
+                    <h2 className="text-body font-bold text-foreground">هنوز سندی نیست.</h2>
                     <p className="mx-auto mt-1.5 max-w-[380px] text-caption text-muted-foreground">
                       {search || tab !== "all" || format !== "all"
                         ? "سندی مطابق جستجو یا فیلتر پیدا نشد."
@@ -477,10 +491,10 @@ export default function Knowledge() {
             نمایش {faNum(pageItems.length)} از {faNum(filtered.length)} سند
           </span>
           <div className="flex gap-2">
-            <LoadingButton variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            <LoadingButton variant="secondary" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
               قبلی
             </LoadingButton>
-            <LoadingButton variant="secondary" size="xs" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
+            <LoadingButton variant="secondary" size="sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
               بعدی
             </LoadingButton>
           </div>

@@ -150,7 +150,11 @@ export default function Usage() {
         </CardHeader>
         <CardContent className="space-y-2">
           <p className="text-sm font-bold">{share}٪ از گردش اخیر صرف مصرف شده است.</p>
-          <Progress value={share} className="h-2" />
+          {/* role="progressbar" carries no information on its own: a screen
+              reader announces "progress bar" with no idea what is progressing.
+              The label repeats what the sentence above already states for
+              sighted users, so both get the same fact. */}
+          <Progress value={share} className="h-2" aria-label="نسبت مصرف به شارژ" />
         </CardContent>
       </Card>
 

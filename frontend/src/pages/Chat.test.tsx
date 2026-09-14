@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderWithRouter } from "../test/render";
 import Chat from "./Chat";
 
 function mockApi(routes: Record<string, unknown>) {
@@ -34,7 +35,7 @@ describe("Chat page (RG-14)", () => {
       "GET /chat/sessions": { items: [], total_count: 0, page: 1, page_size: 20, has_more: false },
       "GET /wallet": { status: 500, code: "SERVER_ERROR", message: "boom" },
     });
-    render(<Chat />);
+    renderWithRouter(<Chat />);
     // PO request: the panel shows an explanatory Persian sentence for the
     // failure - never the server's English "boom", never a stale banner.
     const box = await screen.findByTestId("chat-error");
@@ -71,7 +72,7 @@ describe("Chat page (RG-14)", () => {
       },
       "GET /wallet": { balance: 0, blocked: true },
     });
-    render(<Chat />);
+    renderWithRouter(<Chat />);
     expect(await screen.findByText("سلام")).toBeInTheDocument();
     expect(await screen.findByText("پاسخ با منبع")).toBeInTheDocument();
     expect(screen.getByTestId("zero-credit-banner")).toBeInTheDocument();
@@ -101,7 +102,7 @@ describe("Chat page (RG-14)", () => {
         ],
       },
     });
-    render(<Chat />);
+    renderWithRouter(<Chat />);
 
     const composer = await screen.findByLabelText("متن پیام");
     fireEvent.change(composer, { target: { value: "سوال من" } });
@@ -124,7 +125,7 @@ describe("Chat page (RG-14)", () => {
       "GET /wallet": { balance: 500, blocked: false },
       "POST /chat/sessions": { status: 500, code: "SERVER_ERROR", message: "boom" },
     });
-    render(<Chat />);
+    renderWithRouter(<Chat />);
     const composer = await screen.findByLabelText("متن پیام");
     fireEvent.change(composer, { target: { value: "سلام" } });
     fireEvent.keyDown(composer, { key: "Enter" });
@@ -166,7 +167,7 @@ describe("Chat page (RG-14)", () => {
       },
       "GET /wallet": { balance: 500, blocked: false },
     });
-    render(<Chat />);
+    renderWithRouter(<Chat />);
 
     expect(await screen.findByText("سؤال قدیمی")).toBeInTheDocument();
     expect(await screen.findByText("پاسخ قدیمی")).toBeInTheDocument();
@@ -196,7 +197,7 @@ describe("Chat page (RG-14)", () => {
       },
       "GET /wallet": { balance: 500, blocked: false },
     });
-    render(<Chat />);
+    renderWithRouter(<Chat />);
 
     // The good row still renders; the two degraded rows render empty.
     expect(await screen.findByText("پیام سالم")).toBeInTheDocument();

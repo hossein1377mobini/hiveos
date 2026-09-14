@@ -259,19 +259,29 @@ export function AppShell({
                 {group.section}
               </SidebarGroupLabel>
               <SidebarMenu>
-                {group.items.map(({ id, label, icon: Icon, path }) => (
-                  <SidebarMenuItem key={id}>
-                    <SidebarMenuButton asChild tooltip={label}>
-                      <NavLink
-                        to={path}
-                        className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
-                      >
-                        <Icon aria-hidden />
-                        <span>{label}</span>
-                      </NavLink>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {group.items.map(({ id, label, icon: Icon, path }) => {
+                  // The active row was never highlighted: SidebarMenuButton
+                  // hard-codes data-active={isActive}, which defaulted to false
+                  // and overrode whatever the child NavLink rendered through
+                  // Slot, so data-[active=true] in the button variants could
+                  // never match. The state has to be computed here and passed
+                  // down. Children of the route count as active too, so
+                  // /knowledge/<id> keeps the section lit.
+                  const isActive = location.pathname === path || location.pathname.startsWith(path + "/")
+                  return (
+                    <SidebarMenuItem key={id}>
+                      <SidebarMenuButton asChild isActive={isActive} tooltip={label}>
+                        <NavLink
+                          to={path}
+                          className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
+                        >
+                          <Icon aria-hidden />
+                          <span>{label}</span>
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
               </SidebarMenu>
             </SidebarGroup>
           ))}
@@ -350,7 +360,11 @@ export function AppShell({
           aria-label={crumbLabel || "محتوای صفحه"}
           className={cn(
             "outline-none",
-            flush ? "flex min-w-0 flex-1 flex-col pb-0" : "min-w-0 flex-1 px-6 pb-12 pt-6",
+            // min-h-0 on the flush (chat) variant: without it the automatic
+            // minimum size of a flex item is its content, so <main> could never
+            // be shorter than the transcript and the page scrolled instead of
+            // the message list.
+            flush ? "flex min-h-0 min-w-0 flex-1 flex-col pb-0" : "min-w-0 flex-1 px-6 pb-12 pt-6",
           )}
         >
           {children}

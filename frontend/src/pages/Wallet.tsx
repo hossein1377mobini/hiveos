@@ -296,12 +296,12 @@ export default function Wallet() {
             نمایش {faNum(pageItems.length)} از {faNum(filtered.length)} تراکنش
           </span>
           <div className="flex gap-2">
-            <LoadingButton variant="secondary" size="xs" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            <LoadingButton variant="secondary" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
               قبلی
             </LoadingButton>
             <LoadingButton
               variant="secondary"
-              size="xs"
+              size="sm"
               disabled={safePage >= pageCount - 1}
               onClick={() => setPage(safePage + 1)}
             >

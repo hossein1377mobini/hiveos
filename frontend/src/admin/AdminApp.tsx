@@ -321,7 +321,10 @@ function AdminFrame({
   }
 
   return (
-    <SidebarProvider className="min-h-dvh">
+    // h-svh + min-h-0 for the same reason as the organisation shell: a
+    // minimum-height wrapper grows to the content, so the admin document
+    // scrolled as a whole and the sidebar stretched past the viewport.
+    <SidebarProvider className="h-svh min-h-0">
       <Sidebar side="right" collapsible="icon" className="border-e">
         <SidebarHeader className="flex-row items-center gap-2.5 px-2 py-3.5">
           <span
@@ -343,20 +346,29 @@ function AdminFrame({
               بخش‌های پنل
             </SidebarGroupLabel>
             <SidebarMenu>
-              {ADMIN_WORKSPACES.map((w) => (
-                <SidebarMenuItem key={w.id}>
-                  <SidebarMenuButton asChild tooltip={w.label}>
-                    <NavLink
-                      to={w.path}
-                      end={w.path === "/admin"}
-                      className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
-                    >
-                      <w.icon aria-hidden />
-                      <span>{w.label}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {ADMIN_WORKSPACES.map((w) => {
+                // Same defect as the organisation shell: SidebarMenuButton
+                // hard-codes data-active from its own prop (default false), so
+                // the panel had no visible current section at all.
+                const isActive =
+                  w.path === "/admin"
+                    ? pathname === "/admin" || pathname === "/admin/"
+                    : pathname === w.path || pathname.startsWith(w.path + "/")
+                return (
+                  <SidebarMenuItem key={w.id}>
+                    <SidebarMenuButton asChild isActive={isActive} tooltip={w.label}>
+                      <NavLink
+                        to={w.path}
+                        end={w.path === "/admin"}
+                        className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
+                      >
+                        <w.icon aria-hidden />
+                        <span>{w.label}</span>
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
             </SidebarMenu>
           </SidebarGroup>
         </SidebarContent>
@@ -418,7 +430,11 @@ function AdminFrame({
             </Button>
           </div>
         </header>
-        <main className="min-w-0 flex-1 px-6 pb-14 pt-6">
+        {/* min-h-0 + overflow-y-auto: same defect as the organisation shell.
+            Without them <main> is sized by its content, so the document scrolled
+            as a whole and the sidebar rail stretched past the viewport on every
+            tall admin view. Now the panel body scrolls inside the frame. */}
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pb-14 pt-6">
           <div className="mx-auto max-w-6xl">
             <div className="mb-5">
               <h1 className="text-title">{workspace.label}</h1>
