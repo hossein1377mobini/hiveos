@@ -42,7 +42,11 @@ def test_user_api_base_only_for_avalai_shape():
 
 
 def test_api_key_is_masked():
-    assert ai_monitor._mask("aa-FanBj4Z8xKmXmqkj5uOPsGMGIA2nTBlfU1U2RvnNU4MH25SV") == "...25SV"
+    # A synthetic key, never the live one. The real AvalAI key was committed
+    # here verbatim, which breaks ADR-022 (secrets live only in server-side
+    # files) and leaks a funded credential to anyone who can read the repo.
+    # _mask only cares about the shape, so a made-up key tests it identically.
+    assert ai_monitor._mask("aa-0000000000-0000000000-0000000000-000000TESTKEY") == "...TKEY"
     assert ai_monitor._mask("short") is None
     assert ai_monitor._mask(None) is None
 
