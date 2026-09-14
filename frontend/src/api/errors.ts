@@ -71,6 +71,10 @@ const MESSAGES: Record<string, string> = {
   EXTRACTION_FAILED: "متن این فایل قابل خواندن نبود؛ فایل ممکن است خراب باشد.",
   REVIEW_QUEUE: "این نوع فایل پردازش خودکار نمی‌شود و در صف بازبینی می‌ماند.",
   OCR_UNAVAILABLE: "موتور تشخیص متن تصویری روی سرور نصب نیست؛ سند در صف بازبینی ماند.",
+  // Distinct from OCR_UNAVAILABLE: the engine ran and simply found no text.
+  // Telling the owner the engine is missing would send them after a server
+  // problem when the file itself has nothing to read.
+  OCR_EMPTY: "متنی در این تصویر تشخیص داده نشد؛ سند در صف بازبینی ماند.",
   PROCESSING_JOB_NOT_FOUND: "کار پردازش موردنظر پیدا نشد.",
   JOB_NOT_RETRYABLE: "فقط کارهای ناموفق قابل تلاش مجدد هستند.",
   JOB_NOT_CANCELLABLE: "این کار در وضعیتی نیست که بتوان لغو کرد.",

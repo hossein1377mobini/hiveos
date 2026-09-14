@@ -73,6 +73,24 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
         try:
             asset.extracted_text = await asyncio.to_thread(extract_text, asset, folder)
             normalized = normalize_text(asset.extracted_text or "")
+            if not normalized and verdict["pipeline"] == "ocr":
+                # An image with no legible text - a photo, a logo, a blank or
+                # blurred scan - is not a successfully indexed document. It was
+                # marked ready like any other asset, so the document table showed
+                # a finished row for something that contributed nothing to search
+                # and the operator had no reason to look at it.
+                job.status = "completed"
+                asset.status = "queued"
+                await record_audit(
+                    session,
+                    "processing-job.completed",
+                    organization_id=job.organization_id,
+                    entity_type="processing_job",
+                    entity_id=job.id,
+                    detail={"needs_review": True, "pipeline": verdict["pipeline"],
+                            "reason": "OCR_EMPTY"},
+                )
+                return "completed"
             asset.extracted_text = normalized
             asset.asset_metadata = build_metadata(asset)
             chunk_rows = await replace_chunks(session, asset, normalized)

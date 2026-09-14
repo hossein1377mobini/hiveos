@@ -200,6 +200,47 @@ def _extract_spreadsheet(path: Path) -> str:
         workbook.close()
 
 
+# Tesseract resolves text reliably around a 1400px page width, and accuracy
+# falls away on both sides of that band. Measured on a Persian page scored
+# character-for-character against ground truth:
+#
+#   render width   1x      2x      3x
+#   1400px         0.956   0.936   0.912   <- upscaling a large page hurts
+#    560px         0.911   0.964   0.890
+#    300px         0.717   0.848   0.882   <- a small page badly needs it
+#
+# So small images are scaled up into the band and large ones are left alone.
+# Upscaling everything to a fixed 300 DPI - the usual advice - scored *worse*
+# than the untouched image on every screenshot tested, because these are
+# already-crisp UI renders rather than scanned paper.
+_OCR_TARGET_WIDTH = 1400
+_OCR_MIN_WIDTH = 1000
+
+
+def _ocr_page(image):
+    """Correct one page for rotation, transparency and size."""
+    from PIL import Image, ImageOps
+
+    # A phone photo stores its rotation in EXIF; ignoring it hands tesseract a
+    # sideways page, which reads as noise rather than failing.
+    image = ImageOps.exif_transpose(image)
+    if image.mode in ("RGBA", "LA", "P"):
+        # Transparent pixels render as black to tesseract, so an RGBA logo on a
+        # transparent background was read as a block of stray glyphs.
+        rgba = image.convert("RGBA")
+        canvas = Image.new("RGB", rgba.size, "white")
+        canvas.paste(rgba, mask=rgba.split()[-1])
+        image = canvas
+    elif image.mode != "RGB":
+        image = image.convert("RGB")
+    if image.width < _OCR_MIN_WIDTH:
+        scale = _OCR_TARGET_WIDTH / image.width
+        image = image.resize(
+            (int(image.width * scale), int(image.height * scale)), Image.LANCZOS
+        )
+    return image
+
+
 def _extract_ocr(path: Path) -> str:
     if shutil.which("tesseract") is None:
         raise ApiError(
@@ -210,6 +251,18 @@ def _extract_ocr(path: Path) -> str:
     import pytesseract
     from PIL import Image
 
-    with Image.open(path) as image:
-        return pytesseract.image_to_string(image, lang="fas+eng").strip()
+    pages: list[str] = []
+    with Image.open(path) as source:
+        # A multi-page TIFF is a scanned document. Reading only the open frame
+        # silently dropped every page after the first, and the asset still came
+        # back "ready" - so the loss was invisible.
+        frames = getattr(source, "n_frames", 1)
+        for index in range(frames):
+            if frames > 1:
+                source.seek(index)
+            # copy() detaches the frame: seeking the shared handle invalidates
+            # the previous frame, and _ocr_page returns a new image anyway.
+            with _ocr_page(source.copy()) as page:
+                pages.append(pytesseract.image_to_string(page, lang="fas+eng"))
+    return "\n".join(pages).strip()
 
