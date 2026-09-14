@@ -1,3 +1,10 @@
+# UNUSED. The real image is infrastructure/api.Dockerfile (uv-based).
+#
+# This file survives only because deploy/docker-compose.staging.yml - which is
+# also unused - references it. Do not build from it: the vendored wheelhouse it
+# expects has no torch/triton entry any more, and satisfying it by downloading
+# torch produced a 2.05GB image for a 1.43GB job. See deploy/README.md.
+#
 # HiveOS v0.1 backend image (staging/prod, zero-open deploy bundle).
 # Dependencies are vendored as wheels by the deployer before building:
 #   cd backend && py -3.11 -m pip download . -d ../deploy/_wheels

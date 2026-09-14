@@ -1,3 +1,8 @@
+# UNUSED. The stack that actually runs on staging is the hand-maintained
+# /opt/hiveos/app/docker-compose.staging.yml; the tracked source is
+# infrastructure/docker-compose.staging.yml. This file points at the unused
+# deploy/Dockerfile and would build the wrong image. See deploy/README.md.
+#
 # HiveOS v0.1 staging stack (zero-open): PO starts the server, agent uploads,
 # PO sets provider keys in the admin panel and tests.
 #
