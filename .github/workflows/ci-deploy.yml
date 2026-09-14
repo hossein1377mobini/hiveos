@@ -37,8 +37,35 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Type-check and build first: a type error is the cheapest failure to read.
       - run: npm run build
+      - run: npm run lint
       - run: npm test
+      # F4: a11y and bundle budget were previously unenforced, so both could
+      # regress without anything failing. The a11y run is the same axe suite as
+      # npm test, executed separately so the job log names which gate failed.
+      - run: npm run test:a11y
+      - run: npm run budget
+      # F3: unit tests run in jsdom, which has no layout, no navigation and no
+      # real page - so a whole class of defect (a page with no landmark, a CDN
+      # request, a redirect that never fires) was invisible to them.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  # G4: pin the nginx security headers to a real server. A config read cannot
+  # prove them - add_header does not inherit across levels, and the version of
+  # this file that shipped had no CSP on the document itself.
+  nginx-headers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Serve the config and assert the headers on every route
+        run: |
+          docker run --rm \
+            -v "$PWD/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$PWD/deploy/security-headers.conf:/etc/nginx/conf.d/security-headers.conf:ro" \
+            -v "$PWD/deploy/check-security-headers.sh:/check.sh:ro" \
+            nginx:1.27-alpine sh /check.sh
 
   deploy-staging:
     needs: backend

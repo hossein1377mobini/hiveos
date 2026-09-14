@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="HiveOS">
+  <!-- Hexagon (the hive) in the product's primary navy with the amber accent. -->
+  <path d="M16 2.5 27.7 9.25v13.5L16 29.5 4.3 22.75V9.25z" fill="#26315c"/>
+  <path d="M16 7.5 23.4 11.75v8.5L16 24.5 8.6 20.25v-8.5z" fill="#ffffff" opacity="0.12"/>
+  <circle cx="16" cy="16" r="3.4" fill="#f2a93b"/>
+</svg>
