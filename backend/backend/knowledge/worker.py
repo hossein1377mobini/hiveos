@@ -10,7 +10,7 @@ directly.
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -116,6 +116,12 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
                     vectors = await embed_texts_background([row.content for row in window])
                     for row, vector in zip(window, vectors, strict=True):
                         row.embedding = vector  # type: ignore[assignment]
+                    # Heartbeat. _reclaim_orphaned_jobs treats a job that has not
+                    # been touched for processing_job_stale_seconds as orphaned,
+                    # and this row is otherwise untouched for the whole embed, so
+                    # without this a slow document would be reclaimed and started
+                    # again by the next tick while still running.
+                    job.updated_at = _utc_now()
                     await session.commit()
             if len(chunk_rows) >= get_settings().knowledge_max_chunks_per_document:
                 # The cap truncated this document. Record it on the asset so the
@@ -169,8 +175,64 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
     return job.status
 
 
+async def _reclaim_orphaned_jobs(session: AsyncSession) -> int:
+    """Return jobs whose worker died back to the queue.
+
+    A job is marked 'processing' and committed before any work happens, so a
+    process that dies mid-job - a deploy restart, an OOM, a crash - leaves the
+    row in 'processing' forever. Nothing selected it again: the queue only ever
+    looks at 'queued' and 'retrying'. Measured on staging, eight jobs sat in
+    'processing' for between 1.5 and 3.8 hours with attempt_count 0, and their
+    4985 chunks were never embedded, so those documents were invisible to search
+    while the asset list showed them as ordinary files.
+
+    A live job heartbeats its updated_at once per embedding sub-batch, so only a
+    dead one goes this long without one. Jobs that have already used up their
+    attempts are failed rather than requeued, so a document that genuinely breaks
+    the worker cannot loop forever.
+    """
+    from sqlalchemy import func, update
+
+    from backend.knowledge.processing import MAX_JOB_ATTEMPTS
+
+    cutoff = _utc_now() - timedelta(
+        seconds=max(60, get_settings().processing_job_stale_seconds)
+    )
+    stale = (ProcessingJob.status == "processing", ProcessingJob.updated_at < cutoff)
+
+    exhausted = await session.execute(
+        update(ProcessingJob)
+        .where(*stale, ProcessingJob.attempt_count >= MAX_JOB_ATTEMPTS)
+        .values(
+            status="failed",
+            error_detail="orphaned in processing; attempts exhausted",
+            updated_at=func.now(),
+        )
+    )
+    requeued = await session.execute(
+        update(ProcessingJob)
+        .where(*stale, ProcessingJob.attempt_count < MAX_JOB_ATTEMPTS)
+        .values(
+            status="queued",
+            attempt_count=ProcessingJob.attempt_count + 1,
+            updated_at=func.now(),
+        )
+    )
+    reclaimed = (exhausted.rowcount or 0) + (requeued.rowcount or 0)
+    if reclaimed:
+        logger.warning(
+            "reclaimed %s orphaned processing job(s): %s requeued, %s failed",
+            reclaimed,
+            requeued.rowcount or 0,
+            exhausted.rowcount or 0,
+        )
+    return reclaimed
+
+
 async def drain_queue(session: AsyncSession, limit: int = 20) -> int:
     """Process up to limit queued jobs (highest priority, oldest first)."""
+    await _reclaim_orphaned_jobs(session)
+    await session.commit()
     rows = (
         (
             await session.execute(

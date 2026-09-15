@@ -169,6 +169,14 @@ class Settings(BaseSettings):
     # is worse than failing fast: at 20 users on staging a search waited 125 s
     # and the edge timed out with 524, so the user lost the request anyway.
     inference_queue_timeout_seconds: float = 20.0
+    # How long a job may sit in 'processing' without a heartbeat before it is
+    # treated as orphaned and requeued. A job that is genuinely running heartbeats
+    # once per embedding sub-batch, so this only trips on a job whose process
+    # died - a deploy restart, an OOM, a crash. Measured on staging: jobs sat in
+    # 'processing' for up to 3 h 48 m with attempt_count 0, and because nothing
+    # ever requeued them their chunks stayed unembedded and the files were
+    # silently unsearchable.
+    processing_job_stale_seconds: int = 900
     # NB-1 (final review): per-IP rate limiting only works if the api knows the real
     # client. Comma-separated trusted proxies (IPs/CIDRs).
     #
