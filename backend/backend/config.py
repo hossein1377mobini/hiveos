@@ -164,6 +164,11 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     db_pool_timeout_seconds: int = 30
     db_pool_recycle_seconds: int = 1800
+    # How long an interactive request waits for an inference slot before being
+    # refused with 503 INFERENCE_BUSY. Under saturation, queueing indefinitely
+    # is worse than failing fast: at 20 users on staging a search waited 125 s
+    # and the edge timed out with 524, so the user lost the request anyway.
+    inference_queue_timeout_seconds: float = 20.0
     # NB-1 (final review): per-IP rate limiting only works if the api knows the real
     # client. Comma-separated trusted proxies (IPs/CIDRs).
     #

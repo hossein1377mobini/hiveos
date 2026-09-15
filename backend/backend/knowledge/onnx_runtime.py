@@ -17,6 +17,8 @@ import logging
 import threading
 from contextlib import contextmanager
 
+from backend.api_errors import ApiError
+
 logger = logging.getLogger(__name__)
 
 # One (session, tokenizer) per model directory, built under a lock because two
@@ -168,6 +170,35 @@ def _score_sync(model_dir: str, pairs: list[list[str]], max_length: int, batch_s
     return scores
 
 
+async def _acquire_or_shed():
+    """Take an interactive inference slot, or refuse quickly instead of queueing.
+
+    Waiting indefinitely is worse than failing fast under load. Measured on
+    staging at 20 users, /search queued past 125 s and the edge gave up with
+    524 - the user waits two minutes and gets nothing. Refusing in a few
+    seconds costs the same user the same request but returns a real, actionable
+    answer ("busy, retry") while keeping the queue short for everyone else.
+
+    The timeout is generous relative to one inference (a warm embed is about
+    0.03 s and a 20-candidate rerank about 4 s), so it only fires when the
+    server is genuinely saturated rather than merely busy.
+    """
+    from backend.config import get_settings
+
+    settings = get_settings()
+    try:
+        await asyncio.wait_for(
+            _get_semaphore().acquire(),
+            timeout=max(1.0, settings.inference_queue_timeout_seconds),
+        )
+    except TimeoutError:
+        raise ApiError(
+            503,
+            "INFERENCE_BUSY",
+            "The server is busy processing other requests. Please retry shortly.",
+        ) from None
+
+
 async def embed(texts: list[str]) -> list[list[float]]:
     """Embed texts with the local ONNX model; returns unit vectors.
 
@@ -178,7 +209,8 @@ async def embed(texts: list[str]) -> list[list[float]]:
 
     settings = get_settings()
     with interactive_inference():
-        async with _get_semaphore():
+        await _acquire_or_shed()
+        try:
             return await asyncio.to_thread(
                 _embed_sync,
                 settings.embedding_onnx_dir,
@@ -186,6 +218,8 @@ async def embed(texts: list[str]) -> list[list[float]]:
                 settings.embedding_onnx_max_tokens,
                 settings.local_inference_batch_size,
             )
+        finally:
+            _get_semaphore().release()
 
 
 async def embed_background(texts: list[str]) -> list[list[float]]:
@@ -240,7 +274,8 @@ async def score(query: str, documents: list[str]) -> list[float]:
     settings = get_settings()
     pairs = [[query, document] for document in documents]
     with interactive_inference():
-        async with _get_semaphore():
+        await _acquire_or_shed()
+        try:
             return await asyncio.to_thread(
                 _score_sync,
                 settings.rerank_onnx_dir,
@@ -248,3 +283,5 @@ async def score(query: str, documents: list[str]) -> list[float]:
                 settings.rerank_onnx_max_tokens,
                 settings.local_inference_batch_size,
             )
+        finally:
+            _get_semaphore().release()

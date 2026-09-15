@@ -154,3 +154,48 @@ async def test_background_embed_handles_an_empty_input(monkeypatch) -> None:
 
     monkeypatch.setattr(config_module, "get_settings", lambda: _Settings())
     assert await onnx_runtime.embed_background([]) == []
+
+async def test_interactive_inference_sheds_load_instead_of_queueing(monkeypatch) -> None:
+    """A saturated server must refuse quickly, not make the user wait minutes.
+
+    Staging at 20 users: /search queued past 125 s and the edge returned 524, so
+    the request was lost anyway. A fast 503 with a retry message is the same
+    outcome for that request and keeps the queue short for everyone else.
+    """
+    from backend.api_errors import ApiError
+
+    class _Settings:
+        inference_queue_timeout_seconds = 0.05
+
+    # A semaphore whose single slot is already taken, so the acquire must wait.
+    sem = asyncio.Semaphore(1)
+    await sem.acquire()
+    monkeypatch.setattr(onnx_runtime, "_get_semaphore", lambda: sem)
+
+    from backend import config as config_module
+
+    monkeypatch.setattr(config_module, "get_settings", lambda: _Settings())
+
+    with pytest.raises(ApiError) as caught:
+        await onnx_runtime._acquire_or_shed()
+
+    assert caught.value.status_code == 503
+    assert caught.value.code == "INFERENCE_BUSY"
+
+
+async def test_interactive_inference_takes_a_free_slot_immediately(monkeypatch) -> None:
+    """The normal case must not pay for the shed path."""
+
+    class _Settings:
+        inference_queue_timeout_seconds = 5.0
+
+    from backend import config as config_module
+
+    monkeypatch.setattr(config_module, "get_settings", lambda: _Settings())
+    # One instance, not a fresh semaphore per call: a lambda that builds a new
+    # semaphore each time would make the assertion below meaningless.
+    sem = asyncio.Semaphore(2)
+    monkeypatch.setattr(onnx_runtime, "_get_semaphore", lambda: sem)
+
+    await onnx_runtime._acquire_or_shed()
+    assert sem._value == 1, "the slot must be held"
