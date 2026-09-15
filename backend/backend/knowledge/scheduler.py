@@ -59,18 +59,49 @@ def _engine():
     return _ENGINE
 
 
+# Errors that mean the cached pool is unusable rather than the job is bad: the
+# pooled connection was opened on an event loop that has since closed (a
+# restart, or a tick that overlapped shutdown). Reusing it raises before any
+# work happens, and because the same broken pool is handed to every later tick
+# the queue never drains again.
+_POOL_POISONED = (
+    "MissingGreenlet",
+    "Event loop is closed",
+    "connection was closed",
+    "has no attribute 'send'",
+)
+
+
+def _pool_is_poisoned(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}"
+    return any(marker in text for marker in _POOL_POISONED)
+
+
 async def _drain_safely(session) -> None:
     """Drain the ingestion queue, never letting a failure escape the tick.
 
     A failed drain is retried on the next tick; an escaping exception would
-    skip the advisory unlock below and stall every later scan.
+    skip the advisory unlock below and stall every later scan. If the failure
+    is a poisoned pool the cached engine is dropped so the next tick builds a
+    fresh one bound to the current loop - otherwise every subsequent tick
+    inherits the same dead pool and ingestion stops for good.
     """
     try:
         await drain_queue(session)
         await session.commit()
-    except Exception:  # noqa: BLE001 - a failed drain retries next tick
+    except Exception as exc:  # noqa: BLE001 - a failed drain retries next tick
         await session.rollback()
         logger.exception("queue drain failed")
+        if _pool_is_poisoned(exc):
+            logger.warning("dropping the cached engine; it belongs to a closed loop")
+            # Clear the cache first so the very next _engine() call builds a
+            # fresh pool even if disposing the old one fails below. Disposing is
+            # best-effort: the caller still has a live session and will check a
+            # new connection out of the rebuilt pool for the advisory unlock.
+            try:
+                await dispose_engine()
+            except Exception:  # noqa: BLE001 - dropping it is what matters
+                logger.exception("could not dispose the stale engine")
 
 
 async def _scan_due_sources() -> None:
@@ -129,11 +160,17 @@ async def _scan_due_sources() -> None:
             # It runs in its own try so a drain error cannot skip the unlock.
             await _drain_safely(session)
             # Advisory locks are session-scoped, so this also releases on
-            # disconnect; releasing explicitly keeps it tied to the tick.
-            await session.execute(
-                text("SELECT pg_advisory_unlock(:key)"), {"key": SCAN_LOCK_KEY}
-            )
-            await session.commit()
+            # disconnect; releasing explicitly keeps it tied to the tick. When
+            # the pool was dropped above this runs on a dead connection, which
+            # is expected - the lock died with the session either way, and a
+            # failure here must not escape the tick.
+            try:
+                await session.execute(
+                    text("SELECT pg_advisory_unlock(:key)"), {"key": SCAN_LOCK_KEY}
+                )
+                await session.commit()
+            except Exception:  # noqa: BLE001 - the lock is session-scoped
+                logger.warning("advisory unlock skipped; session already gone")
 
 
 async def _loop(poll_seconds: int) -> None:

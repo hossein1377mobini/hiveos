@@ -92,3 +92,85 @@ async def test_second_scanner_stands_down(synced_database, monkeypatch):
     finally:
         await engine.dispose()
 
+
+def test_poisoned_pool_markers_are_recognised():
+    """The stale-pool errors must be detected so the cache is dropped.
+
+    On staging 2026-09-15 an api restart left a cached engine whose pooled
+    connections belonged to the closed event loop. Every later tick reused it,
+    raised MissingGreenlet before doing any work, and the queue stopped
+    draining while nothing surfaced the cause.
+    """
+    import sqlalchemy.exc
+
+    for exc in (
+        sqlalchemy.exc.MissingGreenlet(
+            "greenlet_spawn has not been called; can't call await_only() here."
+        ),
+        RuntimeError("Event loop is closed"),
+        RuntimeError("this connection was closed"),
+        RuntimeError("'NoneType' object has no attribute 'send'"),
+    ):
+        assert scheduler._pool_is_poisoned(exc) is True, exc
+
+    # A job-level failure must NOT be mistaken for a dead pool: dropping the
+    # engine on every bad file would rebuild the pool constantly.
+    for exc in (
+        ValueError("bad chunk"),
+        OSError("no space left on device"),
+        RuntimeError("UNIQUE constraint failed"),
+    ):
+        assert scheduler._pool_is_poisoned(exc) is False, exc
+
+
+@pytest.mark.anyio
+async def test_drain_failure_drops_the_cached_engine(monkeypatch):
+    """A poisoned pool must be dropped so the next tick can rebuild it."""
+    dropped: list[str] = []
+
+    async def _fake_dispose():
+        dropped.append("disposed")
+
+    async def _boom(session, limit=20):
+        raise RuntimeError("Event loop is closed")
+
+    monkeypatch.setattr(scheduler, "dispose_engine", _fake_dispose)
+    monkeypatch.setattr(scheduler, "drain_queue", _boom)
+
+    class _Session:
+        async def rollback(self):
+            return None
+
+        async def commit(self):
+            return None
+
+    await scheduler._drain_safely(_Session())
+    assert dropped == ["disposed"], (
+        "a drain that failed on a dead pool must drop the engine, or every "
+        "later tick inherits the same pool and ingestion never resumes"
+    )
+
+
+@pytest.mark.anyio
+async def test_ordinary_drain_failure_keeps_the_engine(monkeypatch):
+    """Only a poisoned pool justifies throwing away a healthy pool."""
+    dropped: list[str] = []
+
+    async def _fake_dispose():
+        dropped.append("disposed")
+
+    async def _boom(session, limit=20):
+        raise ValueError("bad file")
+
+    monkeypatch.setattr(scheduler, "dispose_engine", _fake_dispose)
+    monkeypatch.setattr(scheduler, "drain_queue", _boom)
+
+    class _Session:
+        async def rollback(self):
+            return None
+
+        async def commit(self):
+            return None
+
+    await scheduler._drain_safely(_Session())
+    assert dropped == []
