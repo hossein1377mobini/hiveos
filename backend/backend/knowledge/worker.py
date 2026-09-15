@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
-from backend.knowledge.chunking import build_metadata, normalize_text, replace_chunks
+from backend.knowledge.chunking import build_metadata, ensure_chunks, normalize_text
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.embeddings import embed_texts_background
 from backend.models import KnowledgeAsset, KnowledgeSource, ProcessingJob
@@ -96,19 +96,24 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
                 return "completed"
             asset.extracted_text = normalized
             asset.asset_metadata = build_metadata(asset)
-            chunk_rows = await replace_chunks(session, asset, normalized)
-            if chunk_rows:
+            # Only the rows that still need a vector. classify and this worker
+            # both index the same document, and re-embedding work the other one
+            # already did was the whole document's inference cost paid twice.
+            chunk_rows = await ensure_chunks(session, asset, normalized)
+            pending = [row for row in chunk_rows if row.embedding is None]
+            if pending:
                 # Commit the replacement BEFORE embedding, not after the first
-                # batch. replace_chunks deletes and re-inserts every chunk of
-                # this document, and those row locks were previously held for the
-                # whole of the first embed_texts call - which, with both inference
-                # slots busy, is a wait of minutes rather than seconds. Measured
-                # on staging 2026-09-15: an ingestion transaction sat "idle in
-                # transaction" for 1 m 30 s with DELETE FROM knowledge_chunks as
-                # its last statement, and every authenticated request blocked
-                # behind it, because each request refreshes its own sessions row.
-                # Committing here releases those locks before the slow part, and
-                # makes the replacement durable even if the embed never lands.
+                # batch. ensure_chunks may have deleted and re-inserted every
+                # chunk of this document, and those row locks were previously
+                # held for the whole of the first embed_texts call - which, with
+                # both inference slots busy, is a wait of minutes rather than
+                # seconds. Measured on staging 2026-09-15: an ingestion
+                # transaction sat "idle in transaction" for 1 m 30 s with DELETE
+                # FROM knowledge_chunks as its last statement, and every
+                # authenticated request blocked behind it, because each request
+                # refreshes its own sessions row. Committing here releases those
+                # locks before the slow part, and makes the replacement durable
+                # even if the embed never lands.
                 await session.commit()
                 # Embed in bounded sub-batches and commit each one, so a large
                 # document releases the inference semaphore between batches
@@ -123,8 +128,8 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
                 # chunk, 8 chunks is ~5 s of hold; 32 would be ~22 s, which is
                 # the same starvation this change exists to remove.
                 batch = max(1, get_settings().local_inference_batch_size)
-                for start in range(0, len(chunk_rows), batch):
-                    window = chunk_rows[start : start + batch]
+                for start in range(0, len(pending), batch):
+                    window = pending[start : start + batch]
                     vectors = await embed_texts_background([row.content for row in window])
                     for row, vector in zip(window, vectors, strict=True):
                         row.embedding = vector  # type: ignore[assignment]

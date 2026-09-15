@@ -94,7 +94,7 @@ def patched(monkeypatch):
     })
     monkeypatch.setattr(worker_module, "extract_text", lambda asset, folder: "متن سند برای آزمون")
 
-    async def fake_replace_chunks(session, asset, text):
+    async def fake_ensure_chunks(session, asset, text):
         session.events.append("replace_chunks")
         return state["rows"]
 
@@ -107,7 +107,7 @@ def patched(monkeypatch):
     async def fake_audit(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(worker_module, "replace_chunks", fake_replace_chunks)
+    monkeypatch.setattr(worker_module, "ensure_chunks", fake_ensure_chunks)
     monkeypatch.setattr(worker_module, "embed_texts_background", fake_embed)
     monkeypatch.setattr(worker_module, "record_audit", fake_audit)
     monkeypatch.setattr(worker_module, "build_metadata", lambda asset: {})
@@ -202,3 +202,130 @@ async def test_on_demand_classification_commits_each_embedding_batch(monkeypatch
     assert session.commits_at_embed[1] > session.commits_at_embed[0], (
         f"no commit between batches: {session.commits_at_embed}"
     )
+
+async def test_reindexing_an_unchanged_document_keeps_its_chunks(monkeypatch):
+    """The reuse rule. Both the worker and classify index the same document.
+
+    Before this, whoever arrived second called replace_chunks, deleting and
+    re-inserting every chunk row and then re-embedding all of them: the whole
+    document's inference cost paid again, in the request, for work already done.
+    """
+    from backend.knowledge import chunking as chunking_module
+
+    stored = [_FakeChunkRow(0), _FakeChunkRow(1)]
+    stored[0].content = "الف"
+    stored[1].content = "ب"
+    replaced: list[int] = []
+
+    async def fake_current(session, asset):
+        return stored
+
+    async def fake_replace(session, asset, text):
+        replaced.append(1)
+        return []
+
+    monkeypatch.setattr(chunking_module, "current_chunks", fake_current)
+    monkeypatch.setattr(chunking_module, "replace_chunks", fake_replace)
+    monkeypatch.setattr(chunking_module, "chunk_text", lambda text, max_chunks=None: ["الف", "ب"])
+
+    rows = await chunking_module.ensure_chunks(_CommitCountingSession(), _FakeAsset(), "الف ب")
+
+    assert rows is stored
+    assert replaced == [], "an unchanged document was re-chunked"
+
+
+async def test_a_changed_document_is_chunked_again(monkeypatch):
+    from backend.knowledge import chunking as chunking_module
+
+    stored = [_FakeChunkRow(0)]
+    stored[0].content = "متن قدیمی"
+    replaced: list[int] = []
+
+    async def fake_current(session, asset):
+        return stored
+
+    async def fake_replace(session, asset, text):
+        replaced.append(1)
+        return [_FakeChunkRow(0)]
+
+    monkeypatch.setattr(chunking_module, "current_chunks", fake_current)
+    monkeypatch.setattr(chunking_module, "replace_chunks", fake_replace)
+    monkeypatch.setattr(chunking_module, "chunk_text", lambda text, max_chunks=None: ["متن تازه"])
+
+    await chunking_module.ensure_chunks(_CommitCountingSession(), _FakeAsset(), "متن تازه")
+
+    assert replaced == [1], "a changed document kept its stale chunks"
+
+
+async def test_a_changed_chunk_size_is_chunked_again(monkeypatch):
+    """A config change must not silently keep chunks cut to the old width."""
+    from backend.knowledge import chunking as chunking_module
+
+    stored = [_FakeChunkRow(0), _FakeChunkRow(1), _FakeChunkRow(2)]
+    replaced: list[int] = []
+
+    async def fake_current(session, asset):
+        return stored
+
+    async def fake_replace(session, asset, text):
+        replaced.append(1)
+        return [_FakeChunkRow(0)]
+
+    monkeypatch.setattr(chunking_module, "current_chunks", fake_current)
+    monkeypatch.setattr(chunking_module, "replace_chunks", fake_replace)
+    # Same text, but the new chunking config produces a different split.
+    monkeypatch.setattr(chunking_module, "chunk_text", lambda text, max_chunks=None: ["یک تکه"])
+
+    await chunking_module.ensure_chunks(_CommitCountingSession(), _FakeAsset(), "متن یکسان")
+
+    assert replaced == [1], "re-chunking was skipped after the chunking config changed"
+
+
+async def test_already_embedded_chunks_are_not_embedded_again(monkeypatch):
+    from backend.knowledge import chunking as chunking_module
+
+    class _S:
+        async def commit(self):
+            raise AssertionError("nothing to commit: every row already had a vector")
+
+    rows = [_FakeChunkRow(0), _FakeChunkRow(1)]
+    rows[0].embedding = [0.0] * 4
+    rows[1].embedding = [0.0] * 4
+
+    calls = []
+
+    async def fake_embed(texts):
+        calls.append(texts)
+        return [[0.0] * 4 for _ in texts]
+
+    from backend.knowledge import embeddings as embeddings_module
+
+    monkeypatch.setattr(embeddings_module, "embed_texts_background", fake_embed)
+
+    done = await chunking_module.embed_chunk_rows(_S(), rows)
+
+    assert done == 0
+    assert calls == [], "an already-indexed document was embedded again"
+
+
+async def test_only_the_missing_vectors_are_computed(monkeypatch):
+    from backend.knowledge import chunking as chunking_module
+
+    session = _CommitCountingSession()
+    rows = [_FakeChunkRow(0), _FakeChunkRow(1), _FakeChunkRow(2)]
+    rows[0].embedding = [0.0] * 4  # done by someone else already
+
+    seen: list[list[str]] = []
+
+    async def fake_embed(texts):
+        seen.append(list(texts))
+        return [[0.0] * 4 for _ in texts]
+
+    from backend.knowledge import embeddings as embeddings_module
+
+    monkeypatch.setattr(embeddings_module, "embed_texts_background", fake_embed)
+
+    done = await chunking_module.embed_chunk_rows(session, rows, batch_size=8)
+
+    assert done == 2
+    assert seen == [["chunk 1", "chunk 2"]], seen

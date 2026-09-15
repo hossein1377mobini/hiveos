@@ -23,9 +23,9 @@ from backend.config import get_settings
 from backend.knowledge.chunking import (
     build_metadata,
     embed_chunk_rows,
+    ensure_chunks,
     list_chunks,
     normalize_text,
-    replace_chunks,
 )
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.processing import enqueue_job
@@ -555,11 +555,16 @@ async def classify_single_asset(
         normalized = normalize_text(asset.extracted_text or "")
         asset.extracted_text = normalized
         asset.asset_metadata = build_metadata(asset)
-        chunk_rows = await replace_chunks(session, asset, normalized)
-        # Release the replacement's row locks before the slow part. replace_chunks
-        # deletes and re-inserts every chunk of the document; without this commit
-        # those locks were held for the whole of the first embed_texts call, which
-        # with both inference slots busy is minutes rather than seconds.
+        # Reuse the chunks this version already has. Re-chunking an indexed
+        # document deleted and re-inserted every row and then re-embedded all of
+        # them - the whole document's inference cost paid again, in the request,
+        # for work the queue had already done.
+        chunk_rows = await ensure_chunks(session, asset, normalized)
+        # Release the replacement's row locks before the slow part. ensure_chunks
+        # may have deleted and re-inserted every chunk of the document; without
+        # this commit those locks were held for the whole of the first
+        # embed_texts call, which with both inference slots busy is minutes
+        # rather than seconds.
         await session.commit()
         # Embed before declaring the asset ready. Without this the row was
         # "ready" with chunks that had no vectors, and semantic search only

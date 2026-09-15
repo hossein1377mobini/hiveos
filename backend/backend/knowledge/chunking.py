@@ -104,6 +104,53 @@ async def replace_chunks(
     return rows
 
 
+async def current_chunks(session: AsyncSession, asset: KnowledgeAsset) -> list[KnowledgeChunk]:
+    """Chunks already stored for this asset's CURRENT version, in order.
+
+    Scoped by organization_id as every other chunk query is (ADR-024). An asset
+    whose version changed has no rows here, which is exactly the signal that the
+    document must be chunked again.
+    """
+    result = await session.execute(
+        select(KnowledgeChunk)
+        .where(
+            KnowledgeChunk.asset_id == asset.id,
+            KnowledgeChunk.organization_id == asset.organization_id,
+            KnowledgeChunk.asset_version == asset.version,
+        )
+        .order_by(KnowledgeChunk.chunk_index)
+    )
+    return list(result.scalars().all())
+
+
+async def ensure_chunks(
+    session: AsyncSession, asset: KnowledgeAsset, normalized: str
+) -> list[KnowledgeChunk]:
+    """This version's chunks, chunked only if they are not already the right ones.
+
+    Two code paths index the same document: the worker draining the queue, and
+    POST /knowledge-assets/{id}/classify. Both called replace_chunks, which
+    deletes every chunk of the asset and re-inserts it, and then embedded all of
+    them again - so a file that had already been indexed was re-indexed from
+    scratch by whoever arrived second, paying the document's full inference cost
+    a second time and competing with the first for the same two inference slots.
+    Measured on staging 2026-09-15 as classify calls timing out at 125 s in the
+    live suite while the queue was working on the same files.
+
+    The comparison is exact rather than a stored fingerprint: chunk_text is pure
+    string slicing, so recomputing it costs no inference, and comparing it to the
+    stored contents means a changed document, a changed chunk size, or a changed
+    overlap all force a real rebuild instead of silently keeping stale chunks.
+    """
+    rows = await current_chunks(session, asset)
+    expected = chunk_text(normalized)
+    if rows and len(rows) == len(expected) and all(
+        row.content == content for row, content in zip(rows, expected, strict=True)
+    ):
+        return rows
+    return await replace_chunks(session, asset, normalized)
+
+
 async def embed_chunk_rows(
     session: AsyncSession, rows: list[KnowledgeChunk], batch_size: int | None = None
 ) -> int:
@@ -119,15 +166,19 @@ async def embed_chunk_rows(
     see a single one of them. The user saw a ready document and an answer that
     said no document existed.
     """
-    if not rows:
+    # Only the rows that still lack a vector. A document that is already
+    # embedded costs nothing here, which is what makes calling this twice - once
+    # from the worker, once from classify - cheap instead of a full re-embed.
+    pending = [row for row in rows if row.embedding is None]
+    if not pending:
         return 0
     from backend.knowledge.embeddings import embed_texts_background
 
     size = batch_size or get_settings().local_inference_batch_size
     batch = max(1, size)
     done = 0
-    for start in range(0, len(rows), batch):
-        window = rows[start : start + batch]
+    for start in range(0, len(pending), batch):
+        window = pending[start : start + batch]
         vectors = await embed_texts_background([row.content for row in window])
         for row, vector in zip(window, vectors, strict=True):
             row.embedding = vector  # type: ignore[assignment]
