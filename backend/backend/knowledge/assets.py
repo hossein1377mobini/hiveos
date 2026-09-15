@@ -556,6 +556,11 @@ async def classify_single_asset(
         asset.extracted_text = normalized
         asset.asset_metadata = build_metadata(asset)
         chunk_rows = await replace_chunks(session, asset, normalized)
+        # Release the replacement's row locks before the slow part. replace_chunks
+        # deletes and re-inserts every chunk of the document; without this commit
+        # those locks were held for the whole of the first embed_texts call, which
+        # with both inference slots busy is minutes rather than seconds.
+        await session.commit()
         # Embed before declaring the asset ready. Without this the row was
         # "ready" with chunks that had no vectors, and semantic search only
         # reads chunks that carry one - so the operator saw a finished document

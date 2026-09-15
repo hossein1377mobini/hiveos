@@ -153,3 +153,52 @@ async def test_an_empty_document_still_completes_without_embedding(patched):
 
     assert job.status == "completed"
     assert "embed" not in session.events
+
+class _FakeChunkRow:
+    def __init__(self, index):
+        self.content = f"chunk {index}"
+        self.embedding = None
+
+
+class _CommitCountingSession:
+    def __init__(self):
+        self.commits = 0
+        self.commits_at_embed: list[int] = []
+
+    async def commit(self):
+        self.commits += 1
+
+
+async def test_on_demand_classification_commits_each_embedding_batch(monkeypatch):
+    """The classify endpoint ran the whole document in one open transaction.
+
+    embed_chunk_rows embeds every chunk of the document and is called from the
+    request that asked for the classification. It now commits per batch, so the
+    transaction is not held for the length of the document and the vectors
+    already computed survive a restart.
+    """
+    from backend.knowledge import chunking as chunking_module
+
+    session = _CommitCountingSession()
+    rows = [_FakeChunkRow(i) for i in range(5)]
+
+    async def fake_embed(texts):
+        session.commits_at_embed.append(session.commits)
+        return [[0.0] * 4 for _ in texts]
+
+    monkeypatch.setattr(chunking_module, "embed_texts_background", fake_embed, raising=False)
+    # embed_chunk_rows imports it locally, so patch the source module too.
+    from backend.knowledge import embeddings as embeddings_module
+
+    monkeypatch.setattr(embeddings_module, "embed_texts_background", fake_embed)
+
+    done = await chunking_module.embed_chunk_rows(session, rows, batch_size=2)
+
+    assert done == 5
+    assert all(r.embedding is not None for r in rows)
+    assert session.commits >= 2, f"expected a commit per batch, saw {session.commits}"
+    # The first embed must not be preceded by zero commits only by accident of
+    # ordering: every embed after the first must see at least one commit.
+    assert session.commits_at_embed[1] > session.commits_at_embed[0], (
+        f"no commit between batches: {session.commits_at_embed}"
+    )

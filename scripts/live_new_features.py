@@ -116,7 +116,9 @@ def main() -> int:
     if sid_c:
         data, ms = run_turn(c, H, sid_c, "یک گزارش کامل از پروژه قناری بساز و برایم آماده کن.")
         s.check("artifacts", "report request answers", data is not None, ms)
-        artifacts = (data or {}).get("artifacts") or []
+        # artifacts live under output, beside text and citations - the same
+        # place the citations the answer cites are reported.
+        artifacts = ((data or {}).get("output") or {}).get("artifacts") or []
         s.check("artifacts", "the reply carries the file it built", bool(artifacts), ms,
                 json.dumps(data or {}, ensure_ascii=False)[:300])
 
@@ -131,9 +133,18 @@ def main() -> int:
             aid = artifacts[0].get("asset_id")
             s.check("artifacts", "the file is a real readable asset",
                     bool(aid) and bool(artifacts[0].get("name")), 0, json.dumps(artifacts, ensure_ascii=False)[:200])
-            r, ms, err = timed(lambda: c.get(f"/knowledge-assets/{aid}", headers=H))
-            s.check("artifacts", "the file can be read back from the files list",
+            # There is no GET /knowledge-assets/{id}; the detail routes are
+            # /metadata, /download, /classification and /chunks. /metadata is the
+            # cheapest proof the id names a real asset this user may read.
+            r, ms, err = timed(lambda: c.get(f"/knowledge-assets/{aid}/metadata", headers=H))
+            s.check("artifacts", "the file is readable by its own id",
                     not err and r is not None and r.is_success, ms, err or "")
+
+            r, ms, err = timed(lambda: c.get("/knowledge-assets", headers=H))
+            listed = ((r.json().get("data") or {}).get("assets") or []) if not err and r.is_success else []
+            s.check("artifacts", "the file appears in the user's own file list",
+                    any(a.get("id") == aid for a in listed), ms,
+                    json.dumps([a.get("id") for a in listed], ensure_ascii=False)[:220])
             s.check("artifacts", "same id in the reply and in the transcript",
                     any(a.get("asset_id") == aid for a in (stored[0].get("artifacts") if stored else [])), 0)
 

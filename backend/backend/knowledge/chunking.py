@@ -132,6 +132,16 @@ async def embed_chunk_rows(
         for row, vector in zip(window, vectors, strict=True):
             row.embedding = vector  # type: ignore[assignment]
             done += 1
+        # Commit per batch, exactly as the worker does. This path runs inside the
+        # request that asked for the classification, and it used to hold one
+        # transaction for the whole document: replace_chunks' row locks plus
+        # every embedding the inference slot had not produced yet. A large
+        # document made that a multi-minute open transaction, and because every
+        # authenticated request refreshes its own sessions row, other users
+        # queued behind it - measured on staging 2026-09-15 as four classify
+        # calls timing out at 125 s in the live suite. Per-batch commits also
+        # mean the vectors already computed survive a restart.
+        await session.commit()
     return done
 
 
