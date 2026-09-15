@@ -160,6 +160,9 @@ class _FakeChunkRow:
         self.embedding = None
 
 
+_ClassifyChunkRow = _FakeChunkRow
+
+
 class _CommitCountingSession:
     def __init__(self):
         self.commits = 0
@@ -329,3 +332,120 @@ async def test_only_the_missing_vectors_are_computed(monkeypatch):
 
     assert done == 2
     assert seen == [["chunk 1", "chunk 2"]], seen
+
+class _Org:
+    id = "org-1"
+
+
+class _ClassifyAsset:
+    id = "asset-1"
+    organization_id = "org-1"
+    deleted_at = None
+    source_id = None
+    version = 1
+    asset_type = "text"
+    pipeline = "text_parser"
+    status = "queued"
+    classified_at = None
+    extracted_text = None
+
+
+class _ClassifySession:
+    def __init__(self, asset):
+        self._asset = asset
+        self.added = []
+
+    async def get(self, model, key):
+        return self._asset
+
+    def add(self, obj):
+        self.added.append(obj)
+
+
+def _classify_deps(monkeypatch, assets_module, rows, *, embed_some):
+    """Wire classify_single_asset with recorders instead of the real pipeline."""
+    calls: list[str] = []
+
+    def fake_classify(asset, folder):
+        return {"asset_type": "text", "pipeline": "text_parser"}
+
+    def fake_extract(asset, folder):
+        calls.append("extract")
+        return "متن"
+
+    async def fake_ensure(session, asset, text):
+        calls.append("ensure")
+        return rows
+
+    async def fake_embed(session, rows_, batch_size=None, budget_seconds=None):
+        calls.append(f"embed(budget={budget_seconds})")
+        if embed_some:
+            for row in rows_:
+                row.embedding = [0.0] * 4
+        return len(rows_)
+
+    async def fake_commit():
+        return None
+
+    async def fake_audit(*args, **kwargs):
+        return None
+
+    enqueued: list[tuple] = []
+
+    async def fake_enqueue(session, organization_id, asset, job_type, priority="normal"):
+        enqueued.append((asset.id, job_type))
+        return None
+
+    monkeypatch.setattr(assets_module, "classify_asset", fake_classify)
+    monkeypatch.setattr(assets_module, "extract_text", fake_extract)
+    monkeypatch.setattr(assets_module, "ensure_chunks", fake_ensure)
+    monkeypatch.setattr(assets_module, "embed_chunk_rows", fake_embed)
+    monkeypatch.setattr(assets_module, "build_metadata", lambda asset: {})
+    monkeypatch.setattr(assets_module, "record_audit", fake_audit)
+    monkeypatch.setattr(assets_module, "enqueue_job", fake_enqueue)
+
+    session = _ClassifySession(_ClassifyAsset())
+    session.commit = fake_commit
+    return session, calls, enqueued
+
+
+async def test_classify_bounds_the_inference_it_does_inline(monkeypatch):
+    """The request may not embed an unbounded document.
+
+    A capped-out document is 2000 chunks, ~64 s of inference on an idle host and
+    far more when the two slots are busy - past the point where the edge answers
+    524 for work that is in fact progressing.
+    """
+    from backend.knowledge import assets as assets_module
+
+    rows = [_ClassifyChunkRow(i) for i in range(3)]
+    session, calls, _ = _classify_deps(monkeypatch, assets_module, rows, embed_some=True)
+
+    await assets_module.classify_single_asset(session, _Org(), "asset-1")
+
+    assert any("budget=" in c and "budget=None" not in c for c in calls), calls
+
+
+async def test_a_document_that_ran_out_of_budget_is_not_called_ready(monkeypatch):
+    """It must not claim to be finished while search cannot read it."""
+    from backend.knowledge import assets as assets_module
+
+    rows = [_ClassifyChunkRow(i) for i in range(3)]
+    session, _, enqueued = _classify_deps(monkeypatch, assets_module, rows, embed_some=False)
+
+    result = await assets_module.classify_single_asset(session, _Org(), "asset-1")
+
+    assert result["status"] != "ready", "a partly embedded document was marked ready"
+    assert enqueued == [("asset-1", "create")], "nothing was queued to finish the document"
+
+
+async def test_a_fully_embedded_document_is_ready_and_queues_nothing(monkeypatch):
+    from backend.knowledge import assets as assets_module
+
+    rows = [_ClassifyChunkRow(i) for i in range(3)]
+    session, _, enqueued = _classify_deps(monkeypatch, assets_module, rows, embed_some=True)
+
+    result = await assets_module.classify_single_asset(session, _Org(), "asset-1")
+
+    assert result["status"] == "ready"
+    assert enqueued == [], "a finished document queued another job"

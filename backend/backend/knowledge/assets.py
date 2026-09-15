@@ -36,6 +36,16 @@ ALLOWED_EXTENSIONS = frozenset(
     {"txt", "md", "pdf", "docx", "pptx", "xlsx", "csv", "jpg", "jpeg", "png", "tif", "tiff", "bmp", "webp"}
 )
 
+# How long POST /knowledge-assets/{id}/classify may spend embedding before it
+# hands the rest to the queue. The on-demand path runs inside a request, and a
+# capped-out document is 2000 chunks: at the measured rate that is ~64 s of
+# inference on an idle host and far more when the slots are busy, which is past
+# the point where the edge answers 524 and the operator sees an error for work
+# that was in fact progressing. The request now does a bounded slice of it,
+# stores what it produced, and lets the worker finish - it embeds only the rows
+# still missing a vector, so none of this work is thrown away.
+CLASSIFY_EMBED_BUDGET_SECONDS = 25.0
+
 _SCAN_BLOCKED = ("disabled", "failed")
 # US-1606 caps each file; these bound the request itself so one multipart POST
 # cannot fill the disk or the worker's memory.
@@ -571,8 +581,18 @@ async def classify_single_asset(
         # reads chunks that carry one - so the operator saw a finished document
         # that no answer could ever be grounded in (PO report: "I added a file,
         # but it says there was no document").
-        await embed_chunk_rows(session, chunk_rows)
-        asset.status = "ready"
+        await embed_chunk_rows(
+            session, chunk_rows, budget_seconds=CLASSIFY_EMBED_BUDGET_SECONDS
+        )
+        if any(row.embedding is None for row in chunk_rows):
+            # Out of budget: a large document, or the inference slots busy. The
+            # chunks are stored and partly embedded, so the queue finishes them
+            # by filling only the gaps. Marking it ready here would be the exact
+            # lie this endpoint was fixed for - a finished document that search
+            # cannot read.
+            await enqueue_job(session, organization.id, asset, "create")
+        else:
+            asset.status = "ready"
     except ApiError as exc:
         if exc.code in ("REVIEW_QUEUE", "OCR_UNAVAILABLE"):
             # US-205: archive/unknown stays queued, explicitly flagged for review;

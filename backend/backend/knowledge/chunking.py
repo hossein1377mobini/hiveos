@@ -7,6 +7,7 @@
   version replaces the previous version's chunks wholesale.
 """
 
+import time
 import unicodedata
 from datetime import UTC, datetime
 
@@ -152,7 +153,10 @@ async def ensure_chunks(
 
 
 async def embed_chunk_rows(
-    session: AsyncSession, rows: list[KnowledgeChunk], batch_size: int | None = None
+    session: AsyncSession,
+    rows: list[KnowledgeChunk],
+    batch_size: int | None = None,
+    budget_seconds: float | None = None,
 ) -> int:
     """Fill the embeddings of freshly written chunk rows; returns how many.
 
@@ -177,7 +181,16 @@ async def embed_chunk_rows(
     size = batch_size or get_settings().local_inference_batch_size
     batch = max(1, size)
     done = 0
+    deadline = None if budget_seconds is None else time.monotonic() + budget_seconds
     for start in range(0, len(pending), batch):
+        # Stop between batches, never mid-batch, so a batch is never half
+        # embedded. The overshoot is one batch at worst (~5 s at the measured
+        # rate), which is what keeps this a bound rather than a guess: the rows
+        # left without a vector are simply picked up by the next caller, and
+        # because they are already stored and chunked, that caller embeds only
+        # the gaps.
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         window = pending[start : start + batch]
         vectors = await embed_texts_background([row.content for row in window])
         for row, vector in zip(window, vectors, strict=True):
