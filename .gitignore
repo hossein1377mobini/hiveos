@@ -67,3 +67,9 @@ frontend/_*.txt
 frontend/_probe*.cjs
 _probe.js
 _*.txt
+
+# Generated test corpus (scripts/make_test_corpus.py) and live-suite output.
+# The corpus is ~48 MB of binary fixtures rebuilt on demand, not source.
+scripts/corpus/
+reports/
+

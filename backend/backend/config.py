@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     # US-211 (T-S2-5): chunk window size + overlap, in characters.
     knowledge_chunk_size_chars: int = 800
     knowledge_chunk_overlap_chars: int = 100
+    # Ceiling on chunks produced from ONE document. Measured 2026-09-15 on the
+    # staging host: embedding runs at ~0.7 s/chunk under load, so an uncapped
+    # 4908-chunk spreadsheet costs ~57 minutes of a single-process API and a
+    # 26 MB text file costs hours. Because the inference semaphore is held for
+    # the whole batch, every search request queues behind it - search was
+    # measured at 15 s while such a file drained. The cap bounds the worst case
+    # per document and the tail is recorded on the asset rather than dropped
+    # silently.
+    knowledge_max_chunks_per_document: int = 2000
     # US-212 (T-S2-6 + PO decision 2026-09-12): embedding provider.
     # 'onnx' = bge-m3 int8 on this host. The launch default: document text
     # stays on the server and measured quality matches the hosted models.
@@ -76,6 +85,13 @@ class Settings(BaseSettings):
     # API is a single uvicorn worker (ADR-023), so this is the only thing
     # keeping a burst of uploads from starving the event loop.
     local_inference_concurrency: int = 2
+    # Threads each ONNX session may use. onnxruntime's default (0) is "every
+    # core", so with concurrency 2 two inferences oversubscribe the 6 vCPU host
+    # roughly 2x - measured 2026-09-15: 600% CPU sustained with no throughput
+    # gain, and the oversubscription is what made a queued search wait 15 s
+    # instead of ~5. Half the cores per session keeps both slots busy without
+    # thrashing cache.
+    local_inference_threads: int = 3
     embedding_timeout_seconds: float = 60.0
     # PO decision 2026-09-12: reranking is the single biggest quality win -
     # vector search finds candidates, a cross-encoder orders them.

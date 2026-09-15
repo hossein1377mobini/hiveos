@@ -9,6 +9,7 @@ directly.
 """
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -21,6 +22,8 @@ from backend.knowledge.chunking import build_metadata, normalize_text, replace_c
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.embeddings import embed_texts
 from backend.models import KnowledgeAsset, KnowledgeSource, ProcessingJob
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -95,9 +98,35 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
             asset.asset_metadata = build_metadata(asset)
             chunk_rows = await replace_chunks(session, asset, normalized)
             if chunk_rows:
-                vectors = await embed_texts([row.content for row in chunk_rows])
-                for row, vector in zip(chunk_rows, vectors, strict=True):
-                    row.embedding = vector  # type: ignore[assignment]
+                # Embed in bounded sub-batches and commit each one, so a large
+                # document releases the inference semaphore between batches
+                # instead of holding it for the whole file. A search request
+                # that arrives mid-document then waits for one batch (seconds)
+                # rather than for the file (tens of minutes), and the chunks
+                # already embedded survive a crash or restart.
+                # One inference batch per commit, NOT a multiple of it. The
+                # semaphore is held for the whole embed_texts call, so a larger
+                # sub-batch directly becomes the worst-case wait for a search
+                # request that arrives mid-document. At the measured ~0.7 s per
+                # chunk, 8 chunks is ~5 s of hold; 32 would be ~22 s, which is
+                # the same starvation this change exists to remove.
+                batch = max(1, get_settings().local_inference_batch_size)
+                for start in range(0, len(chunk_rows), batch):
+                    window = chunk_rows[start : start + batch]
+                    vectors = await embed_texts([row.content for row in window])
+                    for row, vector in zip(window, vectors, strict=True):
+                        row.embedding = vector  # type: ignore[assignment]
+                    await session.commit()
+            if len(chunk_rows) >= get_settings().knowledge_max_chunks_per_document:
+                # The cap truncated this document. Record it on the asset so the
+                # operator can see the file was indexed only in part, rather
+                # than silently searching a subset.
+                asset.asset_metadata = {
+                    **(asset.asset_metadata or {}),
+                    "chunks_truncated": True,
+                    "chunks_indexed": len(chunk_rows),
+                    "chunk_cap": get_settings().knowledge_max_chunks_per_document,
+                }
             asset.status = "ready"
         except ApiError as exc:
             if exc.code in ("REVIEW_QUEUE", "OCR_UNAVAILABLE"):
@@ -164,6 +193,17 @@ async def drain_queue(session: AsyncSession, limit: int = 20) -> int:
         if job.status not in ("queued", "retrying"):
             continue
         await process_job(session, job)
+        # Commit per job, not once per batch. Each job is a complete unit of
+        # work (extract -> chunk -> embed -> status); holding all 20 in one
+        # transaction meant no progress was durable until the last one
+        # finished, so an operator watching a stuck queue saw a frozen
+        # "queued" count with no way to tell slow from hung, and the row locks
+        # from with_for_update were held across every embedding batch.
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("failed to commit job %s", job.id)
+            continue
         processed += 1
-    await session.commit()
     return processed

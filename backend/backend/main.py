@@ -6,6 +6,7 @@ epic-09/03/12 chat -> S3, epic-16 admin -> S4. /api/health is the T-S0-2
 acceptance contract.
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
@@ -32,6 +33,27 @@ from backend.routes import health
 from backend.wallet_router import router as wallet_router
 from backend.workspace import router as workspace_router
 
+logger = logging.getLogger(__name__)
+
+
+async def _warm_models(settings: Settings) -> None:
+    """Preload the local inference graphs so no request pays the cold start."""
+    if settings.embedding_provider != "onnx":
+        return
+    from backend.knowledge.onnx_runtime import embed
+
+    try:
+        await embed(["warmup"])
+    except Exception:  # pragma: no cover - warmup must never block startup
+        logger.exception("embedding model warmup failed; continuing without it")
+    if settings.rerank_enabled and settings.rerank_provider == "onnx":
+        from backend.knowledge.onnx_runtime import score
+
+        try:
+            await score("warmup", ["warmup"])
+        except Exception:  # pragma: no cover
+            logger.exception("rerank model warmup failed; continuing without it")
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
@@ -40,6 +62,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         start_scheduler(application)
+        # Load the ONNX graphs before serving traffic. Measured on staging
+        # 2026-09-15: the first embed call after a restart costs ~16 s (session
+        # init + graph load) while every later call is ~0.03 s. Without this
+        # the unlucky first user - usually a search or a chat turn - pays that
+        # once per deploy. Failure is non-fatal: search and ingestion fall back
+        # to their error paths and the app still serves.
+        await _warm_models(settings)
         yield
         await stop_scheduler(application)
 

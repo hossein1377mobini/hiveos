@@ -54,7 +54,12 @@ def _load(model_dir: str):
         if not graph.exists():
             raise RuntimeError(f"no ONNX graph at {graph}.")
         options = ort.SessionOptions()
-        options.intra_op_num_threads = 0  # onnxruntime may use every core
+        # See local_inference_threads: 0 means "all cores", which oversubscribes
+        # when two inferences run concurrently and costs throughput rather than
+        # gaining it.
+        from backend.config import get_settings
+
+        options.intra_op_num_threads = max(1, get_settings().local_inference_threads)
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         session = ort.InferenceSession(
             str(graph), sess_options=options, providers=["CPUExecutionProvider"]

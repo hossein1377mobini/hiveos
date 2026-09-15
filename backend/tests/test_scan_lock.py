@@ -56,7 +56,7 @@ async def test_second_scanner_stands_down(synced_database, monkeypatch):
     monkeypatch.setattr(scheduler, "find_due_sources", _fake_find_due)
 
     async def _fake_drain(session):
-        return None
+        ran.append("drained")
 
     monkeypatch.setattr(scheduler, "drain_queue", _fake_drain)
 
@@ -73,15 +73,22 @@ async def test_second_scanner_stands_down(synced_database, monkeypatch):
             ).scalar()
             assert acquired is True
             await scheduler._scan_due_sources()
-            assert ran == [], "the tick must stand down while the lock is held"
+            # The lock serialises the SOURCE SCAN only. Draining must still
+            # happen, otherwise one stuck lock starves the queue forever -
+            # the staging outage of 2026-09-15 where 50 jobs sat frozen while
+            # a single connection held this key for 17 minutes.
+            assert ran == ["drained"], (
+                "the scan must stand down while the lock is held, but the "
+                "queue must still drain"
+            )
             await holder.execute(
                 text("SELECT pg_advisory_unlock(:key)"),
                 {"key": scheduler.SCAN_LOCK_KEY},
             )
             await holder.commit()
-        # Lock released: the next tick does the work.
+        # Lock released: the next tick does the work and drains again.
         await scheduler._scan_due_sources()
-        assert ran == ["scanned"]
+        assert ran == ["drained", "scanned", "drained"]
     finally:
         await engine.dispose()
 

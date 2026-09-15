@@ -29,8 +29,14 @@ def normalize_text(raw: str) -> str:
     return " ".join(text.split())
 
 
-def chunk_text(normalized: str) -> list[str]:
-    """US-211: fixed-size chunks with overlap; empty input -> no chunks."""
+def chunk_text(normalized: str, max_chunks: int | None = None) -> list[str]:
+    """US-211: fixed-size chunks with overlap; empty input -> no chunks.
+
+    max_chunks bounds ONE document. Embedding is CPU-bound and single-process,
+    so without a ceiling one very large file holds the inference semaphore for
+    hours and every search request waits behind it. Defaults to
+    knowledge_max_chunks_per_document.
+    """
     settings = get_settings()
     size = settings.knowledge_chunk_size_chars
     overlap = settings.knowledge_chunk_overlap_chars
@@ -39,15 +45,17 @@ def chunk_text(normalized: str) -> list[str]:
     overlap = min(overlap, size - 1)
     if not normalized:
         return []
+    cap = settings.knowledge_max_chunks_per_document if max_chunks is None else max_chunks
     chunks: list[str] = []
     start = 0
     while start < len(normalized):
+        if cap > 0 and len(chunks) >= cap:
+            break
         chunks.append(normalized[start : start + size])
         if start + size >= len(normalized):
             break
         start += size - overlap
     return chunks
-
 
 def build_metadata(asset: KnowledgeAsset) -> dict:
     """US-208: the pipeline metadata bag stored on the asset."""

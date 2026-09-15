@@ -59,6 +59,20 @@ def _engine():
     return _ENGINE
 
 
+async def _drain_safely(session) -> None:
+    """Drain the ingestion queue, never letting a failure escape the tick.
+
+    A failed drain is retried on the next tick; an escaping exception would
+    skip the advisory unlock below and stall every later scan.
+    """
+    try:
+        await drain_queue(session)
+        await session.commit()
+    except Exception:  # noqa: BLE001 - a failed drain retries next tick
+        await session.rollback()
+        logger.exception("queue drain failed")
+
+
 async def _scan_due_sources() -> None:
     factory = async_sessionmaker(_engine(), expire_on_commit=False)
     async with factory() as session:
@@ -70,7 +84,17 @@ async def _scan_due_sources() -> None:
             )
         ).scalar()
         if not held:
-            logger.info("another worker is scanning; skipping this tick")
+            # The lock guards the SOURCE SCAN, not the queue. Returning here
+            # used to skip the drain as well, so a single stuck lock starved
+            # ingestion permanently: observed on staging 2026-09-15, one
+            # connection sat "idle in transaction" for 17 minutes holding
+            # SCAN_LOCK_KEY while the queue stayed frozen at 50 jobs and the
+            # process burned 600% CPU on work whose results were never
+            # committed. Drain is safe to run concurrently - the queue uses
+            # SELECT ... FOR UPDATE SKIP LOCKED - so an unsynchronised tick
+            # still makes progress instead of doing nothing.
+            logger.info("another worker is scanning; draining the queue only")
+            await _drain_safely(session)
             return
         try:
             now = datetime.now(UTC)
@@ -103,12 +127,7 @@ async def _scan_due_sources() -> None:
             # thing that drains the queue, so assets queued by a manifest sync
             # or an upload sat unprocessed until someone scanned successfully.
             # It runs in its own try so a drain error cannot skip the unlock.
-            try:
-                await drain_queue(session)
-                await session.commit()
-            except Exception:  # noqa: BLE001 - a failed drain retries next tick
-                await session.rollback()
-                logger.exception("queue drain failed")
+            await _drain_safely(session)
             # Advisory locks are session-scoped, so this also releases on
             # disconnect; releasing explicitly keeps it tied to the tick.
             await session.execute(
