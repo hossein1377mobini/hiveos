@@ -7,7 +7,11 @@ report so a failure says what broke, not just that something did.
 """
 from __future__ import annotations
 
-import argparse, json, os, sys, time, uuid
+import argparse
+import json
+import os
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,7 +40,16 @@ class Suite:
         line = f"  [{mark}] {name} ({ms:.0f}ms)"
         if not ok:
             line += f"  <- {detail[:180]}"
-        print(line, flush=True)
+        # The matrix uploads files with Persian names, and a Windows console
+        # defaults to cp1252. Printing one raised UnicodeEncodeError and killed
+        # the run partway through the upload group, so only the groups that ran
+        # before it were ever reported. Re-encode lossily for the console; the
+        # JSON report still carries the exact name.
+        try:
+            print(line, flush=True)
+        except UnicodeEncodeError:
+            enc = sys.stdout.encoding or "utf-8"
+            print(line.encode(enc, "replace").decode(enc, "replace"), flush=True)
         return ok
 
     def check(self, group, name, cond, ms, detail=""):
@@ -81,9 +94,9 @@ def main() -> int:
     s.check("auth", "garbage token rejected",
             c.get("/knowledge-assets", headers={"Authorization": "Bearer nope"}).status_code == 401, 0)
 
-    # admin session
+    # admin session. Only the login itself is asserted here; the admin endpoint
+    # group logs in again for its own token, so no header is built at this point.
     ra = c.post("/admin/auth/login", json={"username": args.admin_user, "password": args.admin_password})
-    AH = {"Authorization": f"Bearer {ra.json()['data']['token']}"} if ra.is_success else {}
     s.check("auth", "admin login", ra.is_success, 0)
     s.check("auth", "user token cannot reach admin",
             c.get("/admin/organizations", headers=H).status_code == 403, 0)
@@ -147,8 +160,16 @@ def main() -> int:
     r, ms, err = timed(lambda: c.get("/processing/jobs", headers=H))
     if not err and r.is_success:
         jobs = r.json().get("data", {}).get("jobs", [])
-        bad = [j for j in jobs if j.get("status") == "failed"]
-        s.check("pipeline", f"job queue healthy ({len(jobs)} jobs, {len(bad)} failed)",
+        # Scope the health check to THIS run's uploads. The queue keeps failed
+        # rows as tombstones for assets an operator deleted, so a global
+        # "no failures anywhere" assertion fails forever on a long-lived
+        # database and says nothing about the uploads just made - it reported a
+        # failure on every run while the pipeline was in fact healthy.
+        mine = set(uploaded)
+        my_jobs = [j for j in jobs if str(j.get("asset_id")) in mine]
+        bad = [j for j in my_jobs if j.get("status") == "failed"]
+        s.check("pipeline",
+                f"job queue healthy ({len(my_jobs)} of this run's jobs, {len(bad)} failed)",
                 len(bad) == 0, ms, json.dumps(bad[:2])[:180])
     else:
         s.record("pipeline", "job list", False, ms, err or "")
