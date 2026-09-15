@@ -109,6 +109,11 @@ const MESSAGES: Record<string, string> = {
   LLM_PROVIDER_MODEL:
     "مدل انتخاب‌شده در سرویس هوش مصنوعی موجود نیست. نام مدل را در پنل بررسی کنید.",
   EMBEDDING_UNAVAILABLE: "سرویس جست‌وجوی معنایی در دسترس نیست.",
+  // Load shedding, not an outage: the request was refused on purpose because the
+  // inference slots were busy, and the same request will succeed if retried. The
+  // wording says "busy, try again" rather than "unavailable", which would send
+  // the owner looking for a broken service.
+  INFERENCE_BUSY: "سامانه در این لحظه مشغول پردازش درخواست‌های دیگر است؛ چند لحظه بعد دوباره تلاش کنید.",
   // P2-12: the worker writes ASSET_FILE_MISSING when the bytes a row points at
   // are gone. Without an entry the owner saw the generic "انجام این کار ممکن
   // نشد" instead of being told the file itself is the problem.
