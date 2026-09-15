@@ -9,7 +9,7 @@ export function DialogBody({ className, ...props }: React.ComponentProps<"div">)
   return (
     <div
       data-slot="dialog-body"
-      className={cn("grid gap-4 overflow-y-auto px-6 py-1 text-sm", className)}
+      className={cn("grid gap-4 overflow-y-auto px-6 py-1 text-body", className)}
       {...props}
     />
   )

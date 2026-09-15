@@ -42,7 +42,15 @@ INGESTION_ALLOWED_ROOTS=/opt/hiveos/ingestion
 STORAGE_ROOT=/opt/hiveos/storage
 WALLET_WELCOME_CREDIT=50
 ADMIN_SESSION_TTL_HOURS=12
-CORS_ORIGINS=https://staging.hivesystem.ir
+# Staging audit 2026-09-14 P1-8: this was https://staging.hivesystem.ir while the
+# live host is the apex domain, so no cross-origin client was ever allowed.
+# Same-origin traffic hides the mistake, which is why it survived.
+CORS_ORIGINS=https://hivesystem.ir
+# Staging audit 2026-09-14 P1-7: nginx is the only hop (the api port is bound to
+# 127.0.0.1:8100), so the loopback address is the only peer allowed to set
+# X-Forwarded-For. This must never be "*": the rate limiter would then trust a
+# header any local process can forge, and rotating it bypasses the limit.
+TRUSTED_PROXIES=127.0.0.1
 SMS_PROVIDER=melipayamak
 MELIPAYAMAK_OTP_SERVICE_ID=$SMS_SERVICE_ID
 EOF

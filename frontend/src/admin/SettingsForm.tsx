@@ -44,7 +44,14 @@ export function toFormValues(
             }))
           : []
     } else if (raw === null || raw === undefined) {
-      next[field.name] = field.kind === "number" ? "" : ""
+      // A select is pre-filled with the value the server would fall back to
+      // rather than left on its placeholder: a dropdown cannot render "the
+      // default is X" as a free-text value, and an empty dropdown reads as
+      // "unset" when the runtime is in fact using something.
+      next[field.name] =
+        field.kind === "select" && field.effectiveDefault !== undefined
+          ? String(field.effectiveDefault)
+          : ""
     } else {
       next[field.name] = String(raw)
     }
@@ -128,6 +135,30 @@ export function toPayload(
   }
 
   return { payload, errors }
+}
+
+/**
+ * The "what is actually in force" note under a field the operator has not set.
+ *
+ * The PO opened the pipeline panel and read the blank "سقف حجم هر فایل" as "no
+ * limit", while the server was rejecting every upload over 25 MB. The runtime
+ * fills an absent key from its own default and never from the empty form, so
+ * the panel has to say so: a blank control must not read as "nothing applies".
+ *
+ * An empty LIST is the one case where blank is the real answer — no allowlist
+ * means every model, and no format list means the server does not filter — and
+ * those fields carry no `effectiveDefault`, so no note is rendered.
+ */
+function FieldNote({ field, value }: { field: SettingField; value: unknown }) {
+  if (field.effectiveDefault === undefined) return null
+  if (String(value ?? "").trim() !== "") return null
+  return (
+    <p data-testid={"setting-default-" + field.name} className="text-micro text-muted-foreground">
+      خالی است؛ در حال حاضر{" "}
+      <span className="mono font-bold text-foreground">{String(field.effectiveDefault)}</span>{" "}
+      اعمال می‌شود (مقدار پیش‌فرض).
+    </p>
+  )
 }
 
 function FieldControl({
@@ -340,6 +371,7 @@ export function SettingsForm({
                     : undefined
                 }
               />
+              <FieldNote field={field} value={values[field.name]} />
               {field.hint && (
                 <p className="text-micro leading-relaxed text-muted-foreground">{field.hint}</p>
               )}

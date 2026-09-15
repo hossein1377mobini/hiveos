@@ -70,7 +70,7 @@ export default function Login({ onDone }: { onDone: () => void }) {
         <span className="logo-box inline-flex h-[52px] w-[52px] items-center justify-center rounded-card bg-primary text-primary-foreground shadow-raised [&>svg]:h-[26px] [&>svg]:w-[26px]">
           {HOUSE_SVG}
         </span>
-        <h1 className="mt-3.5 text-title font-bold">ورود به HiveOS</h1>
+        <h1 className="mt-3.5 text-title">ورود به HiveOS</h1>
         <p className="mt-1 text-caption text-muted-foreground">با نام کاربری و رمز عبور حساب خود وارد شوید.</p>
       </div>
 

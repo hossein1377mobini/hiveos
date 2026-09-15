@@ -6,9 +6,9 @@ idempotency + pagination (US-0909). Streaming/Agent execution land with
 T-S3-2/3-4; hard delete/retention = US-0901 AC6 (v0.3 per US-216 pattern).
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
@@ -29,6 +29,43 @@ DEFAULT_SETTINGS = {
 }
 
 MAX_PAGE_SIZE = 100
+
+# PO request 2026-09: "no session may be empty. If I create a new conversation
+# and do nothing in it, delete it so it is not shown."
+#
+# The client opens a session speculatively (the "new chat" button calls
+# POST /chat/sessions immediately, before anything is typed), so an abandoned
+# session is a normal state, not an error. Two things are needed and they are
+# not the same thing:
+#
+#   * the LIST must never show one - that is the visible half, and it is exact
+#     (a live EXISTS on chat_messages, no reliance on a cached counter).
+#   * the ROWS must not accumulate forever - that is the housekeeping half.
+#
+# The grace period exists only for housekeeping. A user who pressed "new chat"
+# a second ago is about to type into that session; deleting it would make their
+# send fail with CHAT_SESSION_NOT_FOUND. One hour is far beyond any realistic
+# pause between opening a conversation and typing, and short enough that the
+# table stays clean.
+EMPTY_SESSION_GRACE = timedelta(hours=1)
+# How many abandoned sessions one request may delete. Housekeeping must stay
+# cheap: it runs inside the list request, and the backlog is bounded per call
+# rather than by holding the request open until the table is empty.
+EMPTY_SESSION_PURGE_LIMIT = 200
+
+# How many earlier messages of a session are sent back to the model.
+#
+# The chat was stateless: agenerate() built [system, current question] on every
+# call, so the model could not resolve a follow-up ("و دومی؟") and the only
+# record that a conversation existed was the transcript on screen. The PO
+# reported it as having no access to earlier sessions.
+#
+# 20 messages is ten exchanges. It is deliberately a message count rather than a
+# token count: the per-session token_budget (128k) is far above what twenty
+# Persian messages cost, so this bound keeps the prompt predictable and cheap
+# without needing a tokenizer on this path. The oldest are dropped first, which
+# is also the context_strategy the session settings name (TRUNCATE_OLDEST).
+HISTORY_MESSAGES = 20
 
 
 def _utc_now() -> datetime:
@@ -162,6 +199,100 @@ async def create_session(
     return _session_payload(chat, 0)
 
 
+async def load_history(
+    session: AsyncSession,
+    organization_id,
+    user_id,
+    chat_session_id,
+    limit: int = HISTORY_MESSAGES,
+) -> list[dict]:
+    """The recent turns of one session, oldest first, for the model prompt.
+
+    Scoped exactly like the transcript endpoint: the session must belong to this
+    org and this user, so history can never become a way to read another user's
+    conversation. Returns [] rather than raising when there is no session, so the
+    caller can treat "no history" and "history failed" identically - both simply
+    mean the model gets no prior turns.
+
+    Reads from the same table the transcript renders, so what the model sees and
+    what the user sees cannot drift apart.
+    """
+    if chat_session_id is None:
+        return []
+    owned = await session.execute(
+        select(ChatSession.id).where(
+            ChatSession.id == chat_session_id,
+            ChatSession.organization_id == organization_id,
+            ChatSession.owner_id == user_id,
+        )
+    )
+    if owned.scalar_one_or_none() is None:
+        return []
+    rows = (
+        (
+            await session.execute(
+                select(ChatMessage)
+                .where(
+                    ChatMessage.session_id == chat_session_id,
+                    ChatMessage.organization_id == organization_id,
+                    ChatMessage.role.in_(("USER", "ASSISTANT")),
+                )
+                .order_by(ChatMessage.sequence.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # The query walks backwards from the newest so LIMIT keeps the RECENT turns;
+    # the prompt needs them the other way round.
+    ordered = list(reversed(rows))
+    history: list[dict] = []
+    for message in ordered:
+        content = (message.content or {}).get("text") if isinstance(message.content, dict) else None
+        if content:
+            history.append({"role": message.role, "content": str(content)})
+    return history
+
+
+async def purge_empty_sessions(
+    session: AsyncSession, organization_id, user_id
+) -> int:
+    """Delete the caller's abandoned empty sessions (PO request 2026-09).
+
+    Called from the list endpoint: that is exactly the moment the user is
+    looking at their conversations, it is bounded (one statement, at most
+    EMPTY_SESSION_PURGE_LIMIT rows), and it needs no scheduler - the audit noted
+    the rows accumulating, and this is where anyone would notice them.
+
+    Only the caller's own sessions, only zero-message ones, only older than
+    EMPTY_SESSION_GRACE, so a session created seconds ago and about to receive
+    the first message is untouched. Deleted hard, not soft: an abandoned empty
+    row has no transcript to preserve, and keeping it as status='DELETED' would
+    leave exactly the clutter the PO asked to remove.
+
+    Returns the number of rows removed (0 when there is nothing to do).
+    """
+    cutoff = _utc_now() - EMPTY_SESSION_GRACE
+    candidates = (
+        select(ChatSession.id)
+        .where(
+            ChatSession.organization_id == organization_id,
+            ChatSession.owner_id == user_id,
+            ChatSession.created_at < cutoff,
+            ~exists(
+                select(ChatMessage.id).where(ChatMessage.session_id == ChatSession.id)
+            ),
+        )
+        .order_by(ChatSession.created_at)
+        .limit(EMPTY_SESSION_PURGE_LIMIT)
+    )
+    result = await session.execute(
+        delete(ChatSession).where(ChatSession.id.in_(candidates))
+    )
+    return int(result.rowcount or 0)
+
+
 async def list_sessions(
     session: AsyncSession, organization_id, user_id, filters: dict
 ) -> dict:
@@ -172,7 +303,24 @@ async def list_sessions(
     page = max(int(filters.get("page", 1)), 1)
     page_size = min(max(int(filters.get("page_size", 20)), 1), MAX_PAGE_SIZE)
 
+    # PO request 2026-09: an empty session must never surface.
+    #
+    # Done here, before anything else, so the purge cannot delete a row the
+    # caller is about to be shown. One EXISTS per row, but no N+1: the correlated
+    # subquery is inlined into the single COUNT/SELECT below, so the database
+    # answers both in one statement each.
+    await purge_empty_sessions(session, organization_id, user_id)
+
     conditions = [ChatSession.organization_id == organization_id]
+    # The visible half of the same rule: a session with zero messages does not
+    # exist as far as the user is concerned, whatever row lingers. Exact and
+    # cheap - NOT context_state["message_count"], which is a cached counter that
+    # a rolled-back append can leave stale.
+    conditions.append(
+        exists(
+            select(ChatMessage.id).where(ChatMessage.session_id == ChatSession.id)
+        )
+    )
     if status != "ALL":
         conditions.append(ChatSession.status == status)
     conditions.append(ChatSession.owner_id == user_id)

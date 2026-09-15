@@ -112,6 +112,87 @@ def test_admin_logs_can_be_bounded_to_a_time_range(client, tmp_path):
     assert bad.json()["error"]["code"]
 
 
+def test_purge_failed_assets_removes_only_the_tombstones(client, tmp_path):
+    """P2-12 (staging audit 2026-09-14): 24 failed assets were never cleaned up.
+
+    Processing died with ASSET_FILE_MISSING on files the host had but the
+    container could not see, and the rows stayed in the organization's knowledge
+    forever - so tombstones (24) outnumbered working documents (33) in the admin
+    list. The action is audited and HARD-deletes only status='failed'.
+    """
+    from sqlalchemy import create_engine, text
+
+    from backend.config import get_settings, to_sync_database_url
+    from tests.test_admin_api import ADMIN as _ADMIN
+
+    ctx = _bootstrap_full(client)
+    _register_folder(client, ctx, tmp_path)
+    admin = _login(client)
+
+    engine = create_engine(to_sync_database_url(get_settings().database_url))
+    with engine.begin() as conn:
+        org_id = conn.execute(
+            text("SELECT id FROM hiveos.organizations LIMIT 1")
+        ).scalar_one()
+        # One failed row (the tombstones the audit found) plus a ready one that
+        # must survive the purge.
+        conn.execute(
+            text(
+                "INSERT INTO hiveos.knowledge_assets"
+                " (id, organization_id, name, storage_path, size_bytes, extension,"
+                "  status, uploaded_by)"
+                " VALUES (gen_random_uuid(), :org, 'dead.pdf', '/tmp/dead.pdf', 10,"
+                "  'pdf', 'failed', NULL)"
+            ),
+            {"org": org_id},
+        )
+        before = conn.execute(
+            text(
+                "SELECT status, count(*) FROM hiveos.knowledge_assets"
+                " WHERE organization_id = :org GROUP BY status"
+            ),
+            {"org": org_id},
+        ).all()
+    engine.dispose()
+    assert dict(before)["failed"] == 1
+
+    response = client.post(
+        f"{_ADMIN}/organizations/{org_id}/assets/purge-failed", headers=admin
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["purged"] == 1
+
+    engine = create_engine(to_sync_database_url(get_settings().database_url))
+    with engine.connect() as conn:
+        after = conn.execute(
+            text(
+                "SELECT status, count(*) FROM hiveos.knowledge_assets"
+                " WHERE organization_id = :org GROUP BY status"
+            ),
+            {"org": org_id},
+        ).all()
+        logged = conn.execute(
+            text(
+                "SELECT count(*) FROM hiveos.audit_logs"
+                " WHERE event = 'admin.assets.purge_failed'"
+            )
+        ).scalar_one()
+    engine.dispose()
+    counts = dict(after)
+    assert counts.get("failed", 0) == 0
+    # The scanned document is untouched (it is 'queued' until the worker runs -
+    # what matters is that a non-failed row survived).
+    assert counts.get("queued", 0) >= 1
+    assert logged == 1  # audited
+
+    # Unknown organization is a 404, not a silent success.
+    missing = client.post(
+        f"{_ADMIN}/organizations/00000000-0000-0000-0000-000000000000/assets/purge-failed",
+        headers=admin,
+    )
+    assert missing.status_code == 404
+
+
 def test_organization_detail_lists_related_operations(client, tmp_path):
     ctx = _bootstrap_full(client)
     folder = _register_folder(client, ctx, tmp_path)

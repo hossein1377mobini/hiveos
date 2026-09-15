@@ -98,6 +98,48 @@ def test_semantic_search_returns_relevant_chunk_first(client, tmp_path):
     assert top["content"]  # snippet present
 
 
+def test_gibberish_returns_nothing_instead_of_a_confident_page(client, tmp_path):
+    """P2-9 (staging audit 2026-09-14): the API always returned top_k hits.
+
+    Measured on the real corpus: real queries scored 0.72-0.76, gibberish
+    0.31-0.37 - and the gibberish still came back as a full page of "sources",
+    so an answer about something absent from the knowledge base looked grounded.
+    The floor sits in the measured gap.
+    """
+    from backend.knowledge.search import MIN_RELEVANCE_SCORE
+
+    ctx = _register_asset(client, tmp_path, "note.md", "دستورالعمل نصب سرور لینوکس")
+    _drain()
+
+    # A question the corpus says nothing about.
+    response = client.post(
+        f"{SEARCH}",
+        json={"query": "xyzzy plugh frobnicate qqqqq zzz"},
+        headers=ctx["headers"],
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["results"] == []
+
+    # The relevant query still comes back, so the floor did not close the door.
+    relevant = client.post(
+        f"{SEARCH}",
+        json={"query": "دستورالعمل نصب سرور لینوکس"},
+        headers=ctx["headers"],
+    ).json()["data"]["results"]
+    assert relevant and relevant[0]["score"] >= MIN_RELEVANCE_SCORE
+
+
+def test_relevance_floor_sits_in_the_measured_gap():
+    """The floor is a value, with the measurement that chose it, not a guess.
+
+    Real queries 0.72-0.76, gibberish 0.31-0.37 on the staging corpus.
+    """
+    from backend.knowledge.search import MIN_RELEVANCE_HITS, MIN_RELEVANCE_SCORE
+
+    assert 0.37 < MIN_RELEVANCE_SCORE < 0.72
+    assert MIN_RELEVANCE_HITS >= 1
+
+
 def test_search_is_org_isolated(client, tmp_path):
     _register_asset(client, tmp_path, "note.md", "دستورالعمل نصب سرور")
     _drain()

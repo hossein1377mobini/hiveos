@@ -11,6 +11,70 @@ def _create_session(client, headers, body=None):
     return response.json()["data"]
 
 
+def test_an_empty_session_is_never_listed(client):
+    """PO request 2026-09: "no session may be empty - delete it so it is not shown".
+
+    The client opens a session speculatively (the "new chat" button POSTs
+    /chat/sessions before anything is typed), so pressing it and typing nothing
+    left an empty row. It must not appear in the list - and it must also not
+    accumulate: an abandoned one is deleted once it is older than the grace
+    period.
+    """
+    ctx = _bootstrap_full(client)
+    empty = _create_session(client, ctx["headers"], {"title": "گفتگوی جدید"})
+    listed = client.get(f"{CHAT}/sessions", headers=ctx["headers"]).json()["data"]
+    assert listed["total_count"] == 0
+    assert listed["items"] == []
+
+    # It is still addressable by id - the user may be about to type into it.
+    assert (
+        client.get(f"{CHAT}/sessions/{empty['id']}", headers=ctx["headers"]).status_code == 200
+    )
+
+    # A session that DOES have a message is listed, and survives the cleanup.
+    kept = _create_session(client, ctx["headers"], {"title": "گفتگوی واقعی"})
+    _give_a_message(client, ctx["headers"], kept["id"])
+    listed = client.get(f"{CHAT}/sessions", headers=ctx["headers"]).json()["data"]
+    assert [str(row["id"]) for row in listed["items"]] == [str(kept["id"])]
+
+
+def test_list_sessions_purges_an_abandoned_empty_session_past_the_grace(client):
+    """The rows must not accumulate forever (partner of the filter above).
+
+    The guard is the grace period: a fresh empty session is never touched,
+    because deleting one the user is about to type into would make their send
+    fail with CHAT_SESSION_NOT_FOUND.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import create_engine, text
+
+    from backend.config import get_settings, to_sync_database_url
+
+    ctx = _bootstrap_full(client)
+    stale = _create_session(client, ctx["headers"], {"title": "رهاشده"})
+    fresh = _create_session(client, ctx["headers"], {"title": "تازه"})
+
+    engine = create_engine(to_sync_database_url(get_settings().database_url))
+    with engine.begin() as conn:
+        # Age one of them past the one-hour grace period.
+        conn.execute(
+            text("UPDATE hiveos.chat_sessions SET created_at = :t WHERE id = :id"),
+            {"t": datetime.now(UTC) - timedelta(hours=2), "id": stale["id"]},
+        )
+    engine.dispose()
+
+    listed = client.get(f"{CHAT}/sessions", headers=ctx["headers"]).json()["data"]
+    assert listed["total_count"] == 0
+
+    engine = create_engine(to_sync_database_url(get_settings().database_url))
+    with engine.connect() as conn:
+        ids = conn.execute(text("SELECT id FROM hiveos.chat_sessions")).scalars().all()
+    engine.dispose()
+    # The abandoned one is GONE; the one created seconds ago is untouched.
+    assert [str(row) for row in ids] == [str(fresh["id"])]
+
+
 def test_create_session_defaults(client):
     ctx = _bootstrap_full(client)
     data = _create_session(client, ctx["headers"])
@@ -31,11 +95,21 @@ def test_create_session_validation_temperature(client):
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+def _give_a_message(client, headers, session_id, text="سلام"):
+    """A session with no messages is filtered out; every listed one needs one."""
+    response = client.post(
+        f"{CHAT}/sessions/{session_id}/messages", json={"text": text}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_list_sessions_filters_and_pagination(client):
     ctx = _bootstrap_full(client)
     first = _create_session(client, ctx["headers"], {"title": "قرارداد فروش"})
-    _create_session(client, ctx["headers"], {"title": "پشتیبانی فنی", "pinned": True})
-    _create_session(client, ctx["headers"], {"title": "بایگانی‌شده"})
+    second = _create_session(client, ctx["headers"], {"title": "پشتیبانی فنی", "pinned": True})
+    third = _create_session(client, ctx["headers"], {"title": "بایگانی‌شده"})
+    for session in (first, second, third):
+        _give_a_message(client, ctx["headers"], session["id"])
     # archive the third
     archive = client.post(
         f"{CHAT}/sessions/{first['id']}/archive", headers=ctx["headers"]

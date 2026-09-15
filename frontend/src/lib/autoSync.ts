@@ -18,6 +18,9 @@ export interface SyncPlan {
   last_scanned_at: string | null;
   next_due_at: number | null;
   pending_uploads: number;
+  // The server's own `upload_max_file_mb`. Declared here for a while but never
+  // read (P1-6): the upload loop POSTed files the server had already refused on
+  // size, spending the request budget on guaranteed failures.
   max_file_mb: number;
 }
 
@@ -47,7 +50,9 @@ async function tick(): Promise<void> {
   running = true;
   try {
     const plan = await api<SyncPlan>("GET", "/knowledge-sources/client-folder/sync-plan");
-    if (plan.due) await syncClientFolder(folder);
+    // P1-6: hand the advertised limit to the sync so oversize files are
+    // rejected locally instead of being uploaded and refused.
+    if (plan.due) await syncClientFolder(folder, undefined, plan.max_file_mb);
   } catch {
     // Offline, logged out or the folder moved: the next tick tries again.
   } finally {

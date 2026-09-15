@@ -3,7 +3,17 @@ import { ArrowDownLeft, ArrowUpRight, Coins, Info, TrendingDown } from "lucide-r
 import { api } from "../api/client";
 import { Banner } from "../components/ui/banner";
 import { RetryNotice } from "../components/ui/retry";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+// Surface is the product's official page primitive (components/ui/surface.tsx):
+// it is Card with the elevation token, radius, border and padding applied once.
+// This page used to import Card directly, which is why it did not look like its
+// siblings - every other page in the app and the admin panel uses Surface.
+import {
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Surface,
+} from "../components/ui/surface";
 import { Progress } from "../components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { faDateTime, faNum } from "../utils/format";
@@ -87,13 +97,13 @@ export default function Usage() {
 
   if (!state) {
     if (error) return <RetryNotice message={error} onRetry={() => void load()} testId="usage-retry" />;
-    return <p className="text-sm text-muted-foreground">در حال بارگذاری…</p>;
+    return <p className="text-body text-muted-foreground">در حال بارگذاری…</p>;
   }
 
   return (
     <section className="mx-auto max-w-3xl space-y-4" aria-label="اعتبار و مصرف">
       <div>
-        <h1 className="text-heading font-bold text-foreground">اعتبار و مصرف</h1>
+        <h1 className="text-title">اعتبار و مصرف</h1>
         <p className="mt-[3px] text-caption text-muted-foreground">
           موجودی، مصرف و درخواست‌های شارژ سازمان شما.
         </p>
@@ -106,57 +116,57 @@ export default function Usage() {
       )}
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
+        <Surface>
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+            <CardTitle className="flex items-center gap-2 text-micro font-bold text-muted-foreground">
               <Coins className="size-3.5" /> اعتبار فعلی
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-display" data-testid="usage-balance">{faNum(state.balance)}</p>
           </CardContent>
-        </Card>
-        <Card>
+        </Surface>
+        <Surface>
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+            <CardTitle className="flex items-center gap-2 text-micro font-bold text-muted-foreground">
               <ArrowDownLeft className="size-3.5 text-success" /> شارژهای اخیر
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-display text-success" data-testid="usage-charged">{faNum(totals.charged)}</p>
           </CardContent>
-        </Card>
-        <Card>
+        </Surface>
+        <Surface>
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+            <CardTitle className="flex items-center gap-2 text-micro font-bold text-muted-foreground">
               <ArrowUpRight className="size-3.5 text-error" /> مصرف اخیر
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-display text-error" data-testid="usage-spent">{faNum(totals.spent)}</p>
           </CardContent>
-        </Card>
+        </Surface>
       </div>
 
-      <Card>
+      <Surface>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm font-bold">
+          <CardTitle className="flex items-center gap-2 text-body font-bold">
             <TrendingDown className="size-4" /> نسبت مصرف به شارژ
           </CardTitle>
-          <CardDescription className="flex items-start gap-1.5 text-xs">
+          <CardDescription className="flex items-start gap-1.5 text-caption">
             <Info className="mt-0.5 size-3 shrink-0" />
             بر پایهٔ {faNum(state.transactions?.length ?? 0)} تراکنش آخر — نه کل تاریخ حساب.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          <p className="text-sm font-bold">{share}٪ از گردش اخیر صرف مصرف شده است.</p>
+          <p className="text-body font-bold">{share}٪ از گردش اخیر صرف مصرف شده است.</p>
           {/* role="progressbar" carries no information on its own: a screen
               reader announces "progress bar" with no idea what is progressing.
               The label repeats what the sentence above already states for
               sighted users, so both get the same fact. */}
           <Progress value={share} className="h-2" aria-label="نسبت مصرف به شارژ" />
         </CardContent>
-      </Card>
+      </Surface>
 
       {state.pending_request && (
         <Banner tone="warning" title="درخواست شارژ در انتظار تأیید است." data-testid="usage-pending">
@@ -170,9 +180,9 @@ export default function Usage() {
         <Banner tone="error" title="خطا" role="alert">{error}</Banner>
       )}
 
-      <Card>
+      <Surface>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-bold">تراکنش‌های اخیر</CardTitle>
+          <CardTitle className="text-body font-bold">تراکنش‌های اخیر</CardTitle>
         </CardHeader>
         <CardContent>
           {state.transactions?.length ? (
@@ -191,29 +201,29 @@ export default function Usage() {
                   const isSpend = kind.spend || row.amount < 0;
                   return (
                     <TableRow key={row.id}>
-                      <TableCell className="text-xs">{kind.label}</TableCell>
+                      <TableCell className="text-caption">{kind.label}</TableCell>
                       <TableCell className={isSpend ? "font-bold text-error" : "font-bold text-success"}>
                         {(isSpend ? "−" : "+") + faNum(Math.abs(row.amount))}
                       </TableCell>
                       <TableCell>{faNum(row.balance_after)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{faDateTime(row.created_at)}</TableCell>
+                      <TableCell className="text-caption text-muted-foreground">{faDateTime(row.created_at)}</TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
           ) : (
-            <p className="text-xs text-muted-foreground">هنوز تراکنشی ثبت نشده است.</p>
+            <p className="text-caption text-muted-foreground">هنوز تراکنشی ثبت نشده است.</p>
           )}
         </CardContent>
-      </Card>
+      </Surface>
 
       <div className="flex justify-end">
         <button
           type="button"
           onClick={() => void load()}
           disabled={loading}
-          className="rounded-control border px-3 py-1.5 text-xs font-bold hover:bg-muted disabled:opacity-50"
+          className="rounded-control border px-3 py-1.5 text-caption font-bold hover:bg-muted disabled:opacity-50"
         >
           {loading ? "در حال به‌روزرسانی…" : "به‌روزرسانی"}
         </button>

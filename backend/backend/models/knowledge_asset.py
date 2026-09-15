@@ -32,6 +32,7 @@ class KnowledgeAsset(Base, TimestampMixin):
             name="ck_knowledge_assets_status_allowed_values",
         ),
         Index("ix_knowledge_assets_organization_id", "organization_id"),
+        Index("ix_knowledge_assets_org_owner", "organization_id", "owner_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -54,6 +55,20 @@ class KnowledgeAsset(Base, TimestampMixin):
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # Who may READ this file. Distinct from uploaded_by, which records who
+    # performed the upload and is audit-facing.
+    #
+    # NULL means organization-visible: files discovered by the org-level folder
+    # scan, and rows written before migration 0029 (which backfilled owner_id
+    # from uploaded_by, so only genuinely ownerless rows remain NULL).
+    #
+    # This is the enforcement point for the PO's access model. Before it existed,
+    # every read path filtered on organization_id alone, so any member of an
+    # organization could list, download and receive in their answers every other
+    # member's files.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE")
     )
     # US-241: soft delete for uploaded documents (v0.1 scope).
     deleted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))

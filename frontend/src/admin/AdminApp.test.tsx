@@ -108,8 +108,47 @@ describe("Admin panel", () => {
     expect(await screen.findByLabelText("درگاه فعال")).toBeInTheDocument();
     expect(await screen.findByLabelText("مدل پاسخ‌دهی")).toHaveValue("deepseek-v4.1-flash");
     expect(screen.getByLabelText("اعتبار به‌ازای هر ۱۰۰۰ توکن خروجی")).toHaveValue(7);
-    // ...and no textarea anywhere in the panel.
-    expect(document.querySelector("textarea")).toBeNull();
+    // ...in one labelled section per subject, in reading order, all on the page
+    // at once. v0.1 hid each behind a menu, so the prompt was not reachable from
+    // the provider it belongs to.
+    // ...and the provider panel itself is typed controls only: no raw JSON
+    // textarea anywhere in it.
+    const providerPanel = screen.getByTestId("setting-panel-providers_pricing");
+    expect(providerPanel.querySelector("textarea")).toBeNull();
+    for (const title of ["درگاه مدل و قیمت", "لیست مدل‌های مجاز", "پایپ‌لاین اسناد"]) {
+      expect(screen.getByRole("heading", { name: title, level: 2 })).toBeInTheDocument();
+    }
+    // The free-text areas that remain are the prompt and the persona, and they
+    // are real labelled fields rather than a raw JSON blob.
+    expect(screen.getByLabelText(/دستور سیستمی/)).toBeInTheDocument();
+  });
+
+  it("shows the value the server is enforcing when a defaulted field is left blank", async () => {
+    // The PO opened the pipeline panel and read the empty "سقف حجم هر فایل" as
+    // "no limit", while the server was rejecting every upload over 25 MB. An
+    // empty control must never imply that nothing is in force.
+    sessionStorage.setItem("hiveos.admin", "adm-token");
+    const sent: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "PUT") sent.push({ url, body: JSON.parse(String(init.body)) });
+      if (url.includes("/settings/pipeline")) return json({ key: "pipeline", value: {} });
+      if (url.includes("/settings/")) return json({ key: "x", value: {} });
+      if (url.includes("/monitoring/ai")) {
+        return json({ state: "ok", configured_models: {}, packages: [], usage: null, credit: null });
+      }
+      return json({});
+    }));
+    renderAdmin("/admin/ai");
+    expect(await screen.findByTestId("setting-default-upload_max_file_mb")).toHaveTextContent("25");
+    // Saving without touching the field must not write an empty string over the
+    // server's default - the panel PUTs the whole value object.
+    fireEvent.click(screen.getByRole("button", { name: "ذخیرهٔ پایپ‌لاین اسناد" }));
+    await vi.waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0].body).not.toMatchObject({ value: { upload_max_file_mb: "" } });
+    expect(
+      (sent[0].body as { value: Record<string, unknown> }).value.upload_max_file_mb,
+    ).toBeUndefined();
   });
 });
 

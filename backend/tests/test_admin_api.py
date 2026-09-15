@@ -1,5 +1,8 @@
 """epic-16 admin panel backend (T-S4-1..T-S4-7)."""
 
+from sqlalchemy import create_engine, text
+
+from backend.config import get_settings, to_sync_database_url
 from tests.test_knowledge_api import _bootstrap_full
 
 ADMIN = "/api/v1/admin"
@@ -28,6 +31,81 @@ def test_admin_login_and_guard(client):
 
     admin = _login(client)
     assert client.get(f"{ADMIN}/settings/models_allowlist", headers=admin).status_code == 200
+
+
+RAW_KEY = "aa-FanBjRealSecretValue0123456789SV25"
+
+
+def test_providers_pricing_never_returns_the_raw_key(client):
+    """P0-4 (staging audit 2026-09-14): GET returned the live LLM api_key.
+
+    Every admin page load handed a billable key to the browser and to anything
+    logging the response (measured: len=51, prefix aa-FanBj, masked?=False).
+    """
+    admin = _login(client)
+    client.put(
+        f"{ADMIN}/settings/providers_pricing",
+        json={"value": {"provider": "openai-compatible", "api_key": RAW_KEY}},
+        headers=admin,
+    )
+    response = client.get(f"{ADMIN}/settings/providers_pricing", headers=admin)
+    assert response.status_code == 200
+    assert RAW_KEY not in response.text
+    masked = response.json()["data"]["value"]["api_key"]
+    assert masked != RAW_KEY
+    assert masked.endswith(RAW_KEY[-4:])  # recognisable, e.g. aa-FanBj…SV25
+
+
+def test_a_masked_key_round_trips_without_overwriting_the_stored_one(client):
+    """Re-saving the settings form (or an empty field) must KEEP the key.
+
+    Writing the mask through would replace a working key with the literal
+    "aa-FanBj…SV25" and break every provider call - worse than the leak.
+    """
+    admin = _login(client)
+    client.put(
+        f"{ADMIN}/settings/providers_pricing",
+        json={"value": {"provider": "openai-compatible", "api_key": RAW_KEY}},
+        headers=admin,
+    )
+    masked = client.get(f"{ADMIN}/settings/providers_pricing", headers=admin).json()["data"][
+        "value"
+    ]["api_key"]
+
+    # The panel PUTs the whole form back, mask included.
+    client.put(
+        f"{ADMIN}/settings/providers_pricing",
+        json={"value": {"provider": "openai-compatible", "api_key": masked}},
+        headers=admin,
+    )
+    # An empty string means "I did not touch the key" too.
+    client.put(
+        f"{ADMIN}/settings/providers_pricing",
+        json={"value": {"provider": "openai-compatible", "api_key": ""}},
+        headers=admin,
+    )
+
+    engine = create_engine(to_sync_database_url(get_settings().database_url))
+    with engine.connect() as conn:
+        stored = conn.execute(
+            text("SELECT value FROM hiveos.system_settings WHERE key = 'providers_pricing'")
+        ).scalar_one()["api_key"]
+    engine.dispose()
+    assert stored == RAW_KEY
+
+
+def test_system_status_does_not_echo_the_raw_key(client):
+    """The other endpoint that reads the same setting must mask it too."""
+
+    admin = _login(client)
+    client.put(
+        f"{ADMIN}/settings/providers_pricing",
+        json={"value": {"provider": "mock", "api_key": RAW_KEY}},
+        headers=admin,
+    )
+    response = client.get(f"{ADMIN}/system-status", headers=admin)
+    assert response.status_code == 200
+    assert RAW_KEY not in response.text
 
 
 def test_settings_roundtrip_and_pricing(client):

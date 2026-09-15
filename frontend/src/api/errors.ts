@@ -109,6 +109,17 @@ const MESSAGES: Record<string, string> = {
   LLM_PROVIDER_MODEL:
     "مدل انتخاب‌شده در سرویس هوش مصنوعی موجود نیست. نام مدل را در پنل بررسی کنید.",
   EMBEDDING_UNAVAILABLE: "سرویس جست‌وجوی معنایی در دسترس نیست.",
+  // P2-12: the worker writes ASSET_FILE_MISSING when the bytes a row points at
+  // are gone. Without an entry the owner saw the generic "انجام این کار ممکن
+  // نشد" instead of being told the file itself is the problem.
+  ASSET_NOT_FOUND: "سند موردنظر پیدا نشد.",
+  ASSET_NOT_OWNED: "این سند به حساب شما تعلق ندارد؛ فقط اسناد خودتان را می‌بینید.",
+  MEMORY_NOT_FOUND: "این خاطره پیدا نشد؛ ممکن است قبلاً پاک شده باشد.",
+  REPORT_EMPTY: "برای ساخت گزارش، حداقل به یک بخش داده نیاز است.",
+  REPORT_PATH_INVALID: "نشانی ذخیرهٔ گزارش معتبر نیست.",
+  AGENT_NOT_FOUND: "ایجنت موردنظر پیدا نشد.",
+  AGENT_SETTINGS_MANAGED_BY_ORGANIZATION:
+    "تنظیمات ایجنت توسط مدیر سازمان تعیین می‌شود؛ با پشتیبانی تماس بگیرید.",
 
   // --- admin ----------------------------------------------------------------
   SETTING_NOT_FOUND: "این کلید تنظیمات وجود ندارد.",
@@ -137,7 +148,11 @@ const BY_STATUS: Record<number, string> = {
   403: "اجازهٔ انجام این کار را ندارید.",
   404: "مورد درخواستی پیدا نشد.",
   409: "این کار با وضعیت فعلی سامانه سازگار نیست.",
-  413: "حجم درخواست بیش از حد مجاز است.",
+  // P0-1: this entry was unreachable. A 413 never carries a JSON envelope
+  // (nginx cuts the request before FastAPI sees it), so `client.ts` discarded
+  // the status and threw CLIENT_BAD_RESPONSE instead. It now falls through to
+  // this map, and says which thing is too big.
+  413: "حجم فایل ارسالی بیش از حد مجاز است؛ فایل کوچک‌تری انتخاب کنید.",
   429: "تعداد درخواست‌ها زیاد بود؛ چند لحظه بعد دوباره تلاش کنید.",
   500: "خطای غیرمنتظره در سرور رخ داد؛ کمی بعد دوباره تلاش کنید.",
   502: "سرور موقتاً پاسخ نمی‌دهد؛ کمی بعد دوباره تلاش کنید.",

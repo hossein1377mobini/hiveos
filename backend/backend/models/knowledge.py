@@ -1,12 +1,34 @@
-"""KnowledgeSource (US-201/US-007, T-S1-8) - v0.1 local folder per org.
+"""KnowledgeSource (US-201/US-007, T-S1-8) - a watched folder registered by a USER.
 
-The scan pipeline (assets, jobs) is US-202/US-203 in S2; this model holds
-the registration and the last scan summary only. Isolation: ADR-024.
+The PO's model (2026-09): "a user must be able to define several folders ... we
+collect the whole organization's knowledge, but each person only reaches as much
+of it as their access level allows."
+
+So a folder does NOT bound access. A user may register MANY folders; every
+folder's content is collected into the organization's knowledge. A folder is
+PROVENANCE - who contributed it and where it came from - and nothing more.
+Reading is decided per ASSET: owner_id IS NULL (org-wide) or owner_id = the
+caller, plus the organization-admin bypass (see knowledge/assets.visible_to).
+One folder per user was the older, wrong reading of the same requirement and was
+enforced by two partial unique indexes; migration 0030 replaces them with the
+ordinary non-unique ix_knowledge_sources_org_user.
+
+Isolation is still two-layered: organization_id scopes every query (ADR-024),
+and user_id records whose folder a row is.
 """
 
 import uuid
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Uuid, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import Base, TimestampMixin, new_uuid
@@ -23,13 +45,28 @@ class KnowledgeSource(Base, TimestampMixin):
             "source_type IN ('local_folder', 'client_folder')",
             name="ck_knowledge_sources_type_allowed_values",
         ),
+        # NOT unique on purpose (migration 0030, PO request 2026-09): a user may
+        # register several folders, and the organization may hold several
+        # org-wide ones (user_id IS NULL). The index exists only so the list
+        # query - "the folders visible to this caller" - has a covering index.
+        #
+        # Path-level dedup lives in service.register_folder_source instead: the
+        # exact same path for the same user is reused rather than duplicated.
+        # It cannot be a DB constraint, because the same path may legitimately
+        # be registered by two different users (a shared drive).
+        Index("ix_knowledge_sources_org_user", "organization_id", "user_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid, primary_key=True, server_default=text("gen_random_uuid()"), default=new_uuid
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    # The person whose folder this is. NULL means the organization-wide folder
+    # (the on-premises scanner's). See Index above.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE")
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False

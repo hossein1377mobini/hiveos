@@ -12,16 +12,25 @@ export interface LocalEntry {
   fingerprint: string;
 }
 
+export interface RejectedEntry {
+  rel_path: string;
+  code: string;
+  limit_mb?: number;
+}
+
 export interface SyncResult {
   added: number;
   updated: number;
   deleted: number;
   discovered_files: number;
   skipped: number;
-  rejected: { rel_path: string; code: string; limit_mb?: number }[];
+  rejected: RejectedEntry[];
   uploaded: number;
   failed: { rel_path: string; code: string }[];
 }
+
+/** The code the server itself uses for a file over `upload_max_file_mb`. */
+export const OVERSIZE_CODE = "UPLOAD_TOO_LARGE";
 
 export interface LocalScan {
   entries: LocalEntry[];
@@ -58,6 +67,7 @@ export async function scanLocalFolder(folder: string): Promise<LocalScan> {
 export async function syncClientFolder(
   folder: string,
   onProgress?: (done: number, total: number, name: string) => void,
+  maxFileMb?: number,
 ): Promise<SyncResult> {
   const bridge = requireBridge();
   const manifest = await scanLocalFolder(folder);
@@ -67,7 +77,7 @@ export async function syncClientFolder(
     deleted: number;
     discovered_files: number;
     skipped: number;
-    rejected: { rel_path: string; code: string; limit_mb?: number }[];
+    rejected: RejectedEntry[];
     pending: { asset_id: string; rel_path: string }[];
   }>("POST", "/knowledge-sources/client-folder/sync", {
     entries: manifest.entries.map((entry) => ({
@@ -78,9 +88,35 @@ export async function syncClientFolder(
   });
 
   const failed: { rel_path: string; code: string }[] = [];
-  const total = plan.pending.length;
-  let done = 0;
+  const rejected: RejectedEntry[] = [...(plan.rejected ?? [])];
+
+  // P1-6: the plan carries the server's own file-size cap and it used to be
+  // thrown away, so an oversized file was read from disk and POSTed only to be
+  // refused - burning the 30 req/min knowledge limiter on work that could never
+  // succeed. Gate on the size the manifest already reported, before the read.
+  //
+  // Belt and braces: the server rejects the same file in the manifest, but the
+  // sync-plan only reports the limit, not the rejections, so the gate has to
+  // exist here too. A file is reported once, never twice.
+  const maxBytes = maxFileMb !== undefined ? maxFileMb * 1024 * 1024 : null;
+  const bySize = new Map(manifest.entries.map((entry) => [entry.rel_path, entry.size_bytes]));
+  const alreadyRejected = new Set(rejected.map((entry) => entry.rel_path));
+  const queue: typeof plan.pending = [];
   for (const item of plan.pending) {
+    const size = bySize.get(item.rel_path);
+    if (maxBytes !== null && size !== undefined && size > maxBytes) {
+      if (!alreadyRejected.has(item.rel_path)) {
+        rejected.push({ rel_path: item.rel_path, code: OVERSIZE_CODE, limit_mb: maxFileMb });
+        alreadyRejected.add(item.rel_path);
+      }
+      continue;
+    }
+    queue.push(item);
+  }
+
+  const total = queue.length;
+  let done = 0;
+  for (const item of queue) {
     // A file can be renamed or deleted between the scan and the upload; that
     // is normal and must not abort the run for every other file.
     const file = await bridge.readFile(folder, item.rel_path);
@@ -112,5 +148,5 @@ export async function syncClientFolder(
     onProgress?.(done, total, item.rel_path);
   }
 
-  return { ...plan, uploaded: total - failed.length, failed };
+  return { ...plan, rejected, uploaded: total - failed.length, failed };
 }

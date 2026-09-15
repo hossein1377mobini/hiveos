@@ -30,6 +30,62 @@ function serverUrl() {
   return DEFAULT_URL;
 }
 
+/**
+ * THE MISSING CONTEXT MENU (PO report: "راست کلیک موس برای اقداماتی مثل کپی توی
+ * متن چت انگار باز نمیشه").
+ *
+ * Electron does NOT create a default context menu. Unlike a browser, where right
+ * -click on text opens Chromium's Copy / Select All menu, an Electron window
+ * shows nothing unless the app builds the menu itself. This file had no
+ * 'context-menu' handler at all, so right-clicking inside the chat transcript -
+ * or anywhere else in the app - did nothing. That is the whole defect; nothing
+ * in the web UI suppresses the menu.
+ *
+ * Built from roles rather than labels + click handlers: roles use Electron's own
+ * built-in behaviour and localisation, and 'copy' operates on the current
+ * selection exactly as the browser's menu would.
+ *
+ * scoped to a window, not global: the menu is attached to the window that
+ * received the click (via event.sender) so a second window does not pop a menu
+ * belonging to the first.
+ */
+function attachContextMenu(win) {
+  win.webContents.on("context-menu", (event, params) => {
+    const template = [];
+    // Only offer actions that can do something. A menu with every item greyed
+    // out is worse than no menu: it implies the text is not selectable.
+    if (params.selectionText && params.selectionText.trim()) {
+      template.push({ role: "copy", label: "کپی" });
+    }
+    if (params.isEditable) {
+      // Chat input and any form field: the standard editing set.
+      template.push(
+        { role: "cut", label: "برش" },
+        { role: "copy", label: "کپی" },
+        { role: "paste", label: "چسباندن" },
+      );
+    }
+    if (params.linkURL) {
+      template.push({
+        label: "بازکردن پیوند در مرورگر",
+        click: () => {
+          // Same protocol rule as setWindowOpenHandler below: only real web
+          // links reach the OS, so page content cannot launch a local handler.
+          if (/^https?:[/][/]/i.test(params.linkURL)) {
+            shell.openExternal(params.linkURL);
+          }
+        },
+      });
+    }
+    if (!template.length) {
+      // Nothing is selected and this is not a field: "select all" is the only
+      // useful action, and offering it lets the user select then copy.
+      template.push({ role: "selectAll", label: "انتخاب همه" });
+    }
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1360,
@@ -54,6 +110,7 @@ function createWindow() {
     shell.openExternal(url);
     return { action: "deny" };
   });
+  attachContextMenu(win);
   win.loadURL(serverUrl());
   return win;
 }

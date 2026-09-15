@@ -14,7 +14,7 @@ import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
@@ -41,12 +41,86 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-async def _active_source(session: AsyncSession, organization_id) -> KnowledgeSource | None:
-    return (
-        await session.execute(
-            select(KnowledgeSource).where(KnowledgeSource.organization_id == organization_id)
+def visible_to(user_id, is_admin: bool = False):
+    """The one predicate that decides whether a user may read an asset.
+
+    Every read path must apply it: the file list, the metadata and download
+    endpoints, the client manifest and semantic search. It is a function rather
+    than a literal in one place because the leak it closes came from four
+    separate queries each filtering on organization_id alone, so a new read path
+    would silently inherit the same hole.
+
+    Org-visible rows (owner_id IS NULL) are the org-level folder's files and rows
+    predating migration 0029; everything else belongs to exactly one user. A user
+    sees their own files plus the organization's shared ones, never a colleague's.
+
+    is_admin=True is the PO's requirement (2026-09): "we collect the whole
+    organization's knowledge, but each person reaches as much of it as their
+    access level allows" - and the level above a member is the organization
+    Owner, who reaches ALL of it. When is_admin is true there is deliberately NO
+    owner filter at all. The organization_id filter is applied by every caller
+    and is the tenant boundary (ADR-024); this predicate only ever decides
+    between members of the SAME organization.
+    """
+    if is_admin:
+        return text("true")
+    if user_id is None:
+        return KnowledgeAsset.owner_id.is_(None)
+    return (KnowledgeAsset.owner_id == user_id) | KnowledgeAsset.owner_id.is_(None)
+
+
+async def is_org_admin(session: AsyncSession, organization_id, user_id) -> bool:
+    """Whether this user is the organization's Owner (its admin).
+
+    Same definition the auth context uses (organizations.owner_user_id), read
+    here because internal callers - the execution cycle, which only has an
+    organization_id and a requested_by - have no AuthContext to take it from.
+    A second definition would be a second source of truth for "who is admin",
+    so both must change together if the concept ever moves.
+    """
+    if user_id is None:
+        return False
+    organization = await session.get(Organization, organization_id)
+    return organization is not None and organization.owner_user_id == user_id
+
+
+async def _active_source(
+    session: AsyncSession, organization_id, user_id=None
+) -> KnowledgeSource | None:
+    """The folder that governs this user's uploads.
+
+    Prefers the caller's own folder and falls back to the organization-wide one,
+    so a user who registered no folder still lands their uploads in a valid
+    source rather than failing. Without the user preference, uploads in a
+    multi-member organization would attach to whichever folder happened to sort
+    first, which could be a colleague's.
+
+    A user may now register SEVERAL folders (PO request 2026-09), so "one of
+    mine" is not unique any more: the earliest-registered one is chosen, in a
+    deterministic order, or two concurrent uploads could pick different parents
+    for identical requests. Registration order is the tie-break because it is
+    the one thing that never changes for a given row without a delete.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(KnowledgeSource)
+                .where(KnowledgeSource.organization_id == organization_id)
+                .order_by(KnowledgeSource.created_at, KnowledgeSource.id)
+            )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return None
+    for source in rows:
+        if user_id is not None and source.user_id == user_id:
+            return source
+    for source in rows:
+        if source.user_id is None:
+            return source
+    return None
 
 
 def _validate_file(filename: str, size: int) -> str:
@@ -71,8 +145,42 @@ def _validate_file(filename: str, size: int) -> str:
     return extension
 
 
-def _storage_dir(organization_id) -> Path:
+# The subfolder the system creates inside a user's folder for files it writes
+# itself (generated reports, exports). The PO's rule: system-created files live
+# in the same folder as the user's own, separated into a folder named "برنامه"
+# so a generated report is never mistaken for something the user uploaded.
+SYSTEM_SUBFOLDER = "برنامه"
+
+
+def _storage_dir(
+    organization_id, user_id=None, system: bool = False, source_id=None
+) -> Path:
+    """Where a file's bytes live on this server.
+
+    <root>/uploads/<org>/<user>/[<source_id>/]["برنامه"/]
+
+    A user may register SEVERAL folders (PO request 2026-09). Each source gets
+    its own subfolder, derived from its id, or two folders' files would land in
+    one directory and a same-named file in the second folder would either
+    collide with or overwrite the first. The id - not the folder path - is the
+    key, because a client path is user-supplied text and cannot appear in a
+    server-side path.
+
+    Files the system generates still go into the "برنامه" subfolder of the
+    requesting user's directory rather than being interleaved with their
+    uploads. The source argument is optional so the report path (which has no
+    source) keeps its existing layout.
+
+    The path is built from ids only, never from user-supplied text, so a crafted
+    filename or title cannot traverse out of the tenant's directory.
+    """
     path = Path(get_settings().storage_root) / "uploads" / str(organization_id)
+    if user_id is not None:
+        path = path / str(user_id)
+    if source_id is not None:
+        path = path / str(source_id)
+    if system:
+        path = path / SYSTEM_SUBFOLDER
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -127,7 +235,7 @@ async def upload_assets(
             f"At most {MAX_FILES_PER_UPLOAD} files can be uploaded at once.",
         )
 
-    source = await _active_source(session, organization.id)
+    source = await _active_source(session, organization.id, user_id)
     if source is not None and source.status in _SCAN_BLOCKED:
         raise ApiError(
             409, "SOURCE_DISABLED", "The knowledge source is disabled; enable it first."
@@ -135,7 +243,11 @@ async def upload_assets(
 
     stored: list[dict] = []
     rejected: list[dict] = []
-    upload_dir = _storage_dir(organization.id)
+    # The user's own upload: their directory, under the source it attaches to
+    # (one subfolder per folder they registered), not the system subfolder.
+    upload_dir = _storage_dir(
+        organization.id, user_id, source_id=source.id if source is not None else None
+    )
 
     settings = get_settings()
     per_file_max = settings.upload_max_file_mb * 1024 * 1024
@@ -186,6 +298,9 @@ async def upload_assets(
             extension=extension,
             status="queued",
             uploaded_by=user_id,
+            # The upload is the user's file, so they own it. Without this the row
+            # would be org-visible and every colleague could read it.
+            owner_id=user_id,
         )
         session.add(asset)
         await session.flush()
@@ -240,9 +355,19 @@ async def set_source_status(
 
 
 async def list_assets(
-    session: AsyncSession, organization: Organization, status: str = "active"
+    session: AsyncSession,
+    organization: Organization,
+    status: str = "active",
+    user_id=None,
+    is_admin: bool = False,
 ) -> list[dict]:
-    """US-007 FR-005 + US-241 FR-003: asset list; status=deleted lists tombstones."""
+    """US-007 FR-005 + US-241 FR-003: asset list; status=deleted lists tombstones.
+
+    Scoped to what the caller may read: their own files plus the organization's
+    shared ones, and - for the organization Owner (is_admin) - everything in the
+    organization. This filtered on organization_id alone before, so every member
+    of an organization saw every other member's uploads.
+    """
     visible = KnowledgeAsset.deleted_at.is_(None) if status != "deleted" else (
         KnowledgeAsset.deleted_at.is_not(None)
     )
@@ -252,6 +377,7 @@ async def list_assets(
             .where(
                 KnowledgeAsset.organization_id == organization.id,
                 visible,
+                visible_to(user_id, is_admin),
             )
             .order_by(KnowledgeAsset.created_at.desc())
         )
@@ -366,38 +492,66 @@ async def list_asset_chunks(
     }
 
 
+def _readable(asset, organization, user_id, is_admin: bool = False) -> bool:
+    """Whether this user may read this asset row.
+
+    Mirrors visible_to() for a row already loaded, so the single-row endpoints
+    (metadata, download, classification) enforce exactly what the list query
+    enforces. A 404 rather than a 403 is deliberate and is what the callers
+    return: telling a user "this exists but is not yours" leaks the existence of
+    a colleague's file.
+
+    is_admin is the organization Owner (see visible_to): the PO's access model
+    gives them the whole organization's knowledge. It never crosses the
+    organization boundary - organization_id is checked first, for everyone.
+    """
+    if asset is None or asset.organization_id != organization.id:
+        return False
+    if asset.deleted_at is not None:
+        return False
+    if is_admin:
+        return True
+    if asset.owner_id is None:
+        return True
+    return user_id is not None and asset.owner_id == user_id
+
+
 async def get_asset_metadata(
-    session: AsyncSession, organization: Organization, asset_id
+    session: AsyncSession, organization: Organization, asset_id, user_id=None, is_admin: bool = False
 ) -> dict:
     """US-208 API: the pipeline metadata bag."""
     asset = await session.get(KnowledgeAsset, asset_id)
-    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+    if not _readable(asset, organization, user_id, is_admin):
         raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
     metadata = asset.asset_metadata or build_metadata(asset)
     return {"id": asset.id, "metadata": metadata}
 
 
 async def get_asset(
-    session: AsyncSession, organization: Organization, asset_id
+    session: AsyncSession, organization: Organization, asset_id, user_id=None, is_admin: bool = False
 ) -> KnowledgeAsset | None:
-    """Fetch one live asset, scoped to the caller's organization.
+    """Fetch one live asset the caller is allowed to read.
 
     Returns None rather than raising so the caller decides the status code: the
     download route answers 404 for "no such row" and 404 for "row exists but
     the bytes are gone", and those are different messages to the user.
+
+    Also returns None for a colleague's file. This is the download path, so
+    without the ownership check any authenticated member of an organization
+    could fetch any other member's document by id.
     """
     asset = await session.get(KnowledgeAsset, asset_id)
-    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+    if not _readable(asset, organization, user_id, is_admin):
         return None
     return asset
 
 
 async def get_classification(
-    session: AsyncSession, organization: Organization, asset_id
+    session: AsyncSession, organization: Organization, asset_id, user_id=None, is_admin: bool = False
 ) -> dict:
     """US-205 API: GET classification of one asset."""
     asset = await session.get(KnowledgeAsset, asset_id)
-    if asset is None or asset.organization_id != organization.id or asset.deleted_at is not None:
+    if not _readable(asset, organization, user_id, is_admin):
         raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
     return {
         "id": asset.id,
@@ -421,6 +575,15 @@ async def soft_delete_asset(
     asset = await session.get(KnowledgeAsset, asset_id)
     if asset is None or asset.organization_id != organization.id:
         raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
+    # Deleting is a write, so it is stricter than reading: org-visible files may
+    # be read by everyone but deleted by no one through this path, and a
+    # colleague's file is not deletable at all.
+    if asset.owner_id is not None and asset.owner_id != user_id:
+        raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "Asset not found.")
+    if asset.owner_id is None:
+        raise ApiError(
+            403, "ASSET_NOT_OWNED", "Only the owner of a document can delete it."
+        )
     if asset.rel_path is not None:
         # US-241 scenario 2: folder documents (rel_path set by the scanner,
         # US-202) are not deletable in v0.1 — even when an upload was later

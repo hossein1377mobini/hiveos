@@ -1,7 +1,10 @@
 """Ingestion folder: registration + full scanner (US-007/US-201/US-202).
 
-v0.1 scope: one local-folder knowledge source per organization, validated
-before registration (readable, inside the allowed roots). The scanner
+v0.1 scope: a local-folder knowledge source per registration - a user may
+register SEVERAL folders (PO request 2026-09), all of which feed the
+organization's knowledge; the folder is provenance, not an access boundary.
+Each folder is validated before registration (readable, inside the allowed
+roots). The scanner
 (US-202) walks the folder recursively, fingerprints every file
 (path|size|mtime), and reconciles KnowledgeAsset rows: added files enter
 the queue ('queued'), changed files re-enter it, and missing files are
@@ -173,32 +176,73 @@ async def _active_brain(session: AsyncSession, organization_id) -> OrganizationB
     ).scalar_one_or_none()
 
 
-async def register_folder_source(session: AsyncSession, organization: Organization, path_text: str) -> dict:
-    """US-201 scenario 1: validate, register, then the automatic first scan."""
+async def register_folder_source(
+    session: AsyncSession, organization: Organization, path_text: str, user_id=None
+) -> dict:
+    """US-201 scenario 1: validate, register, then the automatic first scan.
+
+    PO request 2026-09: "a user must be able to define several folders ... press
+    add-folder and define another one." So a registration CREATES a new source
+    row for the caller by default; the previous code looked the caller up by
+    user_id and overwrote their one folder, which made a second folder
+    impossible.
+
+    The one thing reused rather than duplicated is the EXACT same path for the
+    same user: registering the same path twice is the user pressing the button
+    again, not a request for two folders, and a second row would scan the same
+    files twice and list them twice. That case updates the existing row in place
+    and reports "reused": true so the caller can tell the two apart.
+
+    Uniqueness is per (organization, user, path) and NOT a database constraint
+    because the same path may legitimately be registered by two different users
+    (a shared drive), and the path is server-side text that differs from the
+    client's own spelling.
+
+    user_id=None keeps the organization-wide folder, which the on-premises
+    scanner still uses for a path on the server itself; there may now be several
+    of those too.
+    """
     brain = await _active_brain(session, organization.id)
     if brain is None or brain.status != "ready":
         raise ApiError(
             409, "KNOWLEDGE_BRAIN_NOT_READY", "Complete the previous onboarding steps first."
         )
 
+    resolved = str(validate_folder(path_text))
+    # "Same path for the same user" is decided in the database, on the exact
+    # stored string, and scoped to this user only (NULL = the org-wide rows).
+    owner_clause = (
+        KnowledgeSource.user_id == user_id
+        if user_id is not None
+        else KnowledgeSource.user_id.is_(None)
+    )
     existing = (
         await session.execute(
-            select(KnowledgeSource).where(KnowledgeSource.organization_id == organization.id)
+            select(KnowledgeSource).where(
+                KnowledgeSource.organization_id == organization.id,
+                owner_clause,
+                KnowledgeSource.path == resolved,
+            )
         )
     ).scalar_one_or_none()
+
     if existing is not None:
-        # v0.1 keeps a single folder; re-registering validates and updates it.
+        # Same path, same user: this is a re-registration, not a new folder.
         source = existing
-        source.path = str(validate_folder(path_text))
+        source.path = resolved
+        reused = True
     else:
+        # A DIFFERENT path: a genuinely new folder. New row, never an overwrite.
         source = KnowledgeSource(
             organization_id=organization.id,
+            user_id=user_id,
             workspace_id=brain.workspace_id,
             brain_id=brain.id,
-            path=str(validate_folder(path_text)),
+            path=resolved,
         )
         session.add(source)
         await session.flush()
+        reused = False
 
     await record_audit(
         session,
@@ -206,11 +250,11 @@ async def register_folder_source(session: AsyncSession, organization: Organizati
         organization_id=organization.id,
         entity_type="knowledge_source",
         entity_id=source.id,
-        detail={"path": source.path, "source_type": "local_folder"},
+        detail={"path": source.path, "source_type": "local_folder", "reused": reused},
     )
     # US-202 FR-001: the first scan runs automatically after registration.
     await run_scan(session, organization.id, source, "initial")
-    return _payload(source, source.discovered_files)
+    return {**_payload(source, source.discovered_files), "reused": reused}
 
 
 async def scan_source(session: AsyncSession, organization: Organization, source_id) -> dict:
@@ -319,6 +363,9 @@ async def run_scan(
                 size_bytes=size,
                 extension=rel_path.rsplit(".", 1)[-1].lower()[:10] if "." in rel_path else "",
                 status="queued",
+                # Inherited from the folder: a file in a user's folder belongs to
+                # that user, an org-level folder's file stays org-visible.
+                owner_id=source.user_id,
                 rel_path=rel_path,
                 file_fingerprint=fingerprint,
                 discovered_at=now,
@@ -488,15 +535,59 @@ def _payload(source: KnowledgeSource, files_state) -> dict:
         "file_state": files_state,  # 'pending_files' (scenario 3) or the discovered count
         "scan_interval_minutes": source.scan_interval_minutes,
         "last_scanned_at": source.last_scanned_at,
+        # A user can hold several folders now, so the list has to say which of
+        # them are the caller's own and which are the organization's shared
+        # ones - otherwise the UI cannot label them differently.
+        "is_org_wide": source.user_id is None,
+        "created_at": source.created_at,
     }
 
 
-async def get_source(session: AsyncSession, organization: Organization) -> dict | None:
-    source = (
-        await session.execute(
-            select(KnowledgeSource).where(KnowledgeSource.organization_id == organization.id)
+async def list_sources(
+    session: AsyncSession, organization: Organization, user_id=None
+) -> list[dict]:
+    """ALL folders visible to the caller, in a stable order.
+
+    PO request 2026-09: "a user must be able to define several folders ... press
+    add-folder and define another one." The old get_source() reported exactly one
+    folder, chosen by a preference order (my folder, else the org-wide one, else
+    anything). It had to pretend, because it had to return one object - there is
+    no single folder any more, and a user cannot press "add folder" against an
+    endpoint that only ever shows one.
+
+    Visible = the caller's own folders plus the organization-wide ones
+    (user_id IS NULL), the same rule the file reads use. A colleague's folder is
+    not listed: its existence and path are not the caller's business.
+
+    Order: mine first (oldest first), then org-wide (oldest first), with id as a
+    final tie-break. Stable so the UI does not reshuffle between two identical
+    requests.
+    """
+    owner_clause = (
+        (KnowledgeSource.user_id == user_id) | KnowledgeSource.user_id.is_(None)
+        if user_id is not None
+        else KnowledgeSource.user_id.is_(None)
+    )
+    rows = (
+        (
+            await session.execute(
+                select(KnowledgeSource)
+                .where(
+                    KnowledgeSource.organization_id == organization.id,
+                    owner_clause,
+                )
+                .order_by(
+                    KnowledgeSource.created_at,
+                    KnowledgeSource.id,
+                )
+            )
         )
-    ).scalar_one_or_none()
-    if source is None:
-        return None
-    return _payload(source, source.discovered_files)
+        .scalars()
+        .all()
+    )
+    # Mine first. Kept as a stable partition rather than in SQL because the
+    # caller's own rows are the common case and the SQL ORDER BY would have to
+    # encode "user_id = me" as an expression anyway.
+    mine = [row for row in rows if row.user_id is not None]
+    shared = [row for row in rows if row.user_id is None]
+    return [_payload(row, row.discovered_files) for row in mine + shared]

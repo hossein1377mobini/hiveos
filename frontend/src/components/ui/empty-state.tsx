@@ -43,7 +43,7 @@ export function EmptyState({
             <Icon className="size-6" />
           </EmptyMedia>
         )}
-        <EmptyTitle className="text-heading">{title}</EmptyTitle>
+        <EmptyTitle>{title}</EmptyTitle>
         {description && <EmptyDescription className="text-caption">{description}</EmptyDescription>}
       </EmptyHeader>
       {action && <EmptyContent className="max-w-none flex-row justify-center">{action}</EmptyContent>}

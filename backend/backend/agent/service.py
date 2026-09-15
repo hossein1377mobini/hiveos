@@ -5,6 +5,16 @@ Kept apart from memory.py so the extraction/retrieval logic can be tested and
 reasoned about without the API's view of an agent. Both callers - the user's
 /agent routes and the admin panel - read the same payload builder, which is what
 stops the two panels drifting apart in what they report.
+
+WHO DECIDES THE AGENT'S BEHAVIOUR. The organization does, through the admin
+panel's "agent" setting (see memory.agent_settings and admin.AgentSettingsSchema),
+because the agent answers on the organization's behalf and its output is
+attributed to the organization. A per-user persona and per-user tool allowlist
+were editable from the user's own page and are now organization-level.
+
+What stays per-user on this object is identity and state, not policy:
+display_name is how the person refers to their assistant, and the memory tables
+are what it has learned about them.
 """
 
 from __future__ import annotations
@@ -13,12 +23,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import UserAgent
 
-# What a fresh agent's persona is. Left empty on purpose: the organization
-# brain already carries the grounding rules, and a default persona would be a
-# second voice competing with it. The user adds one if they want one.
-DEFAULT_PERSONA = ""
-
 PERSONA_MAX = 4000
+
+
+def persona_for(agent: UserAgent, organization_settings: dict) -> str:
+    """The persona in force: the organization's, not the user's.
+
+    Kept as a function so the precedence is stated in exactly one place. Any
+    per-user persona already stored is returned only when the organization has
+    not set one, so an existing row cannot silently outrank an org decision -
+    and nothing new can set a per-user persona, because the user-facing PATCH no
+    longer accepts one.
+    """
+    organization_persona = str(organization_settings.get("persona") or "").strip()
+    if organization_persona:
+        return organization_persona
+    return str(agent.persona or "").strip()
+
+
+def tools_for(agent: UserAgent, organization_settings: dict) -> list[str]:
+    """The tool allowlist in force. Organization-level, like the persona.
+
+    An empty list means every tool, which is the same convention execution
+    already used.
+    """
+    allowed = organization_settings.get("allowed_tools")
+    if allowed:
+        return list(allowed)
+    return list(agent.allowed_tools or [])
 
 
 def agent_payload(agent: UserAgent, stats: dict | None = None) -> dict:

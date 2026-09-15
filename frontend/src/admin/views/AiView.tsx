@@ -13,6 +13,7 @@ import { persianError } from "../../api/errors"
 import { adminApi, AdminSessionExpired } from "../api"
 import { Retry, useLive } from "../useLive"
 import { SETTING_DEFINITIONS, type SettingDefinition } from "../settings-schema"
+import { LoadingPanel, PageHeader, SectionHeading } from "../page-layout"
 import {
   SettingsForm,
   toFormValues,
@@ -41,27 +42,54 @@ export default function AiView({ token }: { token: string }) {
   )
 }
 
+/**
+ * The order the settings are read in, and why.
+ *
+ * v0.1 rendered one panel at a time behind a menu, in whatever order the schema
+ * array happened to hold. The PO's complaint was that the page had no layout to
+ * read: the answer behaviour sat before the provider it depends on, and the
+ * retrieval knobs were three clicks away from the models they belong to.
+ *
+ * The order below follows the path an answer takes: which provider answers ->
+ * which models are allowed -> how documents are retrieved and embedded -> how
+ * the answer itself is written. Every panel is on the page at once, so nothing
+ * is hidden behind a click, and the panels that a change actually couples
+ * together (the provider and its pricing, the prompt and the persona) stay
+ * adjacent.
+ */
+const AI_SECTIONS: Array<{
+  key: string
+  caption: string
+}> = [
+  { key: "providers_pricing", caption: "درگاه پاسخ‌دهی، مدل‌های بردار و نرخ مصرف" },
+  { key: "models_allowlist", caption: "مدل‌هایی که کاربران مجاز به انتخابشان هستند" },
+  { key: "pipeline", caption: "پویش پوشهٔ اسناد و محدودیت‌های بارگذاری" },
+  { key: "prompt_template", caption: "دستور سیستمی و قالب پرسش نهایی" },
+  { key: "agent", caption: "نام، شخصیت، ابزارها و حافظهٔ دستیار سازمان" },
+]
+
 function SettingsSection({ token }: { token: string }) {
-  const [active, setActive] = useState(SETTING_DEFINITIONS[0].key)
-  const definition = SETTING_DEFINITIONS.find((d) => d.key === active) ?? SETTING_DEFINITIONS[0]
+  // Driven by AI_SECTIONS rather than by the schema array, so the reading order
+  // is a deliberate decision in one place instead of a side effect of where a
+  // definition was appended. A key with no definition is skipped rather than
+  // rendered as an empty card.
+  const sections = AI_SECTIONS.map((entry) => ({
+    ...entry,
+    definition: SETTING_DEFINITIONS.find((d) => d.key === entry.key),
+  })).filter((entry): entry is typeof entry & { definition: SettingDefinition } =>
+    entry.definition !== undefined,
+  )
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
-      <nav aria-label="گروه‌های تنظیمات" className="grid content-start gap-1">
-        {SETTING_DEFINITIONS.map((entry) => (
-          <Button
-            key={entry.key}
-            variant={entry.key === active ? "secondary" : "ghost"}
-            size="sm"
-            aria-current={entry.key === active ? "true" : undefined}
-            className="h-auto justify-start rounded-control px-3 py-2 text-start text-caption"
-            onClick={() => setActive(entry.key)}
-          >
-            {entry.title}
-          </Button>
-        ))}
-      </nav>
-      <SettingPanel key={definition.key} token={token} definition={definition} />
+    <div className="grid gap-5">
+      {sections.map((entry) => (
+        <SettingPanel
+          key={entry.definition.key}
+          token={token}
+          definition={entry.definition}
+          caption={entry.caption}
+        />
+      ))}
     </div>
   )
 }
@@ -69,9 +97,12 @@ function SettingsSection({ token }: { token: string }) {
 function SettingPanel({
   token,
   definition,
+  caption,
 }: {
   token: string
   definition: SettingDefinition
+  /** One line on what this panel controls, shown under its title. */
+  caption?: string
 }) {
   const [values, setValues] = useState<SettingsValues>({})
   const [defaults, setDefaults] = useState<Record<string, string>>({})
@@ -139,13 +170,9 @@ function SettingPanel({
   if (error) return <Retry message={error} onRetry={() => void load()} />
 
   return (
-    <Surface className="grid gap-5">
-      <div>
-        <h2 className="text-heading">{definition.title}</h2>
-        <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
-          {definition.description}
-        </p>
-      </div>
+    <Surface data-testid={"setting-panel-" + definition.key} className="grid gap-5">
+      <PageHeader title={definition.title} description={caption ?? definition.description} />
+      <p className="text-caption leading-relaxed text-muted-foreground">{definition.description}</p>
       {loaded ? (
         <SettingsForm
           definition={definition}
@@ -154,13 +181,24 @@ function SettingPanel({
           defaults={defaults}
         />
       ) : (
-        <p className="text-caption text-muted-foreground">در حال بارگذاری…</p>
+        <LoadingPanel label={"در حال دریافت " + definition.title + "…"} />
       )}
-      <div className="flex justify-end gap-2 border-t border-border pt-4">
+      {/* One save per panel, with the server's own field label on it: five
+          identical "ذخیره" buttons made it impossible to tell which setting a
+          save belonged to. */}
+      <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
+        <span className="me-auto text-micro text-muted-foreground">
+          تغییرات هر بخش جداگانه ذخیره می‌شود.
+        </span>
         <Button variant="outline" className="rounded-control" onClick={() => void load()} disabled={busy}>
           بازگردانی
         </Button>
-        <Button className="rounded-control" onClick={() => void save()} disabled={busy || !loaded}>
+        <Button
+          className="rounded-control"
+          onClick={() => void save()}
+          disabled={busy || !loaded}
+          aria-label={"ذخیرهٔ " + definition.title}
+        >
           <SaveIcon className="size-4" />
           {busy ? "در حال ذخیره…" : "ذخیره"}
         </Button>
@@ -236,7 +274,7 @@ function ModelCheckButton({ token }: { token: string }) {
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-subheading">آزمایش مدل پاسخ‌دهی</h2>
+          <SectionHeading>آزمایش مدل پاسخ‌دهی</SectionHeading>
           <p className="mt-0.5 text-micro text-muted-foreground">
             یک پرسش کوتاه به مدل تنظیم‌شده می‌فرستد تا مطمئن شوید کلید و اعتبار حساب درست کار می‌کند.
           </p>
@@ -307,7 +345,7 @@ function MonitoringSection({ token }: { token: string }) {
   }
 
   if (error && !data) return <Retry message={error} onRetry={() => void reload()} />
-  if (!data) return <p className="text-caption text-muted-foreground">در حال دریافت وضعیت درگاه…</p>
+  if (!data) return <LoadingPanel label="در حال دریافت وضعیت درگاه…" />
 
   if (data.state === "unsupported") {
     return (
@@ -331,20 +369,23 @@ function MonitoringSection({ token }: { token: string }) {
   return (
     <div className="grid gap-4">
       <ModelCheckButton token={token} />
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-subheading">اعتبار حساب هوش مصنوعی</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="ms-auto rounded-control"
-          onClick={() => void refreshCredit()}
-          disabled={refreshing}
-          data-testid="ai-credit-refresh"
-        >
-          <RefreshCwIcon aria-hidden className={refreshing ? "animate-spin" : undefined} />
-          {refreshing ? "در حال تازه‌سازی…" : "تازه‌سازی اعتبار"}
-        </Button>
-      </div>
+      <PageHeader
+        title="اعتبار حساب هوش مصنوعی"
+        description="ماندهٔ حساب درگاه و مصرف ثبت‌شده؛ خودکار هر ۶۰ ثانیه به‌روز می‌شود."
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-control"
+            onClick={() => void refreshCredit()}
+            disabled={refreshing}
+            data-testid="ai-credit-refresh"
+          >
+            <RefreshCwIcon aria-hidden className={refreshing ? "animate-spin" : undefined} />
+            {refreshing ? "در حال تازه‌سازی…" : "تازه‌سازی اعتبار"}
+          </Button>
+        }
+      />
       {expiring.length > 0 && (
         <Surface data-testid="ai-credit-warning" className="border-warning-border bg-warning-bg">
           {expiring.map((pkg, index) => (
@@ -412,8 +453,8 @@ function PackagesPanel({ packages }: { packages: NonNullable<AiSnapshot["package
   if (packages.length === 0) {
     return (
       <Surface data-testid="ai-packages-empty">
-        <h2 className="text-subheading">بسته‌های فعال</h2>
-        <p className="mt-1 text-caption text-muted-foreground">
+        <SectionHeading>بسته‌های فعال</SectionHeading>
+        <p className="mt-2 text-caption text-muted-foreground">
           درگاه هیچ بستهٔ فعالی برای این حساب گزارش نکرد. اگر تازه اعتبار خریده‌اید،
           «تازه‌سازی اعتبار» را بزنید.
         </p>
@@ -424,7 +465,7 @@ function PackagesPanel({ packages }: { packages: NonNullable<AiSnapshot["package
   return (
     <Surface data-testid="ai-packages">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-subheading">بسته‌های فعال</h2>
+        <SectionHeading>بسته‌های فعال</SectionHeading>
         <span className="text-micro text-muted-foreground">
           {faNum(packages.length)} بسته
         </span>

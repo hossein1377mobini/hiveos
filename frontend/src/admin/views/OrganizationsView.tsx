@@ -10,6 +10,7 @@ import { DomainStatus } from "../../components/ui/domain-status"
 import { Surface } from "../../components/ui/surface"
 import { faDateTime, faNum, norm } from "../../lib/dates"
 import { adminApi, AdminSessionExpired } from "../api"
+import { LoadingPanel, SectionHeading } from "../page-layout"
 import { Retry } from "../useLive"
 import { OrgDetailPanel, type OrgDetail } from "../OrgDetailPanel"
 
@@ -247,15 +248,13 @@ export default function OrganizationsView({ token }: { token: string }) {
 
       {openId && (
         <Surface className="p-5" aria-label="جزئیات سازمان">
-          <h2 className="text-heading">جزئیات سازمان</h2>
+          <SectionHeading>جزئیات سازمان</SectionHeading>
           {detailError && (
             <div className="mt-3">
               <Retry message={detailError} onRetry={() => void openDetail(openId)} />
             </div>
           )}
-          {!detail && !detailError && (
-            <p className="mt-3 text-caption text-muted-foreground">در حال بارگذاری…</p>
-          )}
+          {!detail && !detailError && <LoadingPanel label="در حال دریافت جزئیات سازمان…" />}
           {detail && (
             <OrgDetailPanel
               detail={detail}

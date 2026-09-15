@@ -161,6 +161,7 @@ async def agenerate(
     tool_ctx=None,
     persona: str = "",
     extra_system: str = "",
+    history: list[dict] | None = None,
 ) -> dict:
     """Provider dispatch (US-1201): mock/online-mock stay deterministic and
     keyless; "openai-compatible" calls the endpoint the System Admin set in
@@ -177,6 +178,16 @@ async def agenerate(
       agent persona, and the retrieved memories. They are appended rather than
       substituted so the org-level grounding rules can never be displaced by a
       per-user string.
+    - `history` is the earlier turns of this chat session, oldest first, as
+      `[{"role": "USER"|"ASSISTANT", "content": str}]`. Without it the model was
+      strictly stateless: every request carried the system prompt plus the
+      current question and nothing else, so a follow-up like "and the second
+      one?" had no referent and the transcript on screen was the only record the
+      conversation existed. The PO reported exactly this ("به سشن‌های قبلی دسترسی
+      ندارم") — the sessions were stored and listed, but never sent.
+
+      The window is bounded by the caller (see chat.service.HISTORY_TURNS) so a
+      long session cannot grow the prompt without limit.
     """
     pricing = await read_setting(session, "providers_pricing")
     provider = pricing.get("provider") or get_settings().llm_provider
@@ -202,7 +213,17 @@ async def agenerate(
         system_prompt = await _system_prompt(session, organization_id)
         user_template = template.get("user_template") or DEFAULT_USER_TEMPLATE
         user_content = user_template.replace("{question}", prompt).replace("{context}", context)
-        messages: list[dict] = [{"role": "system", "content": _compose_system(system_prompt, persona, extra_system)}]
+        messages: list[dict] = [
+            {"role": "system", "content": _compose_system(system_prompt, persona, extra_system)}
+        ]
+        # Prior turns of this session, oldest first, before the current turn.
+        # Roles are mapped here rather than by the caller so the provider wire
+        # format lives in exactly one place.
+        for turn in history or []:
+            role = "assistant" if str(turn.get("role", "")).upper() == "ASSISTANT" else "user"
+            text = str(turn.get("content") or "").strip()
+            if text:
+                messages.append({"role": role, "content": text})
         messages.append({"role": "user", "content": user_content})
         headers = {"Authorization": f"Bearer {api_key}"}
 

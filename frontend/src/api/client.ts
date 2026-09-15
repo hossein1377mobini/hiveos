@@ -74,7 +74,20 @@ export async function api<T>(
   try {
     payload = (await response.json()) as Envelope;
   } catch {
-    // a proxy error page (HTML) or a truncated body - never a raw stack string
+    // P0-1/P0-2: an error page instead of an envelope means a PROXY answered,
+    // not the API. nginx sends HTML for 413 (and 502/504) with
+    // `client_max_body_size`, so the HTTP status is the only thing that still
+    // names the real cause. Discarding it here is what turned "the file is over
+    // the size limit" into the unreadable "پاسخ سرور قابل خواندن نبود".
+    if (!response.ok) {
+      throw new ApiError(
+        response.status,
+        "HTTP_" + response.status,
+        persianError("HTTP_" + response.status, response.status),
+      );
+    }
+    // 2xx with a body that is not the envelope: the API did answer, so this is
+    // the old bad-response case and the status carries no extra meaning.
     throw new ApiError(
       response.status,
       "CLIENT_BAD_RESPONSE",

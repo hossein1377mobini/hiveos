@@ -52,8 +52,11 @@ def test_delete_upload_soft_deletes_and_hides_from_search(client, tmp_path):
         await engine.dispose()
 
     asyncio.run(_drain())
-    # the upload exists in search results before deletion
-    query = "hello upload"
+    # The upload exists in search results before deletion. The query is the
+    # document's own text because the test runs on the deterministic MOCK
+    # embeddings: unrelated text scores near zero there, and search now applies
+    # the relevance floor (P2-9) instead of returning top_k regardless.
+    query = "# hello upload"
     hits = client.post("/api/v1/search", json={"query": query}, headers=ctx["headers"])
     assert hits.status_code == 200 and len(hits.json()["data"]["results"]) >= 1
 

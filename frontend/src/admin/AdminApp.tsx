@@ -349,7 +349,7 @@ function AdminFrame({
     // minimum-height wrapper grows to the content, so the admin document
     // scrolled as a whole and the sidebar stretched past the viewport.
     <SidebarProvider className="h-svh min-h-0">
-      <Sidebar side="right" collapsible="icon" className="border-e">
+      <Sidebar side="right" collapsible="icon" className="border-e border-sidebar-border">
         <SidebarHeader className="flex-row items-center gap-2.5 px-2 py-3.5">
           <span
             aria-hidden
@@ -366,7 +366,7 @@ function AdminFrame({
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel className="text-micro font-bold tracking-[0.4px]">
+            <SidebarGroupLabel className="text-micro font-bold">
               بخش‌های پنل
             </SidebarGroupLabel>
             <SidebarMenu>
@@ -384,7 +384,7 @@ function AdminFrame({
                       <NavLink
                         to={w.path}
                         end={w.path === "/admin"}
-                        className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
+                        className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold [&[data-active=true]>svg]:text-sidebar-accent-foreground"
                       >
                         <w.icon aria-hidden />
                         <span>{w.label}</span>
@@ -396,7 +396,7 @@ function AdminFrame({
             </SidebarMenu>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="border-t">
+        <SidebarFooter className="border-t border-sidebar-border">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -459,8 +459,12 @@ function AdminFrame({
             as a whole and the sidebar rail stretched past the viewport on every
             tall admin view. Now the panel body scrolls inside the frame. */}
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pb-14 pt-6">
-          <div className="mx-auto max-w-6xl">
-            <div className="mb-5">
+          <div className="mx-auto grid max-w-6xl gap-5">
+            {/* The shell owns the h1: a view that repeated it would render two
+                level-one headings, and one that used h2 for its page title
+                would leave the document without a level-one heading at all.
+                Every workspace below the title now shares this one gap. */}
+            <div>
               <h1 className="text-title">{workspace.label}</h1>
               <p className="mt-1 text-caption text-muted-foreground">{workspace.description}</p>
             </div>

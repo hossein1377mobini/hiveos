@@ -1,4 +1,18 @@
-import { CircleAlert, Download, FileText, FolderOpen, RefreshCw, Search, UploadCloud, X } from "lucide-react";
+import {
+  CircleAlert,
+  Download,
+  FileText,
+  FolderOpen,
+  FolderPlus,
+  MonitorSmartphone,
+  Power,
+  RefreshCw,
+  Search,
+  Server,
+  Trash2,
+  UploadCloud,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE, ApiError, api, getToken } from "../api/client";
 import { persianError } from "../api/errors";
@@ -13,15 +27,25 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { RetryNotice } from "../components/ui/retry";
 import { cn } from "../lib/utils";
-import { faNum, humanSize, norm } from "../utils/format";
+import { pickFolder, isDesktop } from "../lib/desktop";
+import { syncClientFolder } from "../lib/folderSync";
+import { faDateTime, faNum, humanSize, norm } from "../utils/format";
 import { Surface } from "../components/ui/surface";
 
 // 02-knowledge/01-knowledge-home.html at mockup fidelity: page-head with
-// پویش اکنون/افزودن سند, source card (folder icon, active badge, auto-scan
-// note), stat cards, status tabs with count chips, live search + format
-// filter, document table with format/size/status/actions, table-foot paging,
-// add-document dialog with dropzone, empty state. Business logic unchanged
-// (GET assets/jobs, POST scan, multipart upload US-201 Am2, classify).
+// «افزودن پوشه جدید»/«افزودن سند», one card PER registered folder, stat cards,
+// status tabs with count chips, live search + format filter, document table with
+// format/size/status/actions, table-foot paging, add-document dialog with
+// dropzone, empty state.
+//
+// Multi-folder (PO request 2026-09-14): the page used to manage exactly one
+// folder because GET /knowledge-sources answered a single object and the UI had
+// no way to register a second one. It now renders the LIST the API returns and
+// keeps «افزودن پوشه جدید» visible at all times, so registering another folder
+// never replaces the previous ones. Every folder still feeds the SAME
+// organization knowledge base; what a person can READ is decided by their
+// access level, not by which folder they happened to add - the page says so in
+// copy so the model is not surprising.
 interface Asset {
   id: string;
   name: string;
@@ -48,10 +72,30 @@ interface Job {
   error_detail: string | null;
 }
 
+/**
+ * One registered ingestion folder.
+ *
+ * `source_type` decides whether the SERVER can walk this folder. A
+ * `client_folder` lives on the person's own machine (ADR-023), so the server
+ * can never read it; only the installed client can sync it.
+ */
+interface SourceFolder {
+  id: string;
+  path: string;
+  source_type: "local_folder" | "client_folder";
+  status: string;
+  discovered_files: number | null;
+  last_scanned_at: string | null;
+  is_org: boolean;
+}
+
 // Must stay identical to the server's US-205 table (backend/knowledge/assets.py):
 // an extension the picker offers but the server refuses is a broken promise.
 const ACCEPTED =
   ".txt,.md,.pdf,.docx,.pptx,.xlsx,.csv,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp";
+
+/** Fallback when the server has never told us its cap. */
+const DEFAULT_MAX_FILE_MB = 25;
 
 /**
  * The machine code at the head of a job's error_detail, e.g.
@@ -66,6 +110,49 @@ function jobFailureCode(detail: string | null | undefined): string {
   if (!detail) return "EXTRACTION_FAILED";
   const code = detail.split(":", 1)[0].trim().toUpperCase();
   return /^[A-Z][A-Z0-9_]{2,}$/.test(code) ? code : "EXTRACTION_FAILED";
+}
+
+/**
+ * GET /knowledge-sources -> a normalized list.
+ *
+ * The new contract is a LIST (a user may register several folders). An earlier
+ * build answered a single object, and "no source" arrives as an empty object
+ * rather than an empty list. Both are accepted here so the page keeps working
+ * whichever shape the deployment has, without a second code path above.
+ */
+function normalizeSources(raw: unknown): SourceFolder[] {
+  const rows: unknown[] = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object" && "id" in raw
+      ? [raw]
+      : [];
+  const out: SourceFolder[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const item = row as Record<string, unknown>;
+    if (item.id === undefined || item.id === null) continue;
+    // `discovered_files` is the list-shape field; `file_state` is what the
+    // single-object payload used to carry.
+    const files = item.discovered_files ?? item.file_state;
+    out.push({
+      id: String(item.id),
+      path: String(item.path_label ?? item.path ?? ""),
+      source_type: item.source_type === "client_folder" ? "client_folder" : "local_folder",
+      status: String(item.status ?? ""),
+      discovered_files: typeof files === "number" ? files : null,
+      last_scanned_at: typeof item.last_scanned_at === "string" ? item.last_scanned_at : null,
+      // A folder with no owner is the organization-wide one; a folder with an
+      // owner belongs to that person.
+      is_org: item.user_id === null || item.user_id === undefined,
+    });
+  }
+  return out;
+}
+
+/** Files over the server's cap, by the cap the server advertised. */
+function oversizeFiles(files: File[], limitMb: number): File[] {
+  const maxBytes = limitMb * 1024 * 1024;
+  return files.filter((file) => file.size > maxBytes);
 }
 
 type TabKey = "all" | "ready" | "processing" | "queued" | "failed";
@@ -113,7 +200,7 @@ function AssetProgress({ asset }: { asset: Asset }) {
 export default function Knowledge() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [source, setSource] = useState<{ id: string; path: string; status: string } | null>(null);
+  const [sources, setSources] = useState<SourceFolder[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -122,11 +209,16 @@ export default function Knowledge() {
   const [format, setFormat] = useState("all");
   const [page, setPage] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [newPath, setNewPath] = useState("");
   const [picked, setPicked] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [maxFileMb, setMaxFileMb] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The browser build has no native folder picker and no local file access.
+  const desktop = isDesktop();
 
   const reload = useCallback(async () => {
     const [a, j, s] = await Promise.all([
@@ -136,14 +228,25 @@ export default function Knowledge() {
       // the same wrong string, which is exactly why it stayed green.
       api<{ assets: Asset[] }>("GET", "/knowledge-assets"),
       api<{ jobs: Job[] }>("GET", "/processing/jobs"),
-      api<Record<string, unknown>>("GET", "/knowledge-sources"),
+      api<unknown>("GET", "/knowledge-sources"),
     ]);
     setAssets(a.assets ?? []);
     setJobs(j.jobs ?? []);
-    setSource(
-      s && "id" in s ? { id: String(s.id), path: String(s.path ?? ""), status: String(s.status ?? "") } : null,
-    );
+    setSources(normalizeSources(s));
     setLoadError(null);
+  }, []);
+
+  // P1-5: the server's own per-file cap, read ONCE from the sync plan and used
+  // to reject oversize files in the picker instead of uploading them first and
+  // learning about the limit from a 413. Failure to read it is not an error:
+  // the dropzone falls back to the documented default.
+  const loadLimit = useCallback(async () => {
+    try {
+      const plan = await api<{ max_file_mb?: number }>("GET", "/knowledge-sources/client-folder/sync-plan");
+      if (typeof plan.max_file_mb === "number" && plan.max_file_mb > 0) setMaxFileMb(plan.max_file_mb);
+    } catch {
+      // Keep the default; the upload route still enforces the real cap.
+    }
   }, []);
 
   // PO request: the server's Persian reason stays visible and a retry button
@@ -158,7 +261,29 @@ export default function Knowledge() {
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void loadLimit();
+  }, [refresh, loadLimit]);
+
+  const limitMb = maxFileMb ?? DEFAULT_MAX_FILE_MB;
+
+  /** Reject the files the server will refuse anyway - before any byte is sent. */
+  function acceptedFiles(files: File[]): File[] {
+    const tooBig = oversizeFiles(files, limitMb);
+    if (tooBig.length === 0) return files;
+    setError(
+      "این فایل‌ها از حد مجاز " +
+        faNum(limitMb) +
+        " مگابایت بزرگ‌ترند و اضافه نشدند: " +
+        tooBig.map((f) => f.name).join("، "),
+    );
+    const blocked = new Set(tooBig.map((f) => f.name + ":" + f.size));
+    return files.filter((f) => !blocked.has(f.name + ":" + f.size));
+  }
+
+  function pickFiles(files: File[]) {
+    setError(null);
+    setPicked((prev) => [...prev, ...acceptedFiles(files)]);
+  }
 
   async function upload() {
     if (picked.length === 0) {
@@ -185,18 +310,125 @@ export default function Knowledge() {
     }
   }
 
-  async function scanNow() {
-    if (!source) return;
+  /**
+   * Register ANOTHER folder. The server validates the path and reuses the row
+   * only when the identical path is already registered, so calling this against
+   * an existing folder is idempotent while a new path appends.
+   */
+  async function addFolder() {
+    const path = newPath.trim();
+    if (!path) return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      await api("POST", "/knowledge-sources/" + source.id + "/scan");
-      setNotice("پویش دستی اجرا شد.");
+      await api("POST", "/knowledge-sources", { path });
+      setNotice("پوشهٔ جدید ثبت شد و در پویش بعدی پردازش می‌شود.");
+      setNewPath("");
+      setAddOpen(false);
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "پویش ناموفق بود.");
+      setError(e instanceof Error ? e.message : "ثبت پوشه ناموفق بود.");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Native picker for the desktop build; a no-op in the browser. */
+  async function chooseLocalFolder() {
+    const chosen = await pickFolder();
+    if (chosen) setNewPath(chosen);
+  }
+
+  /**
+   * Per-folder action, branching on `source_type` (P0-3).
+   *
+   * `local_folder` is a path ON THE SERVER, so POST /{id}/scan is the right
+   * call. A `client_folder` lives on the person's own machine and the server
+   * can never read it: that endpoint always answers 400
+   * INGESTION_PATH_NOT_READABLE, which is exactly the dead button the audit
+   * found. For those folders we drive the client-side sync instead, and only on
+   * the desktop build, which is the only place the folder's bytes exist.
+   */
+  async function runFolderAction(folder: SourceFolder) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (folder.source_type === "client_folder") {
+        if (!desktop) {
+          setError("این پوشه روی رایانهٔ شماست؛ همگام‌سازی آن از برنامهٔ ویندوزی HiveOS انجام می‌شود.");
+          return;
+        }
+        const result = await syncClientFolder(folder.path, undefined, limitMb);
+        setNotice(
+          "همگام‌سازی انجام شد: " +
+            faNum(result.discovered_files) +
+            " فایل شناسایی شد" +
+            (result.rejected.length + result.failed.length > 0
+              ? " و " + faNum(result.rejected.length + result.failed.length) + " فایل رد شد"
+              : "") +
+            ".",
+        );
+      } else {
+        await api("POST", "/knowledge-sources/" + folder.id + "/scan");
+        setNotice("پویش دستی اجرا شد.");
+      }
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "اجرای این کار ناموفق بود.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** US-201 FR-008: disable / re-enable one folder without touching the rest. */
+  async function toggleFolder(folder: SourceFolder) {
+    const next = folder.status === "active" ? "disabled" : "active";
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api("PUT", "/knowledge-sources/" + folder.id, { status: next });
+      setNotice(next === "active" ? "پوشه فعال شد." : "پوشه غیرفعال شد.");
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تغییر وضعیت پوشه ناموفق بود.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * US-201 FR-008 parity: removing a folder stops it feeding the knowledge base.
+   *
+   * Disabling is the reversible half and always works; the hard delete is only
+   * requested when the route exists. A 404/405 means this deployment has no
+   * delete yet, so the folder is disabled instead and the user is told that -
+   * rather than the page pretending the folder is gone while its scans keep
+   * running.
+   */
+  async function removeFolder(folder: SourceFolder) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api("DELETE", "/knowledge-sources/" + folder.id);
+      setNotice("پوشه حذف شد.");
+    } catch (e) {
+      const routeMissing = e instanceof ApiError && (e.status === 404 || e.status === 405);
+      if (routeMissing) {
+        try {
+          await api("PUT", "/knowledge-sources/" + folder.id, { status: "disabled" });
+          setNotice("حذف پوشه در این نسخه پشتیبانی نمی‌شود؛ پوشه غیرفعال شد و دیگر پویش نمی‌شود.");
+        } catch (inner) {
+          setError(inner instanceof Error ? inner.message : "غیرفعال‌کردن پوشه ناموفق بود.");
+        }
+      } else {
+        setError(e instanceof Error ? e.message : "حذف پوشه ناموفق بود.");
+      }
+    } finally {
+      await reload();
       setBusy(false);
     }
   }
@@ -282,16 +514,17 @@ export default function Knowledge() {
       {/* page-head (mockup) */}
       <div className="mb-5 flex flex-wrap items-start gap-3.5">
         <div>
-          <h1 className="text-heading font-bold text-foreground">دانش سازمان</h1>
-          <p className="mt-[3px] text-caption text-muted-foreground">منبع اسناد، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه.</p>
+          <h1 className="text-title text-foreground">دانش سازمان</h1>
+          <p className="mt-[3px] text-caption text-muted-foreground">
+            پوشه‌ها، وضعیت پردازش و جستجو در اسناد — همه در یک صفحه. هر پوشه‌ای که اضافه می‌کنید به همان دانش
+            سازمان اضافه می‌شود و پوشه‌های قبلی سر جای خودشان می‌مانند.
+          </p>
         </div>
         <div className="ms-auto flex items-center gap-2">
-          {source && (
-            <LoadingButton variant="secondary" size="sm" onClick={scanNow} loading={busy}>
-              <RefreshCw aria-hidden />
-              پویش اکنون
-            </LoadingButton>
-          )}
+          <LoadingButton size="sm" variant="secondary" onClick={() => setAddOpen(true)} data-testid="add-folder">
+            <FolderPlus aria-hidden />
+            افزودن پوشه جدید
+          </LoadingButton>
           <LoadingButton size="sm" onClick={() => setDialogOpen(true)}>
             افزودن سند
           </LoadingButton>
@@ -319,42 +552,139 @@ export default function Knowledge() {
         </div>
       )}
 
-      {/* کارت منبع پوشه (mockup) */}
-      {source && (
-        <Surface className="mb-4 p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span
-                aria-hidden
-                className="flex size-11 shrink-0 items-center justify-center rounded-control bg-amber-soft text-amber"
-              >
-                <FolderOpen className="size-5" />
-              </span>
-              <div>
-                <div className="text-body font-bold text-foreground">پوشه اسناد سازمان</div>
-                <div className="mt-1 font-mono text-caption text-muted-foreground" dir="ltr">
-                  {source.path}
-                </div>
+      {/* پوشه‌های ثبت‌شده — one card per folder (PO request). */}
+      <h2 className="mb-3 text-heading text-foreground">پوشه‌های دانش</h2>
+      {/* PO rule that decides the whole access model: the folder you add is NOT
+          the limit on what you can read. Stated in copy so a member is not
+          surprised when a colleague's folder answers their question. */}
+      <Banner tone="info" className="mb-4">
+        هر پوشه‌ای که ثبت می‌کنید به دانش مشترک سازمان اضافه می‌شود. این که هر کس چه چیزی را می‌تواند بخواند
+        به سطح دسترسی او بستگی دارد، نه به این‌که پوشه را چه کسی اضافه کرده است؛ مدیران سازمان همهٔ پوشه‌ها را
+        می‌خوانند.
+      </Banner>
+
+      {sources.length === 0 ? (
+        <Surface className="mb-4 p-6" data-testid="folders-empty">
+          <div className="flex items-center gap-3">
+            <span
+              aria-hidden
+              className="flex size-11 shrink-0 items-center justify-center rounded-control bg-amber-soft text-amber"
+            >
+              <FolderOpen className="size-5" />
+            </span>
+            <div>
+              <div className="text-body font-bold text-foreground">هنوز پوشه‌ای ثبت نشده است.</div>
+              <div className="mt-1 text-caption text-muted-foreground">
+                پوشهٔ اسناد را ثبت کنید تا پردازش آغاز شود. بعد از آن می‌توانید هر تعداد پوشهٔ دیگر اضافه کنید.
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              {/* The watch state is a health signal, not a knowledge status:
-                  "active" here means the scheduled scan is running. */}
-              {/* The source status is "active" | "disabled" - the watch state,
-                  not a health probe. Rendering it through the health registry
-                  fell through to the raw value, so the badge read "active" in
-                  English. It has its own registry now. */}
-              <DomainStatus domain="source" value={source.status} dot />
-              <span className="text-micro text-muted-foreground">پویش خودکار هر ۳۰ دقیقه</span>
-            </div>
           </div>
-          <div className="mt-4">
-            <Banner tone="info">
-              فایل‌های تازه‌ای که در این پوشه قرار می‌دهید، در پویش بعدی (حداکثر ۳۰ دقیقه) شناسایی و پردازش می‌شوند.
-              برای پردازش فوری از «پویش اکنون» استفاده کنید یا سند را مستقیم از رایانه اضافه کنید.
-            </Banner>
-          </div>
+          <LoadingButton size="sm" className="mt-4" onClick={() => setAddOpen(true)}>
+            <FolderPlus aria-hidden />
+            افزودن پوشه جدید
+          </LoadingButton>
         </Surface>
+      ) : (
+        <div className="mb-4 space-y-3">
+          {sources.map((folder) => {
+            const isClient = folder.source_type === "client_folder";
+            return (
+              <Surface key={folder.id} className="p-5" data-testid={"folder-" + folder.id}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      aria-hidden
+                      className="flex size-11 shrink-0 items-center justify-center rounded-control bg-amber-soft text-amber"
+                    >
+                      <FolderOpen className="size-5" />
+                    </span>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-body font-bold text-foreground">
+                          {folder.is_org ? "پوشهٔ سازمان" : "پوشهٔ من"}
+                        </span>
+                        <span
+                          data-testid={"folder-kind-" + folder.id}
+                          className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-micro text-muted-foreground"
+                        >
+                          {isClient ? <MonitorSmartphone aria-hidden className="size-3.5" /> : <Server aria-hidden className="size-3.5" />}
+                          {isClient ? "روی رایانهٔ شما" : "روی سرور"}
+                        </span>
+                      </div>
+                      <div className="mt-1 font-mono text-caption text-muted-foreground" dir="ltr">
+                        {folder.path}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* The watch state is a health signal, not a knowledge
+                        status: "active" here means the scheduled scan runs. */}
+                    <DomainStatus domain="source" value={folder.status} dot />
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-caption text-muted-foreground">
+                  <span data-testid={"folder-files-" + folder.id}>
+                    فایل‌های شناسایی‌شده: {folder.discovered_files === null ? "نامشخص" : faNum(folder.discovered_files)}
+                  </span>
+                  <span data-testid={"folder-scanned-" + folder.id}>
+                    آخرین پویش: {folder.last_scanned_at ? faDateTime(folder.last_scanned_at) : "هنوز انجام نشده"}
+                  </span>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {/* P0-3: the scan control must never be a button that is
+                      guaranteed to fail. A client folder is walked by the
+                      person's own machine, so the control becomes the
+                      client-side sync (and is only offered where the folder
+                      actually exists). */}
+                  <LoadingButton
+                    variant="secondary"
+                    size="sm"
+                    loading={busy}
+                    disabled={busy || folder.status !== "active" || (isClient && !desktop)}
+                    onClick={() => void runFolderAction(folder)}
+                    data-testid={"folder-scan-" + folder.id}
+                    title={isClient && !desktop ? "این پوشه روی رایانهٔ شماست" : undefined}
+                  >
+                    <RefreshCw aria-hidden />
+                    {isClient ? "همگام‌سازی اکنون" : "پویش اکنون"}
+                  </LoadingButton>
+                  <LoadingButton
+                    variant="secondary"
+                    size="sm"
+                    loading={busy}
+                    disabled={busy}
+                    onClick={() => void toggleFolder(folder)}
+                    data-testid={"folder-toggle-" + folder.id}
+                  >
+                    <Power aria-hidden />
+                    {folder.status === "active" ? "غیرفعال‌کردن" : "فعال‌کردن"}
+                  </LoadingButton>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void removeFolder(folder)}
+                    data-testid={"folder-remove-" + folder.id}
+                    className="text-error hover:bg-error-bg hover:text-error"
+                  >
+                    <Trash2 aria-hidden />
+                    حذف پوشه
+                  </Button>
+                </div>
+
+                <div className="mt-3">
+                  <Banner tone={isClient ? "info" : "plain"}>
+                    {isClient
+                      ? "این پوشه روی رایانهٔ خودتان است و سرور به آن دسترسی ندارد؛ همگام‌سازی از برنامهٔ HiveOS روی رایانهٔ شما انجام می‌شود. برای پردازش فوری «همگام‌سازی اکنون» را بزنید."
+                      : "فایل‌های تازه‌ای که در این پوشه روی سرور قرار می‌دهید، در پویش بعدی (حداکثر ۳۰ دقیقه) شناسایی و پردازش می‌شوند. برای پردازش فوری «پویش اکنون» را بزنید."}
+                  </Banner>
+                </div>
+              </Surface>
+            );
+          })}
+        </div>
       )}
 
       {/* آمار (stat-card, mockup §۲۱) */}
@@ -388,7 +718,7 @@ export default function Knowledge() {
               aria-pressed={tab === key}
               onClick={() => { setTab(key); setPage(0); }}
               className={cn(
-                "inline-flex cursor-pointer items-center gap-1.5 rounded-control border px-2.5 py-1 text-sm font-semibold transition-colors",
+                "inline-flex cursor-pointer items-center gap-1.5 rounded-control border px-2.5 py-1 text-body font-semibold transition-colors",
                 tab === key
                   ? "border-primary bg-accent text-primary"
                   : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:bg-accent/50",
@@ -414,7 +744,7 @@ export default function Knowledge() {
           <Select value={format} onValueChange={(v) => { setFormat(v); setPage(0); }}>
             <SelectTrigger
               aria-label="فیلتر فرمت"
-              className="h-[42px] w-[150px] rounded-control border-border bg-card text-sm text-muted-foreground"
+              className="h-[42px] w-[150px] rounded-control border-border bg-card text-body text-muted-foreground"
             >
               <SelectValue />
             </SelectTrigger>
@@ -513,11 +843,11 @@ export default function Knowledge() {
                     {/* h2, not h3: the page's only other heading is the h1 above,
                         so an h3 skipped a level and axe flagged the outline as
                         broken for anyone navigating by heading. */}
-                    <h2 className="text-body font-bold text-foreground">هنوز سندی نیست.</h2>
+                    <h2 className="text-heading text-foreground">هنوز سندی نیست.</h2>
                     <p className="mx-auto mt-1.5 max-w-[380px] text-caption text-muted-foreground">
                       {search || tab !== "all" || format !== "all"
                         ? "سندی مطابق جستجو یا فیلتر پیدا نشد."
-                        : "با «افزودن سند» یا قرار دادن فایل در پوشه اسناد، پردازش آغاز می‌شود."}
+                        : "با «افزودن سند» یا قرار دادن فایل در یکی از پوشه‌ها، پردازش آغاز می‌شود."}
                     </p>
                     {!search && tab === "all" && format === "all" && (
                       <LoadingButton size="sm" className="mt-4" onClick={() => setDialogOpen(true)}>
@@ -531,7 +861,7 @@ export default function Knowledge() {
           </TableBody>
         </Table>
         <div className="flex items-center justify-between border-t border-border px-5 py-3">
-          <span className="text-xs text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             نمایش {faNum(pageItems.length)} از {faNum(filtered.length)} سند
           </span>
           <div className="flex gap-2">
@@ -544,6 +874,54 @@ export default function Knowledge() {
           </div>
         </div>
       </Surface>
+
+      {/* Dialog افزودن پوشه جدید — the PO's exact ask: registering another
+          folder must not replace the ones already there. */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>افزودن پوشه جدید</DialogTitle>
+            <DialogDescription>
+              پوشه‌های قبلی حذف نمی‌شوند؛ این پوشه به همان دانش سازمان اضافه می‌شود.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Input
+              value={newPath}
+              onChange={(e) => setNewPath(e.target.value)}
+              placeholder="C:\\Documents\\HiveOS"
+              aria-label="نشانی پوشهٔ جدید"
+              dir="ltr"
+              data-testid="new-folder-path"
+            />
+            <div className="mt-3 flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => void chooseLocalFolder()} disabled={!desktop}>
+                <FolderOpen aria-hidden />
+                انتخاب پوشه از رایانه
+              </Button>
+              <span className="text-caption text-muted-foreground">
+                {desktop
+                  ? "می‌توانید پوشه را انتخاب کنید یا نشانی آن را بنویسید."
+                  : "در مرورگر، نشانی کامل پوشه را بنویسید."}
+              </span>
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <LoadingButton variant="secondary" size="sm" onClick={() => setAddOpen(false)}>
+              انصراف
+            </LoadingButton>
+            <LoadingButton
+              size="sm"
+              loading={busy}
+              disabled={!newPath.trim()}
+              onClick={() => void addFolder()}
+              data-testid="add-folder-submit"
+            >
+              افزودن پوشه
+            </LoadingButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog افزودن سند — الگوی آپلود متعارف ماک‌آپ (بازبینی سوم) */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -574,7 +952,7 @@ export default function Knowledge() {
               onDrop={(event) => {
                 event.preventDefault()
                 setDragging(false)
-                setPicked(Array.from(event.dataTransfer.files))
+                pickFiles(Array.from(event.dataTransfer.files))
               }}
               className={cn(
                 "flex w-full cursor-pointer flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-10 text-center transition-colors",
@@ -584,8 +962,10 @@ export default function Knowledge() {
             >
               <UploadCloud aria-hidden className="mb-2 size-7 text-muted-foreground" />
               <span className="text-caption font-bold text-foreground">فایل‌ها را اینجا رها کنید یا کلیک کنید</span>
-              <span id="dropzone-hint" className="mt-1 text-micro text-muted-foreground">
-                چند فایل در هر بار · حداکثر ۵۰ مگابایت برای هر فایل
+              {/* P1-5: the cap is shown up front, from the server's own
+                  setting, instead of being discovered after a failed upload. */}
+              <span id="dropzone-hint" className="mt-1 text-micro text-muted-foreground" data-testid="dropzone-limit">
+                چند فایل در هر بار · حداکثر {faNum(limitMb)} مگابایت برای هر فایل
               </span>
             </button>
             <input
@@ -594,7 +974,11 @@ export default function Knowledge() {
               multiple
               accept={ACCEPTED}
               className="hidden border-border bg-card"
-              onChange={(e) => setPicked(Array.from(e.target.files ?? []))}
+              onChange={(e) => {
+                pickFiles(Array.from(e.target.files ?? []));
+                // Let the same file be picked again after it was rejected.
+                e.target.value = "";
+              }}
             />
             {picked.length > 0 && (
               <ul className="mt-3 space-y-2">
@@ -657,11 +1041,11 @@ function StatCard({
         tone === "danger" && "border-error bg-error-bg",
       )}
     >
-      <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-caption font-bold text-muted-foreground">
         {tone === "danger" && <CircleAlert aria-hidden className="size-[15px] text-error" />}
         {label}
       </div>
-      <div className="mt-2 text-2xl font-bold tracking-[-0.5px] text-foreground">{value}</div>
+      <div className="mt-2 text-title text-foreground">{value}</div>
     </div>
   );
 }

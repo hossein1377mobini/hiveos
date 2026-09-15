@@ -195,7 +195,7 @@ export default function OtpVerify({
               aria-label={`رقم ${faDigit(i + 1)}`}
               disabled={busy}
               className={cn(
-                "size-[52px] rounded-card border bg-card p-0 text-center text-2xl font-bold text-foreground transition-[border-color,box-shadow]",
+                "size-[52px] rounded-card border bg-card p-0 text-center text-title text-foreground transition-[border-color,box-shadow]",
                 "focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-ring/20",
                 d && "border-primary bg-accent",
                 error && "border-error focus:ring-error-bg",
@@ -205,7 +205,7 @@ export default function OtpVerify({
           ))}
         </div>
 
-        <div className="mt-3.5 flex min-h-6 items-center justify-center gap-1.5 text-xs">
+        <div className="mt-3.5 flex min-h-6 items-center justify-center gap-1.5 text-caption">
           {error ? (
             // role="alert" so a rejected code is announced: the digits are read
             // back to the user and the boxes clear, and without this a screen

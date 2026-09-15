@@ -203,9 +203,21 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         from backend.knowledge.search import semantic_search
 
         results = await asyncio.wait_for(
-            semantic_search(session, organization_id, query),
+            # Scoped to the person asking (execution.requested_by - the local
+            # user_id is not bound until later in this function). Their question
+            # may only be grounded in files they are allowed to read, so a
+            # colleague's document can never surface in this answer.
+            semantic_search(
+                session, organization_id, query, user_id=execution.requested_by
+            ),
             timeout=get_settings().execution_timeout_seconds,
         )
+        # An EMPTY results list is a real answer, not an error: semantic_search
+        # applies the relevance floor (P2-9), so "the organization's knowledge
+        # does not cover this" arrives here as no hits rather than as the best
+        # of a bad set. Everything below already branches on that - the context
+        # block and the citation_rule are the "" case, and citations stays [] -
+        # which is why the floor needed no change to the generator.
         hits = results["results"]
     except TimeoutError:
         # US-314: the cycle is capped; a timed-out execution is FAILED.
@@ -236,6 +248,38 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
             detail={"error_code": error.code},
         )
         return _payload(execution)
+
+    # Ask the model to cite retrieved passages INLINE, as [1], [2], matching the
+    # numbering of the context block below. Previously provenance was only a
+    # structured list rendered under every answer, which meant each reply carried
+    # a full document list whether or not it used any of it - the PO's complaint.
+    # An inline marker ties a claim to its passage where the claim is made, and
+    # the UI renders the list as a disclosure rather than a permanent block.
+    citation_rule = (
+        ""
+        if not hits
+        else (
+            "\n\nبرای هر جمله‌ای که از دانش سازمان می‌آید، شمارهٔ همان بند را "
+            "داخل براکت بنویس، مثل [1] یا [2] و [3]. فقط شماره‌هایی را بنویس که "
+            "واقعاً از آن بند استفاده کرده‌ای. هیچ فهرست منابعی در پایان پاسخ ننویس؛ "
+            "فهرست را خود سامانه نشان می‌دهد. اگر پاسخ از دانش سازمان نیامده، "
+            "هیچ شماره‌ای نگذار."
+        )
+    )
+
+    # Prior turns of this session. Loaded before generation and scoped to the
+    # caller, so a follow-up question has a referent and the model can use what
+    # was already said. A failure here degrades to a stateless answer rather than
+    # failing the request.
+    history: list[dict] = []
+    try:
+        from backend.chat.service import load_history
+
+        history = await load_history(
+            session, organization_id, execution.requested_by, execution.chat_session_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("history load failed for %s: %s", execution.id, exc)
 
     context = ""
     if hits:
@@ -268,11 +312,16 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
     # a memory lookup is an enhancement and must never be the reason a user's
     # question goes unanswered.
     from backend.agent import memory as agent_memory
+    from backend.agent.service import persona_for
     from backend.agent.tools import registry as tool_registry
     from backend.agent.tools.registry import ToolContext
 
     user_id = execution.requested_by
     agent = await agent_memory.ensure_agent(session, organization_id, user_id)
+    # Behaviour is an organization decision, read once here so the persona, the
+    # tool allowlist and the recall settings are all the same snapshot for this
+    # answer.
+    org_agent_settings = await agent_memory.agent_settings(session)
 
     recalled: list = []
     memory_block = ""
@@ -292,9 +341,13 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         execution_id=execution.id,
         chat_session_id=execution.chat_session_id,
     )
-    # The agent's allowlist is authoritative: a tool not listed is not sent to
-    # the provider at all, so the model cannot call it by hallucinating a name.
-    allowed = set(agent.allowed_tools or [])
+    # The allowlist is authoritative: a tool not listed is not sent to the
+    # provider at all, so the model cannot call it by hallucinating a name.
+    # Organization-level, so every user in an organization has the same
+    # capabilities; an empty list means all of them.
+    from backend.agent.service import tools_for
+
+    allowed = set(tools_for(agent, org_agent_settings))
     if not allowed:
         allowed = {spec.name for spec in tool_registry.all_specs()}
     active_schemas = [spec for spec in tool_registry.all_specs() if spec.name in allowed]
@@ -315,8 +368,11 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
             context=context,
             organization_id=organization_id,
             tool_ctx=tool_ctx if active_schemas else None,
-            persona=agent.persona or "",
-            extra_system=memory_block,
+            # The organization's persona (falls back to a pre-existing
+            # per-user one only if the organization set none).
+            persona=persona_for(agent, org_agent_settings),
+            extra_system=memory_block + citation_rule,
+            history=history,
         )
     except ApiError as error:
         # US-313: aggregator/provider failures fail the execution cleanly.

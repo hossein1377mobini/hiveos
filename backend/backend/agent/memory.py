@@ -22,8 +22,14 @@ WHY RECALL IS VECTOR + WEIGHT, NOT VECTOR ALONE. Pure similarity retrieval
 surfaces whatever is textually closest, which for a chat agent means the most
 recent conversation, always. Weight is what makes memory *improve*: a memory
 that keeps being retrieved and keeps being followed gains weight; one that gets
-contradicted loses it. Ranking is therefore a blend, and the blend is tunable
-per agent through settings.
+contradicted loses it. Ranking is therefore a blend: relevance decides, and
+proven usefulness breaks ties and mildly promotes.
+
+The blend's strength (trust_gain) and the recall count are read from the
+organization-wide "agent" setting through agent_settings(), not compiled in.
+This used to claim the blend "is tunable per agent through settings" while
+TRUST_GAIN was a module constant and user_agents.settings was an empty dict that
+nothing ever read - a documented capability that did not exist.
 
 WHY MEMORIES ARE NEVER HARD-DELETED BY THE LEARNING LOOP. An inference about
 what matters can be wrong. Deactivating (or down-weighting) is recoverable and
@@ -33,6 +39,7 @@ auditable; deleting is not. Only the user's explicit forget call removes a row.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import uuid
 
@@ -47,6 +54,26 @@ DEFAULT_RECALL_LIMIT = 6
 # Below this, a memory has been contradicted more than it has helped, and
 # showing it would be worse than showing nothing.
 MIN_ACTIVE_WEIGHT = 0.2
+
+# How much repeat use may amplify a memory's relevance.
+#
+# The obvious blend - score = weight * (1 + 0.1 * hits) - is unbounded in two
+# separate ways, and both were live defects:
+#
+#   1. It was the ONLY term in the sort key, so the cosine distance that had
+#      just been computed was discarded. Two fresh memories (weight 1.0, hits 0)
+#      are one identical key, and Python's sort is stable, so the order was
+#      whatever the LIMIT returned. Memory looked like it worked - a row came
+#      back - while being unrelated to the question.
+#   2. Being *shown* is not evidence of being right, but mark_recalled bumps
+#      hits on every recall, so an irrelevant memory gained 0.1 per turn purely
+#      by having been shown. After 30 turns it scored 4.0 and outranked
+#      everything, and each subsequent recall pushed it further ahead. A
+#      feedback loop that converges on the least useful memory.
+#
+# The fix is a bounded multiplier over relevance: log1p grows slowly, so no
+# amount of repetition can rescue a memory that does not match the question.
+TRUST_GAIN = 0.25
 
 # Extraction heuristics. These are deliberately conservative: a wrong memory is
 # worse than no memory, because it will be repeated back to the user as fact in
@@ -180,12 +207,34 @@ async def ensure_agent(session: AsyncSession, organization_id, user_id) -> UserA
     return agent
 
 
+async def agent_settings(session: AsyncSession) -> dict:
+    """The organization-wide agent settings, with defaults filled in.
+
+    Read from the admin panel's "agent" setting - one row per installation, not
+    per user, because how the agent answers is an organization decision. Uses the
+    same read path as the prompt template and provider config, so the panel and
+    the runtime cannot disagree about which value is in force.
+
+    A settings read must never fail an answer: any error falls back to the
+    documented defaults.
+    """
+    from backend.admin import DEFAULT_AGENT_SETTINGS
+    from backend.llm import read_setting
+
+    try:
+        stored = await read_setting(session, "agent")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("agent settings read failed, using defaults: %s", exc)
+        stored = {}
+    return {**DEFAULT_AGENT_SETTINGS, **(stored or {})}
+
+
 async def recall(
     session: AsyncSession,
     organization_id,
     user_id,
     query: str,
-    limit: int = DEFAULT_RECALL_LIMIT,
+    limit: int | None = None,
 ) -> list[AgentMemory]:
     """The memories most worth putting in front of the model for this question.
 
@@ -195,14 +244,31 @@ async def recall(
     """
     from backend.knowledge.embeddings import embed_one
 
+    # The organization decides how much memory is put in front of the model and
+    # how strongly proven usefulness amplifies relevance. limit=None means "use
+    # the setting"; an explicit limit (the admin panel's own preview, tests)
+    # still wins.
+    settings = await agent_settings(session)
+    if not settings.get("memory_enabled", True):
+        # Off means no recall at all. The memories stay in the database - this
+        # disables their use, it does not delete anything.
+        return []
+    if limit is None:
+        limit = int(settings.get("recall_limit") or DEFAULT_RECALL_LIMIT)
+    trust_gain = float(settings.get("trust_gain", TRUST_GAIN))
+
     try:
         vector = await embed_one(query)
     except Exception as exc:  # noqa: BLE001 - a memory miss must not fail the answer
         logger.warning("memory recall embedding failed: %s", exc)
         return []
 
+    # The distance is selected, not merely ordered by: the re-rank below needs
+    # it, and the previous version paid for the embedding comparison and then
+    # threw the result away.
+    distance = AgentMemory.embedding.cosine_distance(vector).label("distance")
     statement = (
-        select(AgentMemory)
+        select(AgentMemory, distance)
         .where(
             AgentMemory.organization_id == organization_id,
             AgentMemory.user_id == user_id,
@@ -210,14 +276,28 @@ async def recall(
             AgentMemory.weight >= MIN_ACTIVE_WEIGHT,
             AgentMemory.embedding.is_not(None),
         )
-        .order_by(AgentMemory.embedding.cosine_distance(vector))
-        .limit(limit * 3)
+        .order_by(distance)
+        # Bounded here as well as in the schema: a value that reached the database
+        # by another route must not be able to make this query unbounded.
+        .limit(max(1, min(limit, 50)) * 3)
     )
-    rows = list((await session.execute(statement)).scalars().all())
-    # Blend: closer first, but a memory that has repeatedly proven useful
-    # outranks a marginally closer one that never has.
-    rows.sort(key=lambda memory: -(memory.weight * (1.0 + 0.1 * memory.hits)))
-    return rows[:limit]
+    rows = list((await session.execute(statement)).all())
+    if not rows:
+        return []
+
+    def score(row) -> float:
+        memory, distance_value = row
+        # Cosine distance is in [0, 2]; 0 is identical. Clamp so a negative
+        # relevance from float noise cannot invert the ordering.
+        relevance = max(0.0, 1.0 - float(distance_value))
+        trust = memory.weight * (1.0 + 0.1 * memory.hits)
+        # Bounded amplification: relevance decides, proven usefulness breaks
+        # ties and mildly promotes. A memory with weight < 1 (contradicted but
+        # not yet below the floor) is damped rather than boosted.
+        return relevance * (1.0 + trust_gain * math.log1p(max(trust, 0.0)))
+
+    rows.sort(key=score, reverse=True)
+    return [memory for memory, _distance in rows[: max(1, min(limit, 50))]]
 
 
 def render_memories(memories: list[AgentMemory]) -> str:

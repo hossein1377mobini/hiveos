@@ -27,6 +27,16 @@ class AuthContext:
     session: DbSession
     user: User
     organization: Organization
+    # The organization's Owner. This is the product's "admin" of an
+    # organization: PO requirement 2026-09 - "knowledge is collected across the
+    # whole organization, access is by level", and the level above "member" is
+    # the Owner, who reads every file in the organization regardless of owner.
+    # Derived from organizations.owner_user_id - the column that already
+    # identifies the owner (there is one owner per organization, DB-enforced by
+    # uq_organizations_owner_user_id, migration 0023). It is NOT a role check:
+    # nothing in the request path resolves role_assignments, and inventing a
+    # second source of truth for "who is the admin" is how the two drift apart.
+    is_admin: bool = False
 
 
 async def get_auth_context(
@@ -57,4 +67,14 @@ async def get_auth_context(
     organization = await db.get(Organization, session_row.organization_id)
     if user is None or organization is None:
         raise ApiError(401, "AUTH_REQUIRED", "Authentication required.")
-    return AuthContext(token=token, session=session_row, user=user, organization=organization)
+    # PO 2026-09: the organization's Owner (organizations.owner_user_id) reads
+    # the whole organization's knowledge. Everyone else reads their own files
+    # plus the org-wide ones - see knowledge/assets.visible_to.
+    is_admin = organization.owner_user_id is not None and organization.owner_user_id == user.id
+    return AuthContext(
+        token=token,
+        session=session_row,
+        user=user,
+        organization=organization,
+        is_admin=is_admin,
+    )

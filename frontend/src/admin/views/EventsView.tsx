@@ -18,6 +18,7 @@ import { Surface } from "../../components/ui/surface"
 import { cn } from "../../lib/utils"
 import { faDateTime, faNum } from "../../lib/dates"
 import { adminApi, AdminSessionExpired } from "../api"
+import { LoadingPanel, Section } from "../page-layout"
 import { Retry } from "../useLive"
 
 interface LogRow {
@@ -73,6 +74,29 @@ function rangeQuery(range: DateRange): string {
   if (range.from) query += "&since=" + encodeURIComponent(range.from)
   if (range.to) query += "&until=" + encodeURIComponent(range.to)
   return query
+}
+
+/** The one pager, so "previous/next" cannot drift between the two call sites. */
+function PagerButton({
+  label,
+  disabled,
+  onClick,
+}: {
+  label: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="rounded-control"
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {label}
+    </Button>
+  )
 }
 
 /** One line summarising a detail object, for the table cell. */
@@ -323,141 +347,181 @@ export default function EventsView({ token }: { token: string }) {
   )
 
   return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {LEVELS.map((entry) => (
-          <Button
-            key={entry.id}
-            variant={level === entry.id ? "default" : "outline"}
-            size="sm"
-            className="rounded-control"
-            aria-pressed={level === entry.id}
-            onClick={() => {
-              setLevel(entry.id)
-              setOffset(0)
-            }}
-          >
-            {entry.label}
-          </Button>
-        ))}
-        {/* Filtering by time is the question the audit trail exists to answer
-            ("what changed last week"), and v0.1 could not ask it. [D15] */}
-        <DateRangePicker
-          value={range}
-          onChange={(next) => {
-            setRange(next)
-            setOffset(0)
-          }}
-        />
-        <span data-numeric className="ms-auto text-micro text-muted-foreground">
-          {faNum(total)} رویداد
-        </span>
-      </div>
+    <div className="grid gap-5">
+      {/*
+        Stage 1 — narrow the set.
 
-      {/* Exact-value filters, all server-side. The counts come from the facets
-          endpoint over the whole matching set, not from the current page. */}
-      <Surface className="flex flex-wrap items-center gap-2 p-3">
-        <SlidersHorizontalIcon aria-hidden className="size-4 text-muted-foreground" />
-        {filterSelect("رویداد", event, setEvent, facets?.events ?? [], "همهٔ رویدادها")}
-        {filterSelect("کاربر", actor, setActor, facets?.actors ?? [], "همهٔ کاربران")}
-        {filterSelect("سازمان", organization, setOrganization, facets?.organizations ?? [], "همهٔ سازمان‌ها")}
-        <Select
-          value={entityType}
-          onValueChange={(next) => {
-            setEntityType(next)
-            setOffset(0)
-          }}
-        >
-          <SelectTrigger className="h-9 w-auto min-w-[10rem] rounded-control" aria-label="نوع موجودیت">
-            <SelectValue placeholder="همهٔ موجودیت‌ها" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>همهٔ موجودیت‌ها</SelectItem>
-            {entityTypes.map((value) => (
-              <SelectItem key={value} value={value}>
-                <span className="mono" dir="ltr">
-                  {value}
-                </span>
-              </SelectItem>
+        The filters used to be two unlabelled rows of loose controls stacked on
+        top of the table, so there was no reading order: it was not clear which
+        control narrowed what, or that the list below was the result of all of
+        them. They are one labelled card now, with the three questions an audit
+        trail is opened to ask separated: severity (segmented, because it is the
+        one an operator toggles constantly), time, and the exact-value filters
+        whose counts come from the facets endpoint over the whole matching set
+        rather than from the current page.
+      */}
+      <Section
+        title="فیلتر رویدادها"
+        description="همهٔ فیلترها سمت سرور اعمال می‌شوند، پس جستجو و خروجی CSV هم روی همین مجموعهٔ فیلترشده انجام می‌شود."
+      >
+        <Surface className="grid gap-3 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-micro font-bold text-muted-foreground">سطح رویداد</span>
+            {LEVELS.map((entry) => (
+              <Button
+                key={entry.id}
+                variant={level === entry.id ? "default" : "outline"}
+                size="sm"
+                className="rounded-control"
+                aria-pressed={level === entry.id}
+                onClick={() => {
+                  setLevel(entry.id)
+                  setOffset(0)
+                }}
+              >
+                {entry.label}
+              </Button>
             ))}
-          </SelectContent>
-        </Select>
-        <Button
-          variant={onlyWithDetail ? "default" : "outline"}
-          size="sm"
-          className="rounded-control"
-          aria-pressed={onlyWithDetail}
-          onClick={() => {
-            setOnlyWithDetail((current) => !current)
-            setOffset(0)
-          }}
-        >
-          فقط دارای جزئیات
-        </Button>
-        {activeFilterCount > 0 && (
-          <Button variant="ghost" size="sm" className="rounded-control" onClick={resetFilters}>
-            <XIcon aria-hidden className="size-3.5" />
-            پاک کردن {faNum(activeFilterCount)} فیلتر
-          </Button>
-        )}
-      </Surface>
+            <span data-numeric className="ms-auto text-micro text-muted-foreground">
+              {faNum(total)} رویداد با این فیلتر
+            </span>
+          </div>
 
-      <ErrorText>{error}</ErrorText>
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            {/* Filtering by time is the question the audit trail exists to
+                answer ("what changed last week"), and v0.1 could not ask it. */}
+            <span className="text-micro font-bold text-muted-foreground">بازهٔ زمانی</span>
+            <DateRangePicker
+              value={range}
+              onChange={(next) => {
+                setRange(next)
+                setOffset(0)
+              }}
+            />
+          </div>
 
-      <DataTable
-        rows={payload?.logs ?? []}
-        columns={columns}
-        rowKey={(row) => row.id}
-        searchPlaceholder="جستجو در رویداد، سازمان، کاربر یا جزئیات…"
-        exportName="hiveos-events"
-        pageSize={25}
-        density="compact"
-        onRowClick={(row) => setSelected(row)}
-        emptyIcon={ScrollTextIcon}
-        emptyTitle="رویدادی با این فیلتر ثبت نشده است"
-        emptyDescription="فیلترها را تغییر دهید یا بازهٔ دیگری را بررسی کنید."
-      />
-
-      {total > limit && (
-        <div className="flex items-center gap-3 text-caption">
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-control"
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-          >
-            صفحهٔ قبل
-          </Button>
-          <span data-numeric className="text-muted-foreground">
-            {faNum(offset + 1)}–{faNum(Math.min(offset + limit, total))} از {faNum(total)}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-control"
-            disabled={offset + limit >= total}
-            onClick={() => setOffset(offset + limit)}
-          >
-            صفحهٔ بعد
-          </Button>
-        </div>
-      )}
-
-      {payload?.server_log?.available && (
-        <Surface className="p-0">
-          <details>
-            <summary className="cursor-pointer px-4 py-3 text-caption font-bold">
-              گزارش فایل سرور
-            </summary>
-            <pre
-              dir="ltr"
-              className="scrollbar-thin max-h-80 overflow-auto border-t border-border p-4 text-micro leading-relaxed"
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <SlidersHorizontalIcon aria-hidden className="size-4 text-muted-foreground" />
+            <span className="text-micro font-bold text-muted-foreground">فیلتر دقیق</span>
+            {filterSelect("رویداد", event, setEvent, facets?.events ?? [], "همهٔ رویدادها")}
+            {filterSelect("کاربر", actor, setActor, facets?.actors ?? [], "همهٔ کاربران")}
+            {filterSelect("سازمان", organization, setOrganization, facets?.organizations ?? [], "همهٔ سازمان‌ها")}
+            <Select
+              value={entityType}
+              onValueChange={(next) => {
+                setEntityType(next)
+                setOffset(0)
+              }}
             >
-              {payload.server_log.lines.slice(-200).join("\n")}
-            </pre>
-          </details>
+              <SelectTrigger className="h-9 w-auto min-w-[10rem] rounded-control" aria-label="نوع موجودیت">
+                <SelectValue placeholder="همهٔ موجودیت‌ها" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>همهٔ موجودیت‌ها</SelectItem>
+                {entityTypes.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    <span className="mono" dir="ltr">
+                      {value}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant={onlyWithDetail ? "default" : "outline"}
+              size="sm"
+              className="rounded-control"
+              aria-pressed={onlyWithDetail}
+              onClick={() => {
+                setOnlyWithDetail((current) => !current)
+                setOffset(0)
+              }}
+            >
+              فقط دارای جزئیات
+            </Button>
+            {activeFilterCount > 0 && (
+              <Button variant="ghost" size="sm" className="rounded-control" onClick={resetFilters}>
+                <XIcon aria-hidden className="size-3.5" />
+                پاک کردن {faNum(activeFilterCount)} فیلتر
+              </Button>
+            )}
+          </div>
         </Surface>
+      </Section>
+
+      {/*
+        Stage 2 — the matching events. The table keeps its own search, sort,
+        column control and CSV export; the pager sits directly under it because
+        it pages the same rows, not the page.
+      */}
+      <Section
+        title={
+          <>
+            رویدادها
+            <span data-numeric className="ms-2 text-micro font-normal text-muted-foreground">
+              ({faNum(total)})
+            </span>
+          </>
+        }
+        description="برای دیدن جزئیات کامل، روی هر ردیف کلیک کنید."
+      >
+        <ErrorText>{error}</ErrorText>
+
+        {!payload ? (
+          <LoadingPanel label="در حال دریافت رویدادها…" />
+        ) : (
+          <DataTable
+            rows={payload.logs}
+            columns={columns}
+            rowKey={(row) => row.id}
+            searchPlaceholder="جستجو در رویداد، سازمان، کاربر یا جزئیات…"
+            exportName="hiveos-events"
+            pageSize={25}
+            density="compact"
+            onRowClick={(row) => setSelected(row)}
+            emptyIcon={ScrollTextIcon}
+            emptyTitle="رویدادی با این فیلتر ثبت نشده است"
+            emptyDescription="فیلترها را تغییر دهید یا بازهٔ دیگری را بررسی کنید."
+          />
+        )}
+
+        {total > limit && (
+          <div className="flex items-center gap-3 text-caption">
+            <PagerButton
+              label="صفحهٔ قبل"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - limit))}
+            />
+            <span data-numeric className="text-muted-foreground">
+              {faNum(offset + 1)}–{faNum(Math.min(offset + limit, total))} از {faNum(total)}
+            </span>
+            <PagerButton
+              label="صفحهٔ بعد"
+              disabled={offset + limit >= total}
+              onClick={() => setOffset(offset + limit)}
+            />
+          </div>
+        )}
+      </Section>
+
+      {/* Stage 3 — the raw server file, kept at the bottom because it is the
+          fallback for "the audit table does not explain what happened". */}
+      {payload?.server_log?.available && (
+        <Section title="گزارش فایل سرور">
+          <Surface className="p-0">
+            <details>
+              <summary className="cursor-pointer px-4 py-3 text-caption font-bold">
+                آخرین خطوط {payload.server_log.path ?? "گزارش سرور"}
+              </summary>
+              <pre
+                dir="ltr"
+                className="scrollbar-thin max-h-80 overflow-auto border-t border-border p-4 text-micro leading-relaxed"
+              >
+                {payload.server_log.lines.slice(-200).join("\n")}
+              </pre>
+            </details>
+          </Surface>
+        </Section>
       )}
 
       {/* Row detail. A Sheet rather than a dialog because the operator compares

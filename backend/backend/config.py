@@ -126,11 +126,14 @@ class Settings(BaseSettings):
     # localhost; dev keeps the local default (review round 2 intent, now enforced).
     database_url: str | None = None
     # NB-1 (final review): per-IP rate limiting only works if the api knows the real
-    # client. Comma-separated trusted proxies (IPs/CIDRs, or "*" for the staging
-    # topology where nginx is the only hop and the api container is not exposed).
-    # When the direct peer is trusted, X-Forwarded-For supplies the client key and
-    # uvicorn's ProxyHeadersMiddleware rewrites scope client/scheme.
-    trusted_proxies: str = "*"
+    # client. Comma-separated trusted proxies (IPs/CIDRs).
+    #
+    # P1-7 (staging audit 2026-09-14): this defaulted to "*", i.e. EVERY peer was
+    # trusted, so a caller could forge X-Forwarded-For and get a fresh rate-limit
+    # key per request (measured: rotating XFF -> 40x200 with no 429 at all).
+    # The narrow default is the real deployment: nginx proxies from the host's
+    # loopback and that is the only hop that should ever be believed.
+    trusted_proxies: str = "127.0.0.1"
     # E (PO request): optional path of the service log file the admin panel
     # tails (uvicorn/systemd redirect it there in staging). Empty = the panel
     # shows the audit trail only.
@@ -204,6 +207,35 @@ class Settings(BaseSettings):
         env = info.data.get("environment", "dev")
         if env != "dev" and "*" in v:
             raise ValueError('CORS_ORIGINS="*" is only allowed with ENVIRONMENT=dev')
+        return v
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _trusted_proxies_parses(cls, v: str) -> str:
+        """P1-7: a MISSPELLED trusted proxy must not silently disable limiting.
+
+        Failing safe here means refusing to start, not ignoring the bad entry. A
+        misconfigured value used to be accepted, every peer stopped being
+        trusted, X-Forwarded-For stopped being read, and every request behind
+        nginx was keyed on the proxy address - one shared counter for all users,
+        which looks like "rate limiting is broken" rather than "the config is
+        wrong". "*" remains valid but loud: it is never the right value in a
+        deployment that has a proxy at all, and it is now opt-in by name.
+        """
+        hosts = [h.strip() for h in (v or "").split(",") if h.strip()]
+        for host in hosts:
+            if host == "*":
+                continue
+            try:
+                if "/" in host:
+                    ipaddress.ip_network(host, strict=False)
+                else:
+                    ipaddress.ip_address(host)
+            except ValueError as exc:
+                raise ValueError(
+                    f"TRUSTED_PROXIES entry {host!r} is not an IP, CIDR or '*'. "
+                    "Refusing to start rather than silently not trusting the proxy."
+                ) from exc
         return v
 
     def trust_proxy_xff(self, peer: str) -> bool:

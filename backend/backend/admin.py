@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend import ai_monitor, backup_status, host_monitor, wallet
 from backend.api_errors import ApiError
-from backend.audit import record_audit
+from backend.audit import record_audit, record_audit_durable
 from backend.config import get_settings
 from backend.envelope import ok
 from backend.llm import aroute_model, provider_error, read_setting
@@ -41,7 +41,30 @@ SETTINGS_KEYS = (
     "providers_pricing",  # US-1602/1603: provider, token price -> credit
     "pipeline",  # US-1605/1606: scan interval, upload cap, allowed formats
     "prompt_template",  # US-1609
+    "agent",  # PO 2026-09: org-wide agent behaviour
 )
+
+# Defaults for the agent settings. Declared next to the schema so the value the
+# panel shows first and the value the runtime falls back to cannot disagree.
+#
+# These were previously per-user: user_agents.persona and .allowed_tools were
+# editable from the user's own page, and user_agents.settings shipped as an empty
+# dict that NOTHING ever read. The PO's decision is the opposite - how the agent
+# behaves is an organization-level decision, not a personal preference, because
+# the agent answers on the organization's behalf and its output is attributed to
+# the organization.
+#
+# recall_limit and trust_gain live here for the same reason: memory.py's ranking
+# blend documented itself as "tunable per agent through settings", which was
+# never true - the constant was compiled in and settings={} was never read.
+DEFAULT_AGENT_SETTINGS = {
+    "display_name": "دستیار سازمان",
+    "persona": "",
+    "allowed_tools": [],  # empty = every tool the registry exposes
+    "recall_limit": 6,
+    "trust_gain": 0.25,
+    "memory_enabled": True,
+}
 
 class AdminLoginBody(BaseModel):
     username: str = Field(min_length=3, max_length=100)
@@ -73,6 +96,55 @@ def _shared_engine() -> tuple:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+# P0-4 (staging audit 2026-09-14): GET /admin/settings/providers_pricing returned
+# the raw api_key, so every settings page load handed a live billable key to the
+# browser (and to anything logging the response). The panel never needs the raw
+# value back - it needs to know a key is set and to recognise it as the one it
+# already has - so reads are masked and writes recognise the mask.
+API_KEY_MASK_SEPARATOR = "\u2026"  # '…'
+_API_KEY_PREFIX_CHARS = 7
+_API_KEY_SUFFIX_CHARS = 4
+
+
+def mask_api_key(key: str | None) -> str | None:
+    """Show a recognisable stub: 'aa-FanBj…SV25'. Never the whole key."""
+    if not key:
+        return key
+    if len(key) <= _API_KEY_PREFIX_CHARS + _API_KEY_SUFFIX_CHARS:
+        # Too short to reveal parts of it without revealing most of it.
+        return API_KEY_MASK_SEPARATOR
+    return (
+        f"{key[:_API_KEY_PREFIX_CHARS]}{API_KEY_MASK_SEPARATOR}"
+        f"{key[-_API_KEY_SUFFIX_CHARS:]}"
+    )
+
+
+def is_masked_api_key(value) -> bool:
+    """True for a value the panel got from us rather than a key the PO typed.
+
+    A masked value and an empty string both mean "nothing was entered, keep the
+    stored key" - writing either through would replace a working key with the
+    mask itself and break every provider call.
+    """
+    if value is None:
+        return True
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    return stripped == "" or API_KEY_MASK_SEPARATOR in stripped
+
+
+async def _stored_provider_key(session) -> str | None:
+    row = (
+        await session.execute(
+            text("SELECT value FROM hiveos.system_settings WHERE key = 'providers_pricing'")
+        )
+    ).first()
+    if row is None or not isinstance(row[0], dict):
+        return None
+    return row[0].get("api_key")
 
 
 def _admin_username() -> str:
@@ -421,15 +493,23 @@ async def organization_detail(org_id: uuid.UUID, authorization: str = Header(def
                 {"i": str(org_id)},
             )
         ).mappings().all()
-        source = (
+        # ALL of the organization's folders: a user may register several (PO
+        # request 2026-09), so "the source" no longer exists. knowledge_source
+        # (singular, the oldest) is kept for an already-shipped panel build.
+        sources = (
             await session.execute(
                 text(
-                    "SELECT id, path, status FROM hiveos.knowledge_sources"
-                    " WHERE organization_id = :i LIMIT 1"
+                    "SELECT s.id, s.path, s.path_label, s.status, s.user_id,"
+                    " u.username AS owner_username"
+                    " FROM hiveos.knowledge_sources s"
+                    " LEFT JOIN hiveos.users u ON u.id = s.user_id"
+                    " WHERE s.organization_id = :i"
+                    " ORDER BY s.created_at, s.id"
                 ),
                 {"i": str(org_id)},
             )
-        ).mappings().first()
+        ).mappings().all()
+        source = sources[0] if sources else None
 
     return ok(
         {
@@ -440,6 +520,7 @@ async def organization_detail(org_id: uuid.UUID, authorization: str = Header(def
             "recent_events": [dict(row) for row in events],
             "assets_by_status": {str(row["status"]): int(row["total"]) for row in assets},
             "knowledge_source": dict(source) if source else None,
+            "knowledge_sources": [dict(row) for row in sources],
         }
     )
 
@@ -940,6 +1021,12 @@ async def get_setting(key: str, authorization: str = Header(default="")) -> dict
     if key not in SETTINGS_KEYS:
         raise ApiError(404, "SETTING_NOT_FOUND", "Unknown settings key.")
     payload: dict = {"key": key, "value": await _read_setting(key)}
+    if key == "providers_pricing" and isinstance(payload["value"], dict):
+        # P0-4: mask on READ. The raw key must never leave the server in a GET
+        # response; the panel only needs to know that one is stored.
+        value = dict(payload["value"])
+        value["api_key"] = mask_api_key(value.get("api_key"))
+        payload["value"] = value
     if key == "prompt_template":
         # The suggested text ships with the product, so the panel can offer
         # "restore the suggested prompt" without hardcoding a copy in the
@@ -1016,6 +1103,27 @@ class PromptTemplateSchema(BaseModel):
     user_template: str = Field(min_length=1, max_length=5000)
 
 
+class AgentSettingsSchema(BaseModel):
+    """Organization-wide agent behaviour, merged with the answer settings.
+
+    Deliberately one panel with prompt_template and providers_pricing: the
+    persona and the system prompt both shape the same answer, so editing them in
+    two places let an operator change one and wonder why the other still won.
+    """
+
+    display_name: str = Field(default="دستیار سازمان", max_length=120)
+    # Appended to the system prompt, never substituted, so the organization's
+    # grounding rules cannot be displaced by a persona.
+    persona: str = Field(default="", max_length=4000)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=50)
+    recall_limit: int = Field(default=6, ge=1, le=50)
+    # How much repeat use may amplify relevance. Bounded: 0 disables the trust
+    # term entirely, and the ceiling keeps a single heavily-used memory from
+    # outranking a genuinely relevant one.
+    trust_gain: float = Field(default=0.25, ge=0.0, le=2.0)
+    memory_enabled: bool = True
+
+
 class SubscriptionSchema(BaseModel):
     trial_days: int = Field(default=0, ge=0, le=3650)
     plans: dict[str, int] = Field(default_factory=dict)
@@ -1026,6 +1134,7 @@ _SETTING_SCHEMAS: dict[str, type[BaseModel]] = {
     "providers_pricing": ProvidersPricingSchema,
     "pipeline": PipelineSchema,
     "prompt_template": PromptTemplateSchema,
+    "agent": AgentSettingsSchema,
     "subscription": SubscriptionSchema,
 }
 
@@ -1108,16 +1217,31 @@ async def put_setting(key: str, body: SettingsBody, authorization: str = Header(
     _validate_setting(key, body.value)
     # R1/R2 (final review): shared engine + top-level json import.
     _, factory = _shared_engine()
+    value = body.value
     async with factory() as session:
+        if key == "providers_pricing" and isinstance(value, dict):
+            # P0-4: the panel PUTs back a value it got from a masked GET (or an
+            # empty field the operator cleared). Either means "I did not enter a
+            # new key", so the STORED key is kept. Writing the mask through
+            # would replace a working key with the string "aa-FanBj…SV25" and
+            # break every provider call - the exact failure this guards.
+            incoming = value.get("api_key")
+            if is_masked_api_key(incoming):
+                stored = await _stored_provider_key(session)
+                value = {**value, "api_key": stored}
         await session.execute(
             text(
                 "INSERT INTO hiveos.system_settings (key, value) VALUES (:k, CAST(:v AS jsonb)) "
                 "ON CONFLICT (key) DO UPDATE SET value = CAST(:v AS jsonb), updated_at = now()"
             ),
-            {"k": key, "v": json.dumps(body.value)},
+            {"k": key, "v": json.dumps(value)},
         )
         await session.commit()
-    return ok({"key": key, "value": body.value})
+    # The response is masked too: a PUT that echoed the raw key would leak it
+    # down the same path the GET did.
+    if key == "providers_pricing" and isinstance(value, dict):
+        value = {**value, "api_key": mask_api_key(value.get("api_key"))}
+    return ok({"key": key, "value": value})
 
 
 @router.post("/organizations/{org_id}/credit", dependencies=[Depends(_rate_limit)])
@@ -1205,6 +1329,61 @@ async def set_storage_quota(
         )
         await session.commit()
     return ok({"organization_id": str(org_id), "storage_quota_mb": body.storage_quota_mb})
+
+
+@router.post("/organizations/{org_id}/assets/purge-failed", dependencies=[Depends(_rate_limit)])
+async def purge_failed_assets(
+    org_id: uuid.UUID, authorization: str = Header(default="")
+) -> dict:
+    """P2-12 (staging audit 2026-09-14): remove an organization's failed assets.
+
+    The audit found 24 failed KnowledgeAsset rows (processing job
+    ASSET_FILE_MISSING - files copied onto the host but never visible inside the
+    container) against 33 ready ones, so tombstones outnumbered working
+    documents in the admin list and in the organization's own file list. Nothing
+    cleaned them up.
+
+    A HARD delete, not the soft delete US-241 uses: these rows have no readable
+    file and no usable text, so a tombstone is exactly the clutter being
+    removed. The processing jobs and chunks are deleted too (they cascade and
+    describe the same dead asset); the audit trail is NOT touched - the record
+    that the asset existed and failed stays in audit_logs, which is what the PO
+    asked for ("every action that happens must be logged").
+
+    The audit row for this action is written durably, outside the delete
+    transaction, so a rollback cannot lose the record of the purge.
+    """
+    await _authorized(authorization)
+    _, factory = _shared_engine()
+    async with factory() as session:
+        exists_org = (
+            await session.execute(
+                text("SELECT 1 FROM hiveos.organizations WHERE id = :i"), {"i": str(org_id)}
+            )
+        ).first()
+        if exists_org is None:
+            raise ApiError(404, "NOT_FOUND", "Organization not found.")
+        # IDs first, then delete by id: RETURNING across a multi-table delete
+        # would need one statement per table anyway, and the audit detail wants
+        # the count, not the rows.
+        result = await session.execute(
+            text(
+                "DELETE FROM hiveos.knowledge_assets"
+                " WHERE organization_id = :i AND status = 'failed'"
+            ),
+            {"i": str(org_id)},
+        )
+        purged = int(result.rowcount or 0)
+        await session.commit()
+    # Durable: the action must be traceable even though its transaction is gone.
+    await record_audit_durable(
+        "admin.assets.purge_failed",
+        organization_id=org_id,
+        entity_type="organization",
+        entity_id=org_id,
+        detail={"purged": purged},
+    )
+    return ok({"organization_id": str(org_id), "purged": purged})
 
 
 @router.get("/charge-requests", dependencies=[Depends(_rate_limit)])

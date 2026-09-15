@@ -74,6 +74,10 @@ const HOST = {
 const AGENT = {
   id: "00000000-0000-0000-0000-000000000001",
   display_name: "دستیار من",
+  // Still returned by GET /agent, but the page must not render an editor for
+  // it: PATCH /agent accepts display_name only, so a persona control would be
+  // one the server rejects. The stub keeps the field so the page is scanned
+  // with the real payload shape.
   persona: "کوتاه و رسمی پاسخ بده.",
   status: "active",
   version: 2,
@@ -94,11 +98,20 @@ const AGENT_MEMORY = {
     },
   ],
 };
+/**
+ * GET /agent/tools is read-only now and carries managed_by plus unrestricted,
+ * so the page renders policy instead of checkboxes. Without these two keys the
+ * page would fall into its "some tools are enabled" branch and never state
+ * that an empty allowlist means every tool.
+ */
 const AGENT_TOOLS = {
   tools: [
     { name: "build_chart", description: "ساخت نمودار از داده", enabled: true, writes: true },
     { name: "build_report", description: "ساخت گزارش", enabled: false, writes: true },
   ],
+  allowlist: ["build_chart"],
+  unrestricted: false,
+  managed_by: "organization",
 };
 const ADMIN_AGENTS = {
   agents: [

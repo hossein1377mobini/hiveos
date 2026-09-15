@@ -9,6 +9,7 @@ import { DomainStatus } from "../../components/ui/domain-status"
 import { Surface } from "../../components/ui/surface"
 import { faNum } from "../../lib/dates"
 import { adminApi, AdminSessionExpired } from "../api"
+import { Section } from "../page-layout"
 import { Retry } from "../useLive"
 
 interface ChargeRequestItem {
@@ -77,15 +78,18 @@ export default function BillingView({ token }: { token: string }) {
 
   return (
     <div className="grid gap-5">
-      <section className="grid gap-3">
-        <h2 className="text-subheading">
-          در انتظار تصمیم
-          {pending.length > 0 && (
-            <span data-numeric className="ms-2 text-micro font-normal text-muted-foreground">
-              ({faNum(pending.length)})
-            </span>
-          )}
-        </h2>
+      <Section
+        title={
+          <>
+            در انتظار تصمیم
+            {pending.length > 0 && (
+              <span data-numeric className="ms-2 text-micro font-normal text-muted-foreground">
+                ({faNum(pending.length)})
+              </span>
+            )}
+          </>
+        }
+      >
         {pending.length === 0 ? (
           <EmptyState
             icon={InboxIcon}
@@ -126,11 +130,10 @@ export default function BillingView({ token }: { token: string }) {
             </Surface>
           ))
         )}
-      </section>
+      </Section>
 
       {decided.length > 0 && (
-        <section className="grid gap-3">
-          <h2 className="text-subheading">تصمیم‌های پیشین</h2>
+        <Section title="تصمیم‌های پیشین">
           <Surface className="p-0">
             <ul className="divide-y divide-border">
               {decided.map((item) => (
@@ -146,7 +149,7 @@ export default function BillingView({ token }: { token: string }) {
               ))}
             </ul>
           </Surface>
-        </section>
+        </Section>
       )}
 
       <ConfirmDialog

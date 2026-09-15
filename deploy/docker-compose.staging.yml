@@ -54,7 +54,10 @@ services:
       # NB-1 (final review): nginx is the only hop and the api container is not
       # publicly exposed, so the proxy IP is trusted and X-Forwarded-For supplies
       # the real client for the per-IP rate limiters.
-      TRUSTED_PROXIES: ${HIVEOS_TRUSTED_PROXIES:-*}
+      # P1-7 (staging audit 2026-09-14): defaulted to "*", which trusts EVERY
+      # peer and lets a forged X-Forwarded-For mint a fresh rate-limit key per
+      # request. The real topology is one nginx hop from the host loopback.
+      TRUSTED_PROXIES: ${HIVEOS_TRUSTED_PROXIES:-127.0.0.1}
     depends_on:
       db:
         condition: service_healthy

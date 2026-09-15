@@ -23,7 +23,7 @@ export function AuthBrand({ title, subtitle }: { title: string; subtitle: string
         <HouseLogo className="size-[26px]" />
       </span>
       <div className="flex flex-col gap-1">
-        <h1 className="text-title font-bold text-foreground">{title}</h1>
+        <h1 className="text-title text-foreground">{title}</h1>
         <p className="text-caption text-muted-foreground">{subtitle}</p>
       </div>
     </div>
@@ -64,7 +64,7 @@ export function Stepper({ current }: { current: number }) {
               <span
                 data-state={state}
                 className={cn(
-                  "inline-flex size-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold",
+                  "inline-flex size-6 shrink-0 items-center justify-center rounded-full border-2 text-micro font-bold",
                   state === "todo" && "border-border bg-secondary text-muted-foreground",
                   state === "active" && "border-primary bg-primary text-primary-foreground",
                   state === "done" && "border-success bg-success text-primary-foreground",
@@ -117,7 +117,7 @@ export function PanelHead({
       <span aria-hidden className={cn("inline-flex size-[38px] shrink-0 items-center justify-center rounded-control", TONE_CLASS[tone])}>
         <Icon className="size-[19px]" />
       </span>
-      <h2 className="text-heading font-bold text-foreground">{title}</h2>
+      <h2 className="text-heading text-foreground">{title}</h2>
       {hint && <span className="ms-auto whitespace-nowrap text-micro text-muted-foreground">{hint}</span>}
     </div>
   )
@@ -168,8 +168,8 @@ export function Field({
         {optional && <span className="text-micro font-normal text-muted-foreground">(اختیاری)</span>}
       </FieldLabel>
       {labelled}
-      {hint && <FieldDescription className="text-xs">{hint}</FieldDescription>}
-      {error && <FieldDescription className="text-xs text-error">{error}</FieldDescription>}
+      {hint && <FieldDescription className="text-caption">{hint}</FieldDescription>}
+      {error && <FieldDescription className="text-caption text-error">{error}</FieldDescription>}
     </FieldPrimitive>
   )
 }
@@ -260,8 +260,8 @@ export function StepsList({
               {item.state === "done" ? <CheckIcon className="size-3.5" /> : (item.marker ?? "")}
             </ItemMedia>
             <ItemContent className="gap-0.5 pt-px">
-              <ItemTitle className="text-sm font-bold">{item.name}</ItemTitle>
-              {item.desc && <ItemDescription className="text-xs">{item.desc}</ItemDescription>}
+              <ItemTitle className="text-body font-bold">{item.name}</ItemTitle>
+              {item.desc && <ItemDescription className="text-caption">{item.desc}</ItemDescription>}
             </ItemContent>
           </Item>
         </div>

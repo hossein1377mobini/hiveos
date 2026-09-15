@@ -314,7 +314,8 @@ async def save_report(
     ).strip()[:80]
     filename = (safe_stem or "report") + "-" + uuid.uuid4().hex[:8] + "." + extension
 
-    directory = _storage_dir(organization.id)
+    # System-generated: the "برنامه" subfolder of the requesting user's folder.
+    directory = _storage_dir(organization.id, user_id, system=True)
     target = Path(directory) / filename
 
     # The path is built from a sanitized stem plus a uuid, never from raw title
@@ -332,6 +333,8 @@ async def save_report(
         extension=extension,
         status="ready",
         uploaded_by=user_id,
+        # The report is generated for this user, so it is theirs to read.
+        owner_id=user_id,
         asset_type="text",
         classified_at=_utc_now(),
     )

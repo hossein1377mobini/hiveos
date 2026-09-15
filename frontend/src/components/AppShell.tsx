@@ -2,7 +2,6 @@ import {
   BellIcon,
   BookOpenIcon,
   BotIcon,
-  CalendarClockIcon,
   ChevronRightIcon,
   HouseIcon,
   LayoutDashboardIcon,
@@ -66,7 +65,9 @@ import { cn } from "../lib/utils"
  *  - type sizes come from the seven-step scale. [B1]
  */
 
-export type NavId = "chat" | "agent" | "knowledge" | "usage" | "wallet" | "subscription"
+// "subscription" is no longer a nav destination: /subscription redirects to
+// /wallet, so the id was removed rather than kept as a second name for it.
+export type NavId = "chat" | "agent" | "knowledge" | "usage" | "wallet"
 
 type NavItem = { id: NavId; label: string; icon: LucideIcon; path: string; keyword: string }
 
@@ -116,18 +117,14 @@ const NAV_GROUPS: ReadonlyArray<{ section: string; items: readonly NavItem[] }> 
         keyword: "توکن هزینه مصرف اعتبار",
       },
       {
+        // One entry for one page (PO 2026-09: the wallet and subscription pages
+        // were merged). Listing them separately sent the user to two addresses
+        // holding identical content.
         id: "wallet",
-        label: "کیف پول",
+        label: "کیف پول و اشتراک",
         icon: WalletIcon,
         path: "/wallet",
-        keyword: "شارژ پرداخت تراکنش موجودی",
-      },
-      {
-        id: "subscription",
-        label: "اشتراک",
-        icon: CalendarClockIcon,
-        path: "/subscription",
-        keyword: "پلن تمدید دوره اشتراک",
+        keyword: "شارژ پرداخت تراکنش موجودی پلن تمدید دوره اشتراک",
       },
     ],
   },
@@ -138,8 +135,7 @@ export const NAV_LABEL: Record<NavId, string> = {
   agent: "ایجنت من",
   knowledge: "دانش سازمان",
   usage: "اعتبار و مصرف",
-  wallet: "کیف پول",
-  subscription: "اشتراک",
+  wallet: "کیف پول و اشتراک",
 }
 
 const PATH_LABEL: Record<string, string> = {
@@ -147,8 +143,10 @@ const PATH_LABEL: Record<string, string> = {
   "/agent": "ایجنت من",
   "/knowledge": "دانش سازمان",
   "/usage": "اعتبار و مصرف",
-  "/wallet": "کیف پول",
-  "/subscription": "اشتراک",
+  "/wallet": "کیف پول و اشتراک",
+  // Kept so a breadcrumb or title still resolves for the old address during the
+  // redirect, rather than falling back to a blank label.
+  "/subscription": "کیف پول و اشتراک",
   "/admin": "پنل مدیریت",
 }
 
@@ -253,7 +251,7 @@ export function AppShell({
 
   return (
     <SidebarProvider className="min-h-dvh">
-      <Sidebar side="right" collapsible="icon" className="border-e">
+      <Sidebar side="right" collapsible="icon" className="border-e border-sidebar-border">
         <SidebarHeader className="flex-row items-center gap-2.5 px-2 py-3.5">
           <span
             aria-hidden
@@ -261,7 +259,7 @@ export function AppShell({
           >
             <HouseIcon className="size-4.5" />
           </span>
-          <span className="truncate text-heading font-bold tracking-tight text-sidebar-foreground" dir="ltr">
+          <span className="truncate text-heading text-sidebar-foreground" dir="ltr">
             HiveOS
           </span>
         </SidebarHeader>
@@ -286,7 +284,7 @@ export function AppShell({
                       <SidebarMenuButton asChild isActive={isActive} tooltip={label}>
                         <NavLink
                           to={path}
-                          className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold"
+                          className="h-auto py-2 text-caption font-medium data-[active=true]:font-bold [&[data-active=true]>svg]:text-sidebar-accent-foreground"
                         >
                           <Icon aria-hidden />
                           <span>{label}</span>
@@ -299,7 +297,7 @@ export function AppShell({
             </SidebarGroup>
           ))}
         </SidebarContent>
-        <SidebarFooter className="border-t">
+        <SidebarFooter className="border-t border-sidebar-border">
           <SidebarMenu>
             <SidebarMenuItem>
               <UserMenu identity={identity} />

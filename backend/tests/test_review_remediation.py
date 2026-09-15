@@ -285,11 +285,24 @@ def test_unique_owner_index_blocks_shared_owner(client):
         engine.dispose()
 
 
-def test_rate_limit_keys_clients_behind_trusted_proxy(client):
+def test_rate_limit_keys_clients_behind_trusted_proxy(client, monkeypatch):
     """NB-1: behind a trusted proxy the limiter keys on X-Forwarded-For, so two
-    clients get independent budgets instead of one shared proxy bucket."""
+    clients get independent budgets instead of one shared proxy bucket.
+
+    The trusted list is set EXPLICITLY here. The default is now 127.0.0.1
+    (P1-7: "*" trusted a forged X-Forwarded-For from any peer), and the
+    TestClient's direct peer is literally "testclient", so without this the
+    header would correctly be ignored and every request would share one key.
+    """
+    from backend.config import get_settings
     from backend.organization.router import _auth_limiter
 
+    # The TestClient's direct peer is the literal string "testclient", so that
+    # is what has to be listed as the trusted proxy for X-Forwarded-For to be
+    # believed. Set on the cached settings instance: the default is now
+    # 127.0.0.1 (P1-7), and TRUSTED_PROXIES itself refuses a non-IP entry, which
+    # is the fail-safe this test must not weaken.
+    monkeypatch.setattr(get_settings(), "trusted_proxies", "testclient", raising=False)
     _auth_limiter.reset()
     org_body = {"name": "آزمایش محدودیت", "industry": "fintech", "size": "10_50"}
 

@@ -24,6 +24,7 @@ from backend.knowledge.assets import (
     set_source_status,
     soft_delete_asset,
     upload_assets,
+    visible_to,
 )
 from backend.knowledge.client_folder import (
     register_client_folder,
@@ -32,7 +33,7 @@ from backend.knowledge.client_folder import (
 )
 from backend.knowledge.client_sync import sync_plan
 from backend.knowledge.service import (
-    get_source,
+    list_sources,
     register_folder_source,
     scan_history,
     scan_source,
@@ -64,6 +65,11 @@ class ManifestEntry(BaseModel):
 
 class ManifestSync(BaseModel):
     entries: list[ManifestEntry] = Field(default_factory=list, max_length=5000)
+    # Which folder this manifest describes. Optional only for an older client
+    # build that does not send it; the server then falls back to the caller's
+    # oldest folder. A user may hold several (PO request 2026-09), so relying on
+    # the fallback would reconcile every folder into one.
+    source_id: uuid.UUID | None = None
 
 
 class KnowledgeSourceStatus(BaseModel):
@@ -98,7 +104,9 @@ async def register_endpoint(
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-201 scenario 1/2: validate + register the ingestion folder."""
-    result = await register_folder_source(session, auth.organization, payload.path)
+    result = await register_folder_source(
+        session, auth.organization, payload.path, auth.user.id
+    )
     return ok(result)
 
 
@@ -106,9 +114,19 @@ async def register_endpoint(
 async def get_endpoint(
     auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
 ) -> dict:
-    """US-201: the (single) knowledge source of the caller's organization."""
-    result = await get_source(session, auth.organization)
-    return ok(result if result is not None else {})
+    """US-201 + PO request 2026-09: the caller's folders, ALL of them.
+
+    Was "the (single) knowledge source" and returned one object (or {} when the
+    organization had none). A user may register many folders now, so a single
+    object cannot express the state: press "add folder" twice and the second
+    folder was invisible here. The envelope keeps its shape - ok(...) - but the
+    payload is a LIST.
+
+    Response: {"sources": [ {id, path, path_label, source_type, status,
+    file_state, scan_interval_minutes, last_scanned_at, is_org_wide,
+    created_at}, ... ]}, the caller's own folders first.
+    """
+    return ok({"sources": await list_sources(session, auth.organization, auth.user.id)})
 
 
 @router.put("/{source_id}", dependencies=[Depends(_rate_limit)])
@@ -155,13 +173,17 @@ async def register_client_folder_endpoint(
     Separate from POST /knowledge-sources because that path is validated as a
     path ON THIS SERVER; this one describes a path on the owner's machine.
     """
-    result = await register_client_folder(session, auth.organization, payload.path)
+    result = await register_client_folder(
+        session, auth.organization, payload.path, auth.user.id
+    )
     return ok(result)
 
 
 @router.get("/client-folder/sync-plan", dependencies=[Depends(_rate_limit)])
 async def client_folder_sync_plan_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
+    source_id: uuid.UUID | None = None,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """Auto-sync cadence (PO request): the client polls, the server decides.
 
@@ -169,24 +191,48 @@ async def client_folder_sync_plan_endpoint(
     It stays authoritative about WHEN: the interval is a server setting, so
     changing it in the admin panel reaches every installed client on its next
     poll without shipping a new build.
+
+    ?source_id= names the folder when the caller holds several (PO request
+    2026-09); each folder has its own cadence and its own pending uploads, so a
+    single plan for the whole organization would answer about the wrong folder.
     """
-    return ok(await sync_plan(session, auth.organization.id))
+    return ok(
+        await sync_plan(session, auth.organization.id, source_id, auth.user.id)
+    )
 
 
 @router.get("/client-folder/manifest", dependencies=[Depends(_rate_limit)])
 async def client_folder_manifest_endpoint(
-    auth: AuthContext = Depends(get_auth_context), session: AsyncSession = Depends(get_db, scope="function")
+    source_id: uuid.UUID | None = None,
+    auth: AuthContext = Depends(get_auth_context),
+    session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """What the client needs to decide which files to send: the current assets."""
+    """What the client needs to decide which files to send: the current assets.
+
+    ?source_id= restricts it to one folder (PO request 2026-09: a user may hold
+    several). Without it, every readable folder's files are returned.
+    """
     from backend.models import KnowledgeAsset
 
+    conditions = [
+        KnowledgeAsset.organization_id == auth.organization.id,
+        KnowledgeAsset.deleted_at.is_(None),
+        KnowledgeAsset.rel_path.is_not(None),
+    ]
+    if source_id is not None:
+        # One folder's manifest (PO request 2026-09: several folders per user).
+        conditions.append(KnowledgeAsset.source_id == source_id)
     rows = (
         (
             await session.execute(
                 select(KnowledgeAsset).where(
-                    KnowledgeAsset.organization_id == auth.organization.id,
-                    KnowledgeAsset.deleted_at.is_(None),
-                    KnowledgeAsset.rel_path.is_not(None),
+                    *conditions,
+                    # The manifest tells the desktop client which files to upload
+                    # and hands back their asset ids. Scoped to the caller, or a
+                    # member of the organization would receive a colleague's
+                    # file list and their upload ids. The org Owner (is_admin)
+                    # sees the whole organization's set - PO access model.
+                    visible_to(auth.user.id, auth.is_admin),
                 )
             )
         )
@@ -219,6 +265,8 @@ async def client_folder_sync_endpoint(
         session,
         auth.organization,
         [entry.model_dump() for entry in payload.entries],
+        payload.source_id,
+        auth.user.id,
     )
     return ok(result)
 
@@ -231,7 +279,9 @@ async def client_folder_upload_endpoint(
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """The bytes for one manifest entry (the server never sees the folder)."""
-    result = await upload_client_file(session, auth.organization, asset_id, file)
+    result = await upload_client_file(
+        session, auth.organization, asset_id, file, auth.user.id
+    )
     return ok(result)
 
 
@@ -319,8 +369,18 @@ async def assets_list_endpoint(
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """US-007 FR-005 + US-241 FR-003: asset list (status=active|deleted)."""
-    return ok({"assets": await list_assets(session, auth.organization, status)})
+    """US-007 FR-005 + US-241 FR-003: asset list (status=active|deleted).
+
+    The organization Owner reads every file in the organization (PO access
+    model); everyone else reads their own plus the org-wide files.
+    """
+    return ok(
+        {
+            "assets": await list_assets(
+                session, auth.organization, status, auth.user.id, auth.is_admin
+            )
+        }
+    )
 
 
 @assets_router.post("/{asset_id}/classify", dependencies=[Depends(_rate_limit)])
@@ -340,7 +400,11 @@ async def asset_classification_endpoint(
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-205: read the classification of one asset."""
-    return ok(await get_classification(session, auth.organization, asset_id))
+    return ok(
+        await get_classification(
+            session, auth.organization, asset_id, auth.user.id, auth.is_admin
+        )
+    )
 
 
 @assets_router.get("/{asset_id}/chunks", dependencies=[Depends(_rate_limit)])
@@ -360,7 +424,11 @@ async def asset_metadata_endpoint(
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
     """US-208: the pipeline metadata bag."""
-    return ok(await get_asset_metadata(session, auth.organization, asset_id))
+    return ok(
+        await get_asset_metadata(
+            session, auth.organization, asset_id, auth.user.id, auth.is_admin
+        )
+    )
 
 
 @assets_router.get("/{asset_id}/download", dependencies=[Depends(_rate_limit)])
@@ -384,15 +452,28 @@ async def asset_download_endpoint(
 
     from backend.knowledge.assets import _storage_dir
 
-    asset = await get_asset(session, auth.organization, asset_id)
+    asset = await get_asset(
+        session, auth.organization, asset_id, auth.user.id, auth.is_admin
+    )
     if asset is None:
         raise ApiError(404, "ASSET_NOT_FOUND", "The asset does not exist.")
 
-    directory = Path(_storage_dir(auth.organization.id)).resolve()
+    root = Path(_storage_dir(auth.organization.id)).resolve()
     target = Path(asset.storage_path or "").resolve()
     # Containment check: an asset row must never be able to point at a file
     # outside the organization's own directory.
-    if target.parent != directory or not target.is_file():
+    #
+    # Relative-to rather than parent-equals: a file now lives at
+    # <org>/<user>/[برنامه/]file, not directly under the organization root, so
+    # an exact-parent test would refuse every file added after per-user folders
+    # and the containment would be wrong in the other direction too - it would
+    # reject a legitimate path while still only testing one level.
+    try:
+        target.relative_to(root)
+        inside = True
+    except ValueError:
+        inside = False
+    if not inside or not target.is_file():
         raise ApiError(404, "ASSET_FILE_MISSING", "The asset file is not available.")
 
     return FileResponse(

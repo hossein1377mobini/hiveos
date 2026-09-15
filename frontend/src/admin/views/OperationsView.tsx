@@ -15,6 +15,7 @@ import { DomainStatus } from "../../components/ui/domain-status"
 import { Surface } from "../../components/ui/surface"
 import { cn } from "../../lib/utils"
 import { faNum, faRelative, humanSize } from "../../lib/dates"
+import { LoadingPanel, PageHeader, SectionHeading } from "../page-layout"
 import { useLive, Retry } from "../useLive"
 
 interface HostSnapshot {
@@ -60,29 +61,37 @@ export default function OperationsView({ token }: { token: string }) {
   if (host.error && !host.data) {
     return <Retry message={host.error} onRetry={() => void host.reload()} />
   }
-  if (!host.data) return <p className="text-caption text-muted-foreground">در حال دریافت وضعیت سرور…</p>
+  if (!host.data) return <LoadingPanel label="در حال دریافت وضعیت سرور…" />
 
   const data = host.data
 
   return (
     <div className="grid gap-5">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-micro text-muted-foreground">
-          خودکار هر ۳۰ ثانیه · مدت کارکرد سرور {faRelative(uptimeToIso(data.uptime.uptime_seconds))}
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="rounded-control"
-          onClick={() => {
-            void host.reload()
-            void backup.reload()
-          }}
-        >
-          <RefreshCwIcon className="size-3.5" />
-          به‌روزرسانی
-        </Button>
-      </div>
+      {/* Same header shape as every other workspace: a title, the sentence that
+          explains what is on screen, and the row's action on the far side. v0.1
+          put a bare timestamp line here, so this page had no heading at all
+          where the other admin pages had one. */}
+      <PageHeader
+        title="وضعیت سرور"
+        description={
+          "خودکار هر ۳۰ ثانیه · مدت کارکرد سرور " +
+          faRelative(uptimeToIso(data.uptime.uptime_seconds))
+        }
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-control"
+            onClick={() => {
+              void host.reload()
+              void backup.reload()
+            }}
+          >
+            <RefreshCwIcon className="size-3.5" />
+            به‌روزرسانی
+          </Button>
+        }
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <GaugeCard label="پردازنده" percent={data.cpu.percent} hint={data.cpu.model + " · " + faNum(data.cpu.cores) + " هسته"} />
@@ -114,10 +123,10 @@ export default function OperationsView({ token }: { token: string }) {
           worse than an absent one. */}
       {data.memory.swap_total_bytes > 0 && (
         <Surface>
-          <h2 className="flex items-center gap-2 text-subheading">
+          <SectionHeading className="flex items-center gap-2">
             <HardDriveIcon aria-hidden className="size-4 text-muted-foreground" />
             حافظهٔ مبادله (Swap)
-          </h2>
+          </SectionHeading>
           <div className="mt-3">
             <BarChart
               valueLabel=""
@@ -140,10 +149,10 @@ export default function OperationsView({ token }: { token: string }) {
 
       {data.network.interfaces.length > 0 && (
         <Surface>
-          <h2 className="flex items-center gap-2 text-subheading">
+          <SectionHeading className="flex items-center gap-2">
             <NetworkIcon aria-hidden className="size-4 text-muted-foreground" />
             شبکه
-          </h2>
+          </SectionHeading>
           <p className="mt-1 text-micro text-muted-foreground">
             مجموع ترافیک دریافت و ارسال از زمان روشن شدن سرور.
           </p>
@@ -178,10 +187,10 @@ export default function OperationsView({ token }: { token: string }) {
 
       {data.cpu.per_core.length > 1 && (
         <Surface>
-          <h2 className="flex items-center gap-2 text-subheading">
+          <SectionHeading className="flex items-center gap-2">
             <CpuIcon aria-hidden className="size-4 text-muted-foreground" />
             بار هر هسته
-          </h2>
+          </SectionHeading>
           <p className="mt-1 text-micro text-muted-foreground">
             میانگین کل می‌تواند پنهان کند که یک هسته اشباع شده است.
           </p>
@@ -210,10 +219,10 @@ export default function OperationsView({ token }: { token: string }) {
 
       <div className="grid gap-3 lg:grid-cols-2">
         <Surface>
-          <h2 className="flex items-center gap-2 text-subheading">
+          <SectionHeading className="flex items-center gap-2">
             <ServerIcon aria-hidden className="size-4 text-muted-foreground" />
             میانگین بار
-          </h2>
+          </SectionHeading>
           <dl className="mt-3 grid grid-cols-3 gap-3 text-caption">
             {(["1m", "5m", "15m"] as const).map((window) => (
               <div key={window}>
@@ -230,10 +239,10 @@ export default function OperationsView({ token }: { token: string }) {
         </Surface>
 
         <Surface>
-          <h2 className="flex items-center gap-2 text-subheading">
+          <SectionHeading className="flex items-center gap-2">
             <HardDriveIcon aria-hidden className="size-4 text-muted-foreground" />
             پرترافیک‌ترین پردازش‌ها
-          </h2>
+          </SectionHeading>
           {data.top_processes.length === 0 ? (
             <p className="mt-3 text-caption text-muted-foreground">داده‌ای گزارش نشده است.</p>
           ) : (
@@ -357,10 +366,10 @@ function BackupCard({
     <Surface data-testid="backup-card" className={cn(stale && "border-warning-border bg-warning-bg")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid gap-1">
-          <h2 className="flex items-center gap-2 text-subheading">
+          <SectionHeading className="flex items-center gap-2">
             <DatabaseIcon aria-hidden className="size-4 text-muted-foreground" />
             پشتیبان‌گیری شبانه
-          </h2>
+          </SectionHeading>
           <span data-testid="backup-state">
             <DomainStatus domain="health" value={state.state} />
           </span>

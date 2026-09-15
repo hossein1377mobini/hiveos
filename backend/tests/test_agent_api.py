@@ -42,7 +42,16 @@ class TestAgentIdentity:
 
 
 class TestPersona:
-    def test_persona_is_saved_and_version_bumps(self, client):
+    """The persona is an ORGANIZATION setting now, not a personal one.
+
+    The agent answers on the organization's behalf, so one member must not be
+    able to change the voice every other member gets. The user-facing PATCH
+    rejects the field rather than accepting and discarding it - a silent no-op
+    would look like the setting saved, which is the failure these tests exist to
+    catch.
+    """
+
+    def test_a_member_cannot_set_the_persona(self, client):
         ctx = _org_and_users(client)
         before = client.get(AGENT, headers=ctx["headers_a"]).json()["data"]
         response = client.patch(
@@ -50,29 +59,35 @@ class TestPersona:
             headers=ctx["headers_a"],
             json={"persona": "همیشه با لحن رسمی و کوتاه پاسخ بده."},
         )
-        assert response.status_code == 200
-        data = response.json()["data"]
-        assert data["persona"] == "همیشه با لحن رسمی و کوتاه پاسخ بده."
-        assert data["version"] > before["version"]
+        # 400, not 422: install_error_handlers maps schema failures (here
+        # extra="forbid") to this app's VALIDATION_ERROR envelope.
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+        after = client.get(AGENT, headers=ctx["headers_a"]).json()["data"]
+        assert after["version"] == before["version"], "a refused write must not bump the version"
 
-    def test_patch_leaves_unsupplied_fields_alone(self, client):
-        """A PATCH that only sends a persona must not blank the display name."""
+    def test_a_display_name_patch_leaves_other_fields_alone(self, client):
+        """A PATCH that only sends the display name must not blank anything else."""
         ctx = _org_and_users(client)
-        client.patch(AGENT, headers=ctx["headers_a"], json={"display_name": "دستیار من"})
-        data = client.patch(
-            AGENT, headers=ctx["headers_a"], json={"persona": "رسمی"}
+        first = client.patch(
+            AGENT, headers=ctx["headers_a"], json={"display_name": "دستیار من"}
         ).json()["data"]
-        assert data["display_name"] == "دستیار من"
-        assert data["persona"] == "رسمی"
+        assert first["display_name"] == "دستیار من"
+        data = client.patch(
+            AGENT, headers=ctx["headers_a"], json={"display_name": "دستیار دوم"}
+        ).json()["data"]
+        assert data["display_name"] == "دستیار دوم"
+        assert data["status"] == first["status"]
+        assert data["user_id"] == first["user_id"]
 
-    def test_persona_change_is_audited(self, client):
+    def test_a_display_name_change_is_audited(self, client):
         from sqlalchemy import select
 
         from backend.models import AuditLog
         from tests.test_user_agent import _run, _session_scope
 
         ctx = _org_and_users(client)
-        client.patch(AGENT, headers=ctx["headers_a"], json={"persona": "مختصر بگو"})
+        client.patch(AGENT, headers=ctx["headers_a"], json={"display_name": "دستیار من"})
 
         engine, factory = _session_scope()
 
@@ -157,6 +172,12 @@ class TestMemoryApi:
 
 
 class TestToolsApi:
+    """The catalogue is readable and the allowlist is not user-settable.
+
+    The allowlist moved to the organization (admin panel) with the persona: a
+    member must not grant themselves capabilities the organization withheld.
+    """
+
     def test_catalogue_lists_both_tools_enabled_by_default(self, client):
         ctx = _org_and_users(client)
         data = client.get(AGENT + "/tools", headers=ctx["headers_a"]).json()["data"]
@@ -164,24 +185,30 @@ class TestToolsApi:
         assert {"build_chart", "build_report"} <= names
         assert data["unrestricted"] is True
         assert all(tool["enabled"] for tool in data["tools"])
+        assert data["managed_by"] == "organization"
 
-    def test_allowlist_restricts_the_catalogue(self, client):
+    def test_a_member_cannot_set_the_allowlist(self, client):
         ctx = _org_and_users(client)
-        client.patch(AGENT + "/tools", headers=ctx["headers_a"], json={"allowed_tools": ["build_chart"]})
+        client.patch(
+            AGENT + "/tools",
+            headers=ctx["headers_a"],
+            json={"allowed_tools": ["build_chart"]},
+        )
+        # The route exists to explain itself (403) rather than 405, and the
+        # catalogue is unchanged afterwards.
         data = client.get(AGENT + "/tools", headers=ctx["headers_a"]).json()["data"]
-        enabled = {tool["name"] for tool in data["tools"] if tool["enabled"]}
-        assert enabled == {"build_chart"}
-        assert data["unrestricted"] is False
+        assert data["unrestricted"] is True
+        assert all(tool["enabled"] for tool in data["tools"])
 
-    def test_unknown_tool_name_is_rejected(self, client):
+    def test_setting_the_allowlist_is_refused_with_a_reason(self, client):
         """A typo would silently disable a tool with no way for the user to see
-        why their reports stopped working."""
+        why their reports stopped working - so the refusal names its cause."""
         ctx = _org_and_users(client)
         response = client.patch(
             AGENT + "/tools", headers=ctx["headers_a"], json={"allowed_tools": ["buld_chart"]}
         )
-        assert response.status_code == 422
-        assert response.json()["error"]["code"] == "UNKNOWN_TOOL"
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "AGENT_SETTINGS_MANAGED_BY_ORGANIZATION"
 
 
 class TestActivity:

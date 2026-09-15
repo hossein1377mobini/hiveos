@@ -51,6 +51,43 @@ def test_dev_falls_back_to_local_default() -> None:
     assert settings.database_url == _DEV_DATABASE_URL
 
 
+# --- P1-7 (staging audit 2026-09-14): trusted proxies -----------------------
+
+
+def test_trusted_proxies_defaults_to_the_loopback_proxy() -> None:
+    """The default was "*", which trusts EVERY peer.
+
+    With "*" any caller could set X-Forwarded-For and get a fresh rate-limit key
+    per request - measured on staging, rotating XFF produced 40x200 and no 429 at
+    all. The real topology is one nginx hop from the host loopback.
+    """
+    settings = Settings(environment="dev")
+    assert settings.trusted_proxies == "127.0.0.1"
+    assert settings.trust_proxy_xff("127.0.0.1") is True
+    # A peer that is NOT the configured proxy cannot supply the client key.
+    assert settings.trust_proxy_xff("203.0.113.9") is False
+
+
+def test_a_misspelled_trusted_proxy_refuses_startup() -> None:
+    """Fail SAFE: a typo must not silently stop trusting the proxy.
+
+    Accepting "127.0.0.l" would make every request behind nginx key on the
+    proxy's own address - one shared counter for the whole internet - and the
+    symptom ("limiting looks broken") points nowhere near the config.
+    """
+    with pytest.raises(ValidationError):
+        Settings(environment="dev", trusted_proxies="127.0.0.l")
+    with pytest.raises(ValidationError):
+        Settings(environment="dev", trusted_proxies="localhost")
+
+
+def test_a_valid_trusted_proxy_list_still_parses() -> None:
+    settings = Settings(environment="dev", trusted_proxies="127.0.0.1,10.0.0.0/8")
+    assert settings.trust_proxy_xff("127.0.0.1") is True
+    assert settings.trust_proxy_xff("10.1.2.3") is True  # inside the CIDR
+    assert settings.trust_proxy_xff("203.0.113.9") is False
+
+
 def test_explicit_database_url_survives_everywhere() -> None:
     url = "postgresql+asyncpg://hiveos:x@db:5432/hiveos"
     for env in ("dev", "staging", "prod"):

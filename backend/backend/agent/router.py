@@ -7,14 +7,25 @@ organization_id and user_id always come from the auth context, never the path.
 
 What the user can do:
 
-  GET    /agent                  - my agent: persona, status, tool allowlist
-  PATCH  /agent                  - change my persona / display name
+  GET    /agent                  - my agent: status, memory stats
+  PATCH  /agent                  - change my display name
   GET    /agent/memory           - what my agent remembers (paged, filterable)
   POST   /agent/memory           - teach it something explicitly
   DELETE /agent/memory/{id}      - forget one memory
-  GET    /agent/tools            - tools my agent has, and which are enabled
-  PATCH  /agent/tools            - set my tool allowlist
+  GET    /agent/tools            - the organization's tool catalogue (read-only)
   GET    /agent/activity         - my recent tool calls (the trace)
+
+WHAT THE USER OWNS HERE. Identity and state: how they refer to their agent, what
+it remembers about them, and whether a memory is forgotten. The memory itself is
+personal - it is what the agent learned about this person - so teaching and
+forgetting stay user-facing.
+
+WHAT THE ORGANIZATION OWNS. Behaviour: persona and the tool allowlist. Those are
+admin-panel settings (the "agent" key, alongside the prompt template and
+provider config) because the agent answers on the organization's behalf, and one
+member must not change the voice or the capabilities everyone else gets. The
+user-facing PATCH routes that used to set them either reject the field or explain
+why they are refused.
 
 The activity route is the user's window into the same trace the admin panel
 reads: the PO asked that every action be traceable, and the person best placed
@@ -24,7 +35,7 @@ to notice a wrong action is the one who asked for it.
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,8 +59,21 @@ MEMORY_PAGE_MAX = 100
 
 
 class AgentUpdate(BaseModel):
+    """What a user may change about their own agent.
+
+    Only the display name. Persona and the tool allowlist moved to the
+    organization-wide "agent" setting (admin panel): they decide how the agent
+    answers, and the answer is the organization's, so one member must not be able
+    to change the voice or the capabilities every other member gets.
+
+    The field is typed Optional with a default of None and the extra is rejected
+    rather than ignored: silently accepting a persona here and discarding it
+    would look like the setting saved.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     display_name: str | None = Field(default=None, max_length=120)
-    persona: str | None = Field(default=None, max_length=4000)
 
 
 class MemoryCreate(BaseModel):
@@ -58,6 +82,13 @@ class MemoryCreate(BaseModel):
 
 
 class ToolsUpdate(BaseModel):
+    """Retained only so the refusal below has a typed body to parse.
+
+    The route is refused unconditionally, so this model never carries a decision
+    anywhere - it exists so a client sending the old payload gets the explanatory
+    403 rather than a schema error about the shape of a request it was built for.
+    """
+
     allowed_tools: list[str] = Field(default_factory=list, max_length=50)
 
 
@@ -82,15 +113,16 @@ async def update_my_agent(
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """Change persona / display name.
+    """Change how this user refers to their agent.
 
-    The persona is *additive* to the organization's grounding prompt - it is
-    appended, never substituted, so a user cannot edit away the citation rules
-    or the safety instructions by writing a persona that contradicts them.
+    The display name only. Persona and the tool allowlist are organization-level
+    (see AgentUpdate) - the agent answers on the organization's behalf, so its
+    voice and capabilities are not a personal preference. The request model
+    rejects those fields rather than ignoring them.
     """
     agent = await agent_memory.ensure_agent(session, auth.organization.id, auth.user.id)
     changed = await update_agent_settings(
-        session, agent, display_name=body.display_name, persona=body.persona
+        session, agent, display_name=body.display_name
     )
     if changed:
         await record_audit(
@@ -238,13 +270,20 @@ async def list_my_tools(
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """The tool catalogue plus whether this agent may use each one.
+    """The tool catalogue plus whether the organization enables each one.
 
-    An empty allowlist means "all", which is the default for a fresh agent - so
-    it is reported as enabled rather than as an empty toolbox.
+    Read-only: the allowlist is an organization setting set in the admin panel,
+    so this reports what the org decided rather than what this user chose. The
+    user can still see their own capabilities, which is the point of the route.
+
+    An empty allowlist means "all", so it is reported as enabled rather than as
+    an empty toolbox.
     """
     agent = await agent_memory.ensure_agent(session, auth.organization.id, auth.user.id)
-    allowed = set(agent.allowed_tools or [])
+    from backend.agent.service import tools_for
+
+    settings = await agent_memory.agent_settings(session)
+    allowed = set(tools_for(agent, settings))
     tools = [
         {
             "name": spec.name,
@@ -254,7 +293,16 @@ async def list_my_tools(
         }
         for spec in tool_registry.all_specs()
     ]
-    return ok({"tools": tools, "allowlist": sorted(allowed), "unrestricted": not allowed})
+    return ok(
+        {
+            "tools": tools,
+            "allowlist": sorted(allowed),
+            "unrestricted": not allowed,
+            # Says plainly why PATCH no longer exists, so the frontend can show
+            # the reason instead of a dead control.
+            "managed_by": "organization",
+        }
+    )
 
 
 @router.patch("/tools", dependencies=[Depends(_rate_limit)])
@@ -263,32 +311,18 @@ async def set_my_tools(
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """Set the tool allowlist.
+    """Refused: the tool allowlist is an organization setting.
 
-    Unknown names are rejected rather than stored: a typo would silently disable
-    a tool, and the user would have no way to see why their reports stopped
-    working.
+    Kept as a route that explains itself rather than deleted, so a client built
+    against the old contract gets a reason it can show instead of a bare 405. A
+    user must not be able to grant themselves capabilities the organization
+    withheld - the agent acts on the organization's behalf.
     """
-    known = {spec.name for spec in tool_registry.all_specs()}
-    unknown = sorted(set(body.allowed_tools) - known)
-    if unknown:
-        raise ApiError(
-            422, "UNKNOWN_TOOL", "Unknown tool(s): " + ", ".join(unknown)
-        )
-
-    agent = await agent_memory.ensure_agent(session, auth.organization.id, auth.user.id)
-    agent.allowed_tools = sorted(set(body.allowed_tools))
-    await session.flush()
-    await record_audit(
-        session,
-        "agent.tools.updated",
-        organization_id=auth.organization.id,
-        actor_user_id=auth.user.id,
-        entity_type="user_agent",
-        entity_id=agent.id,
-        detail={"allowed_tools": agent.allowed_tools},
+    raise ApiError(
+        403,
+        "AGENT_SETTINGS_MANAGED_BY_ORGANIZATION",
+        "تنظیمات ابزارهای دستیار در سطح سازمان تعیین می‌شود.",
     )
-    return ok({"allowlist": agent.allowed_tools})
 
 
 @router.get("/activity", dependencies=[Depends(_rate_limit)])

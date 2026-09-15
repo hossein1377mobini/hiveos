@@ -83,16 +83,33 @@ def test_register_success_with_initial_scan_summary(client, tmp_path):
     assert len(rows) == 1 and rows[0].source_type == "local_folder" and rows[0].scan_interval_minutes == 30
     assert events == ["knowledge-source.created"]
 
-    # re-register updates the same single row (v0.1: one folder per org)
+    # PO request 2026-09: a DIFFERENT path is a SECOND folder, not a
+    # re-registration of the first. The one-folder-per-user unique index used to
+    # make this impossible (the insert raised a unique violation).
     other = tmp_path / "ingestion2"
     other.mkdir()
     again = client.post(f"{KS}", json={"path": str(other)}, headers=ctx["headers"])
     assert again.status_code == 200
+    assert again.json()["data"]["reused"] is False
+    assert again.json()["data"]["id"] != response.json()["data"]["id"]
+    with engine.connect() as conn:
+        paths = conn.execute(
+            text("SELECT path FROM hiveos.knowledge_sources ORDER BY path")
+        ).scalars().all()
+    engine.dispose()
+    assert sorted(paths) == sorted([str(folder), str(other)])
+
+    # ...and registering the SAME path again is the button pressed twice, so it
+    # reuses that row instead of creating a duplicate folder.
+    same_again = client.post(f"{KS}", json={"path": str(other)}, headers=ctx["headers"])
+    assert same_again.status_code == 200
+    assert same_again.json()["data"]["reused"] is True
+    assert str(same_again.json()["data"]["id"]) == str(again.json()["data"]["id"])
+    engine = _sync_engine()
     with engine.connect() as conn:
         count = conn.execute(text("SELECT count(*) FROM hiveos.knowledge_sources")).scalar_one()
-        path = conn.execute(text("SELECT path FROM hiveos.knowledge_sources")).scalar_one()
     engine.dispose()
-    assert count == 1 and path == str(other)
+    assert count == 2
 
 
 def test_register_rejects_invalid_paths(client, tmp_path):

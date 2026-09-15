@@ -29,14 +29,28 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-async def sync_plan(session: AsyncSession, organization_id) -> dict:
-    """What the client should do right now: sync or wait, and why."""
+async def sync_plan(session: AsyncSession, organization_id, source_id=None, user_id=None) -> dict:
+    """What the client should do right now: sync or wait, and why.
+
+    The plan belongs to ONE folder. A user may register several (PO request
+    2026-09), so source_id names it explicitly; without one the caller's own
+    folder is used, with the organization-wide one as fallback. The previous
+    code took scalar_one_or_none() over the whole organization, which raised
+    MultipleResultsFound as soon as a second folder existed.
+    """
     settings = get_settings()
-    source = (
-        await session.execute(
-            select(KnowledgeSource).where(KnowledgeSource.organization_id == organization_id)
-        )
-    ).scalar_one_or_none()
+    source = None
+    if source_id is not None:
+        source = await session.get(KnowledgeSource, source_id)
+        if source is not None and (
+            source.organization_id != organization_id
+            or (source.user_id is not None and source.user_id != user_id)
+        ):
+            source = None
+    else:
+        from backend.knowledge.assets import _active_source
+
+        source = await _active_source(session, organization_id, user_id)
     if source is None:
         return {
             "due": False,

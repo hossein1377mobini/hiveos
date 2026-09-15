@@ -5,6 +5,7 @@ import { DomainStatus } from "../../components/ui/domain-status"
 import { Surface } from "../../components/ui/surface"
 import { Button } from "../../components/ui/button"
 import { faNum } from "../../lib/dates"
+import { LoadingPanel, SectionHeading } from "../page-layout"
 import { useLive } from "../useLive"
 import { Retry } from "../useLive"
 
@@ -30,7 +31,7 @@ export default function OverviewView({ token }: { token: string }) {
   const { data, error, reload } = useLive<LiveStatus>(token, "/system-status", 15_000)
 
   if (error && !data) return <Retry message={error} onRetry={() => void reload()} />
-  if (!data) return <p className="text-caption text-muted-foreground">در حال دریافت وضعیت…</p>
+  if (!data) return <LoadingPanel label="در حال دریافت وضعیت سامانه…" />
 
   const counters = data.counters ?? {}
   // jobs is optional in the /system-status payload and every other read of it
@@ -92,8 +93,8 @@ export default function OverviewView({ token }: { token: string }) {
       </Surface>
 
       <Surface>
-        <h2 className="text-subheading">شمارنده‌ها</h2>
-        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-4">
+        <SectionHeading className="mb-3">شمارنده‌ها</SectionHeading>
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-4">
           {COUNTER_LABELS.map(([key, label]) =>
             counters[key] === undefined ? null : (
               <div key={key}>

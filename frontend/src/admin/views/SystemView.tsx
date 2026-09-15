@@ -3,6 +3,7 @@ import { DomainStatus } from "../../components/ui/domain-status"
 import { ErrorText } from "../../components/ui/error-text"
 import { Surface } from "../../components/ui/surface"
 import { faNum, faDateTime, faRelative, humanSize } from "../../lib/dates"
+import { LoadingPanel, SectionHeading } from "../page-layout"
 import { useLive, Retry } from "../useLive"
 
 interface LiveStatus {
@@ -50,7 +51,7 @@ export default function SystemView({ token }: { token: string }) {
   const { data, error, updatedAt, reload } = useLive<LiveStatus>(token, "/system-status", 15_000)
 
   if (error && !data) return <Retry message={error} onRetry={() => void reload()} />
-  if (!data) return <p className="text-caption text-muted-foreground">در حال دریافت وضعیت…</p>
+  if (!data) return <LoadingPanel label="در حال دریافت وضعیت سامانه…" />
 
   const jobRows = Object.entries(data.jobs.by_status ?? {})
 
@@ -77,8 +78,8 @@ export default function SystemView({ token }: { token: string }) {
 
       <div className="grid gap-3 lg:grid-cols-3">
         <Surface>
-          <h2 className="text-subheading">سرور برنامه</h2>
-          <dl className="mt-3 grid gap-2 text-caption">
+          <SectionHeading className="mb-3">سرور برنامه</SectionHeading>
+          <dl className="grid gap-2 text-caption">
             <Row label="محیط اجرا" value={<span dir="ltr">{data.environment ?? "—"}</span>} />
             <Row label="مدت کارکرد" value={faRelative(uptimeToIso(data.uptime_seconds))} />
             <Row label="شناسهٔ فرایند" value={<span data-numeric dir="ltr">{data.process?.pid ?? "—"}</span>} />
@@ -97,8 +98,8 @@ export default function SystemView({ token }: { token: string }) {
         </Surface>
 
         <Surface>
-          <h2 className="text-subheading">پایگاه داده</h2>
-          <dl className="mt-3 grid gap-2 text-caption">
+          <SectionHeading className="mb-3">پایگاه داده</SectionHeading>
+          <dl className="grid gap-2 text-caption">
             <Row
               label="وضعیت"
               value={
@@ -127,8 +128,8 @@ export default function SystemView({ token }: { token: string }) {
         </Surface>
 
         <Surface>
-          <h2 className="text-subheading">فضای ذخیره‌سازی</h2>
-          <dl className="mt-3 grid gap-2 text-caption">
+          <SectionHeading className="mb-3">فضای ذخیره‌سازی</SectionHeading>
+          <dl className="grid gap-2 text-caption">
             <Row label="مسیر" value={<span className="mono" dir="ltr">{data.host?.disk?.root ?? "—"}</span>} />
             <Row label="فضای کل" value={<span data-numeric>{humanSize(Number(data.host?.disk?.total_bytes ?? 0))}</span>} />
             <Row
@@ -155,15 +156,15 @@ export default function SystemView({ token }: { token: string }) {
       </div>
 
       <Surface>
-        <h2 className="text-subheading">صف پردازش</h2>
-        <p className="mt-2 text-caption">
+        <SectionHeading className="mb-3">صف پردازش</SectionHeading>
+        <p className="text-caption">
           کارهای در جریان:{" "}
           <span data-numeric data-testid="jobs-open" className="font-bold">
             {faNum(data.jobs.open)}
           </span>
         </p>
         {jobRows.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {jobRows.map(([status, count]) => (
               <span key={status} className="flex items-center gap-1.5">
                 <DomainStatus domain="job" value={status} />
@@ -177,8 +178,8 @@ export default function SystemView({ token }: { token: string }) {
       </Surface>
 
       <Surface>
-        <h2 className="text-subheading">سرویس‌های وابسته</h2>
-        <dl className="mt-3 grid gap-2 text-caption sm:grid-cols-3">
+        <SectionHeading className="mb-3">سرویس‌های وابسته</SectionHeading>
+        <dl className="grid gap-2 text-caption sm:grid-cols-3">
           <Row label="مدل زبانی" value={<span className="mono" dir="ltr">{data.llm_provider}</span>} />
           <Row label="پیامک" value={<span className="mono" dir="ltr">{data.sms_provider}</span>} />
           <Row label="جست‌وجوی معنایی" value={<span className="mono" dir="ltr">{data.embedding_provider}</span>} />

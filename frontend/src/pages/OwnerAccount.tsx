@@ -138,7 +138,7 @@ export default function OwnerAccount({
             <div className="flex" dir="ltr">
               <span
                 aria-hidden
-                className="flex select-none items-center justify-center rounded-control border border-border border-e-0 bg-secondary px-3 text-sm font-bold text-muted-foreground"
+                className="flex select-none items-center justify-center rounded-control border border-border border-e-0 bg-secondary px-3 text-body font-bold text-muted-foreground"
               >
                 +۹۸
               </span>

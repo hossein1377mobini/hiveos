@@ -93,14 +93,14 @@ export default function RegisterOrganization({
                 maxLength={100}
                 className={cn(nameInvalid && "border-error focus:ring-error-bg")}
               />
-              <div className="mt-[5px] text-xs text-muted-foreground">بین ۳ تا ۱۰۰ کاراکتر.</div>
+              <div className="mt-[5px] text-caption text-muted-foreground">بین ۳ تا ۱۰۰ کاراکتر.</div>
             </Field>
             <div className="flex gap-4">
               <Field label="صنعت" required className="min-w-0 flex-1">
                 <Select value={industry} onValueChange={setIndustry}>
                   <SelectTrigger
                     aria-label="صنعت"
-                    className="h-[42px] w-full rounded-control border-border bg-card px-[13px] text-sm text-foreground"
+                    className="h-[42px] w-full rounded-control border-border bg-card px-[13px] text-body text-foreground"
                   >
                     <SelectValue placeholder="انتخاب کنید" />
                   </SelectTrigger>
@@ -119,7 +119,7 @@ export default function RegisterOrganization({
                 <Select value={size} onValueChange={setSize}>
                   <SelectTrigger
                     aria-label="اندازه سازمان"
-                    className="h-[42px] w-full rounded-control border-border bg-card px-[13px] text-sm text-foreground"
+                    className="h-[42px] w-full rounded-control border-border bg-card px-[13px] text-body text-foreground"
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -192,8 +192,8 @@ export default function RegisterOrganization({
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
                   </span>
-                  <div className="text-sm font-bold text-foreground">آنلاین</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
+                  <div className="text-body font-bold text-foreground">آنلاین</div>
+                  <div className="mt-0.5 text-caption text-muted-foreground">
                     اتصال به هوش از طریق سرویس ابری؛ اتصال و کلیدها سمت HiveOS مدیریت می‌شود.
                   </div>
                 </div>
@@ -201,8 +201,8 @@ export default function RegisterOrganization({
                   <span className="absolute end-2 top-2 rounded-full border border-warning bg-warning-bg px-2 py-px text-micro font-bold text-warning">
                     به‌زودی (نسخه ۰.۳)
                   </span>
-                  <div className="text-sm font-bold text-foreground">محلی</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">اجرای هوش روی سرور خودتان</div>
+                  <div className="text-body font-bold text-foreground">محلی</div>
+                  <div className="mt-0.5 text-caption text-muted-foreground">اجرای هوش روی سرور خودتان</div>
                 </div>
               </div>
             </Field>

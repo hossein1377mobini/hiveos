@@ -4,9 +4,9 @@ import { BotIcon, ChevronLeftIcon, RefreshCwIcon } from "lucide-react"
 import { Button } from "../../components/ui/button"
 import { Surface } from "../../components/ui/surface"
 import { EmptyState } from "../../components/ui/empty-state"
-import { Skeleton } from "../../components/ui/skeleton"
 import { BarChart, KpiTile } from "../../components/ui/chart"
 import { faDateTime, faNum } from "../../lib/dates"
+import { LoadingPanel, SectionHeading } from "../page-layout"
 import { Retry, useLive } from "../useLive"
 
 /**
@@ -22,6 +22,14 @@ import { Retry, useLive } from "../useLive"
  *
  * Polls every 30s. The overview runs four aggregate queries, and agent memory
  * only changes on chat turns, so a tighter interval would buy nothing.
+ *
+ * Persona and the tool allowlist are NOT this agent's own settings any more.
+ * They are the organization-wide "agent" setting, and the admin detail here
+ * reads columns off the row, which still hold whatever a user set before the
+ * contract changed. So the detail panel labels them as policy in force and
+ * says where they are actually edited, rather than presenting a stale column
+ * as if it were the user's live choice. The memory list and the invocation
+ * trace stay exactly as they were: those are genuinely per-user.
  *
  * Section headings are h2, not h3: the shell already renders the workspace
  * name as the page h1, and skipping to h3 is a heading-order violation.
@@ -89,6 +97,12 @@ interface AgentDetailPayload {
     organization_name: string | null
     username: string | null
     display_name: string
+    /**
+     * Both of these are the row's stored columns, not a statement of current
+     * policy: the persona the runtime uses comes from the organization setting
+     * and the allowlist is reported by GET /agent/tools. Displayed as "what is
+     * in force and where it is set", never as something this user chose.
+     */
     persona: string
     allowed_tools: string[]
     status: string
@@ -145,7 +159,7 @@ function AgentFleet({
     void reload()
   }, [reload])
 
-  if (loading && !data) return <Skeleton className="h-64 w-full" />
+  if (loading && !data) return <LoadingPanel label="در حال دریافت ایجنت‌ها…" />
   if (error && !data) return <Retry message={error} onRetry={refresh} />
   if (!data) return null
 
@@ -168,14 +182,14 @@ function AgentFleet({
 
       {busiest.length > 0 && (
         <Surface className="p-4">
-          <h2 className="mb-3 text-subheading">پرکارترین ایجنت‌ها</h2>
+          <SectionHeading className="mb-3">پرکارترین ایجنت‌ها</SectionHeading>
           <BarChart data={busiest} valueLabel="فراخوانی" />
         </Surface>
       )}
 
       <Surface className="overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h2 className="text-subheading">فهرست ایجنت‌ها</h2>
+          <SectionHeading>فهرست ایجنت‌ها</SectionHeading>
           <Button variant="ghost" size="sm" onClick={refresh}>
             <RefreshCwIcon aria-hidden className="size-4" />
             <span className="ms-1.5">به‌روزرسانی</span>
@@ -266,15 +280,15 @@ function AgentDetail({
           <span className="ms-1">بازگشت به فهرست</span>
         </Button>
         {loading && !data ? (
-          <Skeleton className="h-24 w-full" />
+          <LoadingPanel label="در حال دریافت ایجنت…" />
         ) : error && !data ? (
           <Retry message={error} onRetry={refresh} />
         ) : data ? (
           <Surface className="p-4">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h2 className="text-subheading">
+              <SectionHeading>
                 {agentLabel({ ...data.agent, id: agentId })}
-              </h2>
+              </SectionHeading>
               <span className="text-caption text-muted-foreground">
                 {data.agent.organization_name || "—"}
               </span>
@@ -296,7 +310,7 @@ function AgentDetail({
                 </dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">ابزارهای مجاز</dt>
+                <dt className="text-muted-foreground">ابزارهای مجاز (سیاست سازمان)</dt>
                 <dd className="text-muted-foreground">
                   {data.agent.allowed_tools.length === 0
                     ? "همهٔ ابزارها"
@@ -304,21 +318,35 @@ function AgentDetail({
                 </dd>
               </div>
             </dl>
-            {data.agent.persona && (
-              <div className="mt-3 border-t border-border pt-3">
-                <div className="text-caption text-muted-foreground">شخصیت تعریف‌شده</div>
-                <p className="mt-1 whitespace-pre-wrap text-caption text-muted-foreground">
-                  {data.agent.persona}
-                </p>
-              </div>
-            )}
+            <div className="mt-3 border-t border-border pt-3">
+              <h3 className="text-caption font-bold text-muted-foreground">
+                سیاست سازمانی در جریان
+              </h3>
+              <p className="mt-1 text-micro leading-relaxed text-muted-foreground">
+                شخصیت و فهرست ابزارهای دستیار برای همهٔ کاربران سازمان یکسان است و
+                مدیر سازمان آن را در پنل مدیریت، در «تنظیمات ایجنت سازمان» — همراه با
+                تنظیمات پاسخ‌دهی هوش مصنوعی — تعیین می‌کند. آنچه اینجا می‌بینید همان
+                تصمیم سازمانی است، نه تنظیم شخصی این کاربر؛ چیزی که برای این ایجنت
+                جداگانه قابل تغییر نیست.
+              </p>
+              {data.agent.persona && (
+                <div className="mt-3">
+                  <div className="text-caption text-muted-foreground">
+                    شخصیت ثبت‌شده برای این ایجنت
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap text-caption text-muted-foreground">
+                    {data.agent.persona}
+                  </p>
+                </div>
+              )}
+            </div>
           </Surface>
         ) : null}
       </div>
 
       {data && data.tools.length > 0 && (
         <Surface className="p-4">
-          <h2 className="mb-3 text-subheading">کاربرد ابزارها</h2>
+          <SectionHeading className="mb-3">کاربرد ابزارها</SectionHeading>
           <div className="overflow-x-auto">
             <table className="w-full text-caption">
               <thead>
@@ -361,7 +389,7 @@ function AgentDetail({
       )}
 
       <Surface className="p-4">
-        <h2 className="mb-3 text-subheading">حافظهٔ ایجنت</h2>
+        <SectionHeading className="mb-3">حافظهٔ ایجنت</SectionHeading>
         {!data ? null : data.memories.length === 0 ? (
           <EmptyState
             title="حافظهٔ این ایجنت خالی است"
@@ -390,7 +418,7 @@ function AgentDetail({
 
       {data && data.recent_invocations.length > 0 && (
         <Surface className="p-4">
-          <h2 className="mb-3 text-subheading">آخرین فراخوانی‌ها</h2>
+          <SectionHeading className="mb-3">آخرین فراخوانی‌ها</SectionHeading>
           <ul className="grid gap-1">
             {data.recent_invocations.map((row) => (
               <li

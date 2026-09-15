@@ -91,9 +91,35 @@ def _is_scannable(rel_path: str) -> bool:
     return _manifest_extension(rel_path) in ALLOWED_EXTENSIONS
 
 
+async def _matching_source(
+    session: AsyncSession, organization_id, user_id, path_label: str
+) -> KnowledgeSource | None:
+    """The caller's already-registered folder with EXACTLY this path, if any.
+
+    Unlike the server-side scanner there is nothing to validate: the path is on
+    the owner's machine, so it is compared as a label. Comparing it (instead of
+    "the caller's one folder") is what allows several folders per user while
+    still making a repeated registration of the same folder idempotent.
+    """
+    owner_clause = (
+        KnowledgeSource.user_id == user_id
+        if user_id is not None
+        else KnowledgeSource.user_id.is_(None)
+    )
+    return (
+        await session.execute(
+            select(KnowledgeSource).where(
+                KnowledgeSource.organization_id == organization_id,
+                owner_clause,
+                KnowledgeSource.path_label == path_label,
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def _ready_brain(
     session: AsyncSession, organization: Organization
-) -> tuple[KnowledgeSource | None, OrganizationBrain]:
+) -> OrganizationBrain:
     brain = (
         await session.execute(
             select(OrganizationBrain).where(OrganizationBrain.organization_id == organization.id)
@@ -103,23 +129,31 @@ async def _ready_brain(
         raise ApiError(
             409, "KNOWLEDGE_BRAIN_NOT_READY", "Complete the previous onboarding steps first."
         )
-    source = (
-        await session.execute(
-            select(KnowledgeSource).where(KnowledgeSource.organization_id == organization.id)
-        )
-    ).scalar_one_or_none()
-    return source, brain
+    return brain
 
 
 async def register_client_folder(
-    session: AsyncSession, organization: Organization, path_text: str
+    session: AsyncSession, organization: Organization, path_text: str, user_id=None
 ) -> dict:
-    """US-007: register the folder the owner picked on their own computer."""
-    source, brain = await _ready_brain(session, organization)
+    """US-007: register the folder this user picked on their own computer.
+
+    PO request 2026-09: a user may define SEVERAL folders, so this CREATES a new
+    source for a path that is not already registered by the caller. Only the
+    exact same path for the same user is reused (pressing the button twice is
+    not a request for two folders). Previously it looked the caller up by
+    user_id and overwrote their single folder, which made a second folder
+    impossible.
+
+    user_id=None still keeps the organization-wide folder, and there may be
+    several of those too.
+    """
+    brain = await _ready_brain(session, organization)
     label = normalize_client_path(path_text)
+    source = await _matching_source(session, organization.id, user_id, label)
     if source is None:
         source = KnowledgeSource(
             organization_id=organization.id,
+            user_id=user_id,
             workspace_id=brain.workspace_id,
             brain_id=brain.id,
             source_type="client_folder",
@@ -128,18 +162,20 @@ async def register_client_folder(
         )
         session.add(source)
         await session.flush()
+        reused = False
     else:
-        # v0.1 keeps a single folder per organization; re-picking updates it.
+        # Same folder, same user: update the label in place.
         source.source_type = "client_folder"
         source.path = label
         source.path_label = label
+        reused = True
     await record_audit(
         session,
         "knowledge-source.registered",
         organization_id=organization.id,
         entity_type="knowledge_source",
         entity_id=source.id,
-        detail={"path_label": label, "source_type": "client_folder"},
+        detail={"path_label": label, "source_type": "client_folder", "reused": reused},
     )
     return {
         "id": source.id,
@@ -150,24 +186,48 @@ async def register_client_folder(
         "scan_interval_minutes": source.scan_interval_minutes,
         "last_scanned_at": source.last_scanned_at,
         "file_state": source.discovered_files,
+        "reused": reused,
     }
 
 
 async def sync_client_manifest(
-    session: AsyncSession, organization: Organization, entries: list[dict]
+    session: AsyncSession,
+    organization: Organization,
+    entries: list[dict],
+    source_id=None,
+    user_id=None,
 ) -> dict:
-    """Reconcile the client's file manifest into KnowledgeAsset rows."""
+    """Reconcile the client's file manifest into KnowledgeAsset rows.
+
+    source_id is EXPLICIT now (PO request 2026-09: a user may hold several
+    folders). The old code took the organization's single source with
+    scalar_one_or_none(), which raised MultipleResultsFound the moment a second
+    folder existed - and if it had not, it would have reconciled every folder's
+    files into whichever folder happened to come back first. When the client
+    does not name one (older client builds), the caller's own folder is used,
+    with the organization-wide one as fallback.
+    """
     if len(entries) > MAX_MANIFEST_ENTRIES:
         raise ApiError(
             400,
             "MANIFEST_TOO_LARGE",
             "The folder holds more files than this version can sync at once.",
         )
-    source = (
-        await session.execute(
-            select(KnowledgeSource).where(KnowledgeSource.organization_id == organization.id)
-        )
-    ).scalar_one_or_none()
+    if source_id is not None:
+        source = await session.get(KnowledgeSource, source_id)
+        if source is None or source.organization_id != organization.id:
+            raise ApiError(
+                404, "KNOWLEDGE_SOURCE_NOT_FOUND", "No knowledge source registered."
+            )
+        # A caller may only sync their own folder, or an org-wide one.
+        if source.user_id is not None and source.user_id != user_id:
+            raise ApiError(
+                404, "KNOWLEDGE_SOURCE_NOT_FOUND", "No knowledge source registered."
+            )
+    else:
+        from backend.knowledge.assets import _active_source
+
+        source = await _active_source(session, organization.id, user_id)
     if source is None:
         raise ApiError(404, "KNOWLEDGE_SOURCE_NOT_FOUND", "No knowledge source registered.")
     if source.status == "disabled":
@@ -231,6 +291,10 @@ async def sync_client_manifest(
                 size_bytes=size,
                 extension=_manifest_extension(rel_path),
                 status="queued",
+                # A file found in a user's folder belongs to that user. Without
+                # this every discovered file would be org-visible and readable by
+                # every colleague, which is exactly the leak this closes.
+                owner_id=source.user_id,
                 rel_path=rel_path,
                 file_fingerprint=fingerprint,
                 discovered_at=now,
@@ -318,19 +382,23 @@ async def sync_client_manifest(
 
 
 async def upload_client_file(
-    session: AsyncSession, organization: Organization, asset_id, upload
+    session: AsyncSession, organization: Organization, asset_id, upload, user_id=None
 ) -> dict:
     """US-201 FR-009 parity: store the bytes the client sent for one manifest entry.
 
     US-1606: the declared size is checked BEFORE the body is buffered, so an
     oversized file is refused instead of being read into memory first.
     """
-    from pathlib import Path
 
     from backend.knowledge.assets import _validate_file
 
     asset = await session.get(KnowledgeAsset, asset_id)
     if asset is None or asset.organization_id != organization.id:
+        raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "This document was not found.")
+    # The client posts bytes for an asset id it learned from the manifest. The id
+    # is guessable, so without this check a member of the organization could
+    # overwrite a colleague's file content by posting to their asset id.
+    if asset.owner_id is not None and asset.owner_id != user_id:
         raise ApiError(404, "KNOWLEDGE_ASSET_NOT_FOUND", "This document was not found.")
     name = asset.name or "file"
 
@@ -348,8 +416,13 @@ async def upload_client_file(
         raise ApiError(400, "UPLOAD_EMPTY", "The file is empty.")
     extension = _validate_file(name, len(content))
 
-    target_dir = Path(get_settings().storage_root) / "uploads" / str(organization.id)
-    target_dir.mkdir(parents=True, exist_ok=True)
+    # One subfolder per source (PO request 2026-09: several folders per user).
+    # Without it, two folders holding a same-named file would write to one path.
+    from backend.knowledge.assets import _storage_dir
+
+    target_dir = _storage_dir(
+        organization.id, asset.owner_id, source_id=asset.source_id
+    )
     target = target_dir / f"{asset.id}.{extension}"
     target.write_bytes(content)
 

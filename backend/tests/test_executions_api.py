@@ -141,7 +141,10 @@ def test_timeout_marks_execution_failed(client, monkeypatch):
     from backend.config import get_settings
     from backend.knowledge import search as search_module
 
-    async def slow_search(session, organization_id, query, top_k=None):
+    # **kwargs, not a fixed signature: the real semantic_search takes user_id so
+    # results are scoped to the caller's folder, and a stub that omits it turns
+    # this test into a TypeError that looks like a generic 500.
+    async def slow_search(session, organization_id, query, top_k=None, **kwargs):
         await asyncio.sleep(0.5)
         return {"results": []}
 

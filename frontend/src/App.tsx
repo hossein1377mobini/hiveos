@@ -22,12 +22,11 @@ const RegisterOrganization = lazy(() => import("./pages/RegisterOrganization"))
 const OwnerAccount = lazy(() => import("./pages/OwnerAccount"))
 const OtpVerify = lazy(() => import("./pages/OtpVerify"))
 const Onboarding = lazy(() => import("./pages/Onboarding"))
-const Wallet = lazy(() => import("./pages/Wallet"))
+const Wallet = lazy(() => import("./pages/WalletPage"))
 const Usage = lazy(() => import("./pages/Usage"))
 const Chat = lazy(() => import("./pages/Chat"))
 const Knowledge = lazy(() => import("./pages/Knowledge"))
 const Agent = lazy(() => import("./pages/Agent"))
-const Subscription = lazy(() => import("./pages/Subscription"))
 const AdminApp = lazy(() => import("./admin/AdminApp"))
 
 /**
@@ -172,14 +171,14 @@ export default function App() {
           </RequireSession>
         }
       />
-      <Route
-        path="/subscription"
-        element={
-          <RequireSession>
-            <ShellRoutes screen="subscription" />
-          </RequireSession>
-        }
-      />
+      {/*
+        Wallet and Subscription are one page now (PO 2026-09): "صفحه اشتراک و
+        کیف پول رو هم با هم ادغام کن". The old address still resolves - it
+        redirects rather than 404s, so bookmarks, in-app links and the e2e route
+        sweep keep working. The alias component at pages/Subscription.tsx also
+        still renders the merged page, so either path is safe.
+      */}
+      <Route path="/subscription" element={<Navigate to="/wallet" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </Suspense>
@@ -228,7 +227,7 @@ function OwnerRoute() {
     return (
       <CenteredAuth>
         <Surface className="mx-auto max-w-md text-center">
-          <h1 className="text-heading">ادامهٔ ثبت‌نام از این مرورگر ممکن نیست</h1>
+          <h1 className="text-title">ادامهٔ ثبت‌نام از این مرورگر ممکن نیست</h1>
           <p className="mt-2 text-caption text-muted-foreground">
             شناسهٔ سازمان در این مرورگر موجود نیست. لطفاً فرایند ساخت سازمان را از ابتدا
             آغاز کنید.
@@ -343,7 +342,7 @@ function BootstrapRoute() {
     return (
       <CenteredAuth>
         <Surface className="mx-auto max-w-md text-center">
-          <h1 className="text-heading">دریافت وضعیت سازمان ناموفق بود</h1>
+          <h1 className="text-title">دریافت وضعیت سازمان ناموفق بود</h1>
           <p className="mt-2 text-caption text-muted-foreground">
             اتصال به سرور برقرار نشد. صفحه را دوباره بارگذاری کنید.
           </p>
@@ -359,7 +358,7 @@ function BootstrapRoute() {
     return (
       <CenteredAuth>
         <Surface className="mx-auto max-w-md">
-          <h1 className="text-heading text-error">ثبت‌نام این سازمان منقضی شد</h1>
+          <h1 className="text-title text-error">ثبت‌نام این سازمان منقضی شد</h1>
           <p className="mt-2 text-caption text-muted-foreground">
             سازمان در بازهٔ مجاز تکمیل نشد. برای ادامه، فرایند ساخت سازمان را از ابتدا
             آغاز کنید.
@@ -385,7 +384,7 @@ function BootstrapRoute() {
       return (
         <CenteredAuth>
           <Surface className="mx-auto max-w-md text-center">
-            <h1 className="text-heading">ادامهٔ ثبت‌نام از این مرورگر ممکن نیست</h1>
+            <h1 className="text-title">ادامهٔ ثبت‌نام از این مرورگر ممکن نیست</h1>
             <p className="mt-2 text-caption text-muted-foreground">
               شناسهٔ سازمان در این مرورگر موجود نیست. لطفاً فرایند ساخت سازمان را از ابتدا
               آغاز کنید.
@@ -425,7 +424,7 @@ function BootstrapRoute() {
     return (
       <AppShell identity={state.identity}>
         <Surface className="mx-auto max-w-xl">
-          <h1 className="text-heading">راه‌اندازی سازمان کامل شد</h1>
+          <h1 className="text-title">راه‌اندازی سازمان کامل شد</h1>
           <p className="mt-2 text-caption text-muted-foreground">
             از فهرست کنار صفحه، گفتگو با هوش سازمان را آغاز کنید.
           </p>
@@ -456,11 +455,9 @@ function BootstrapRoute() {
  * that the address bar does not name.
  */
 function ShellRoutes({ screen }: { screen: NavId }) {
-  const navigate = useNavigate()
   // The identity the header shows. Read from the shared context so the five
   // sibling routes all get it without the router threading it through. [D10/H1]
   const identity = useSessionIdentity()
-  const go = (id: NavId) => navigate("/" + id)
 
   return (
     <AppShell identity={identity} flush={screen === "chat"}>
@@ -472,9 +469,10 @@ function ShellRoutes({ screen }: { screen: NavId }) {
         <Agent />
       ) : screen === "knowledge" ? (
         <Knowledge />
-      ) : screen === "subscription" ? (
-        <Subscription onNavigate={(id) => go(id as NavId)} />
       ) : (
+        // "subscription" deliberately has no branch: it redirects to /wallet
+        // above, so this screen can only be reached through that redirect and
+        // renders the same merged page.
         <Usage />
       )}
     </AppShell>
