@@ -149,6 +149,21 @@ class Settings(BaseSettings):
     # DATABASE_URL must now fail loudly at startup instead of silently targeting
     # localhost; dev keeps the local default (review round 2 intent, now enforced).
     database_url: str | None = None
+    # Connection pool sizing. SQLAlchemy's defaults (5 + 10 overflow) are far too
+    # small here because a request holds its connection for its WHOLE lifetime,
+    # and an interactive request runs local ONNX inference inside that window -
+    # measured at 6-9 s per search on this CPU-only host. With 20 concurrent
+    # users the pool was exhausted and even a pure-SQL read (/wallet) was
+    # answering in 12 s and timing out at the edge with 524.
+    #
+    # PostgreSQL's own max_connections is the upper bound, and on this staging
+    # database it is 60 with the audit engine also connecting (NullPool), so
+    # 20 + 10 = 30 for the request pool leaves real headroom rather than
+    # trading a pool-exhaustion stall for "too many clients already".
+    db_pool_size: int = 20
+    db_max_overflow: int = 10
+    db_pool_timeout_seconds: int = 30
+    db_pool_recycle_seconds: int = 1800
     # NB-1 (final review): per-IP rate limiting only works if the api knows the real
     # client. Comma-separated trusted proxies (IPs/CIDRs).
     #

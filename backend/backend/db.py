@@ -16,7 +16,19 @@ from sqlalchemy.pool import NullPool
 from backend.config import get_settings
 
 _settings = get_settings()
-engine = create_async_engine(_settings.database_url, pool_pre_ping=True)
+# An explicit pool size, because the default is 5 + 10 overflow and a request
+# holds its connection until the response is built. Search and chat run local
+# ONNX inference inside that window (6-9 s on the staging CPU), so the default
+# pool exhausts at roughly 15 concurrent users and every later request waits -
+# including cheap ones, which then look slow for no reason of their own.
+engine = create_async_engine(
+    _settings.database_url,
+    pool_pre_ping=True,
+    pool_size=_settings.db_pool_size,
+    max_overflow=_settings.db_max_overflow,
+    pool_timeout=_settings.db_pool_timeout_seconds,
+    pool_recycle=_settings.db_pool_recycle_seconds,
+)
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 # Rare-event writers (OTP failed attempts / delivery failures) run in their own
