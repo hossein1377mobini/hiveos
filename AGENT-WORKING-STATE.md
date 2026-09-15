@@ -159,7 +159,8 @@
 
 ## زیرساخت و دسترسی (2026-09-10)
 
-- سرورها: staging 193.93.169.136 / prod 193.93.169.204 — SSH با کلید `C:\Users\Hossein Mobini\.ssh\hiveos_key` + میان‌برهای config `hiveos-staging`/`hiveos-prod`. PO سرورها را خاموش نگه می‌دارد؛ فقط حین push به main لازم‌اند.
+- سرورها: فقط **staging** روی `193.93.169.136` — SSH با کلید `C:\Users\Hossein Mobini\.ssh\hiveos_key` + میان‌بر config `hiveos-staging`. PO سرور را خاموش نگه می‌دارد؛ فقط حین push به main لازم است.
+  - **تأیید PO (2026-09-16): محیط prod وجود ندارد.** هدف انتشار فقط همین staging است. ورودی `hiveos-prod` / `193.93.169.204` که قبلاً اینجا و در `~/.ssh/config` ثبت شده بود منقضی است و نباید مبنای هیچ تصمیمی باشد.
 - استک staging: db (project `hiveos`) + api (project `hiveos-app`، external network `hiveos_default`)؛ nginx میزبان :80 → 127.0.0.1:8100؛ `.previous-tag` = `ci-149cf43...`.
 - Deploy path: push main → CI (backend job) → build image `hiveos/api:ci-<sha>` → save/scp/load → `remote-deploy.sh` (env از secret سرور، alembic، healthcheck :8100+:80، rollback خودکار). تنها workflow: `ci-deploy.yml`.
 - Secrets ریپو (ست شده): `STAGING_HOST`، `STAGING_SSH_KEY`.
