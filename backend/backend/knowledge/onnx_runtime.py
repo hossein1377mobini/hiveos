@@ -191,27 +191,46 @@ async def embed(texts: list[str]) -> list[list[float]]:
 async def embed_background(texts: list[str]) -> list[list[float]]:
     """Embed for the ingestion worker: yields the semaphore to user traffic.
 
-    Identical math to embed(); the difference is that the worker waits here
-    while an interactive inference is pending, so a large document drains
-    around the user's searches instead of in front of them.
+    Identical math to embed(), but the semaphore is taken ONE BATCH AT A TIME.
+
+    The earlier version took it once around every batch and released only when
+    the whole document was done. The priority check in front of it therefore
+    ran a single time per document, and a 2000-chunk file held the inference
+    slots for minutes - so a user's search queued behind it. Measured on
+    staging with ingestion active: a lone search took 15.5 s and search
+    throughput was 0.13/s, with the API pinned at 216% CPU by the worker.
+
+    Taking the semaphore per batch bounds how long interactive traffic can be
+    held up to one batch (about a quarter-second warm) instead of one document,
+    and lets the priority check run between every batch.
     """
     from backend.config import get_settings
 
     settings = get_settings()
-    delay = 0.05
-    while interactive_inference_pending():
-        # Bounded backoff: long enough to let the interactive call take the
-        # semaphore, short enough that ingestion keeps moving.
-        await asyncio.sleep(delay)
-        delay = min(delay * 2, 0.5)
-    async with _get_semaphore():
-        return await asyncio.to_thread(
-            _embed_sync,
-            settings.embedding_onnx_dir,
-            texts,
-            settings.embedding_onnx_max_tokens,
-            settings.local_inference_batch_size,
-        )
+    if not texts:
+        return []
+
+    batch = max(1, settings.local_inference_batch_size)
+    vectors: list[list[float]] = []
+    for start in range(0, len(texts), batch):
+        chunk = texts[start : start + batch]
+        delay = 0.05
+        while interactive_inference_pending():
+            # Bounded backoff: long enough to let the interactive call take the
+            # semaphore, short enough that ingestion keeps moving.
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 0.5)
+        async with _get_semaphore():
+            vectors.extend(
+                await asyncio.to_thread(
+                    _embed_sync,
+                    settings.embedding_onnx_dir,
+                    chunk,
+                    settings.embedding_onnx_max_tokens,
+                    batch,
+                )
+            )
+    return vectors
 
 
 async def score(query: str, documents: list[str]) -> list[float]:

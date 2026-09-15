@@ -36,26 +36,49 @@ QUESTIONS = [
 ]
 NOISE = ["قیمت بیت‌کوین امروز چقدر است؟", "هوای تهران فردا چطور است؟"]
 
+# One token shared by every simulated user, fetched on the first login.
+#
+# /auth/login is deliberately rate limited to 10/min per client IP, and locust
+# runs from a single machine - so with 20 users only the first 10 could log in
+# and all 2,150 downstream "failures" were 401s from users that never held a
+# token. That said nothing about the server under load. In production the same
+# per-IP limit is worth watching: an office behind one NAT address shares it.
+_TOKEN: list[str] = []
+
+
+def _login(client, name: str) -> dict[str, str]:
+    if _TOKEN:
+        return {"Authorization": f"Bearer {_TOKEN[0]}"}
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "username": os.environ.get("HIVEOS_LOAD_USER", ""),
+            "password": os.environ.get("HIVEOS_LOAD_PASS", ""),
+        },
+        name="/api/v1/auth/login",
+    )
+    if response.status_code == 200:
+        token = response.json()["data"]["session"]["token"]
+        _TOKEN.append(token)
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
 
 class HiveOSUser(HttpUser):
     """Read-side load: the profile that finds the server's ceiling."""
 
+    # Locust collects every HttpUser subclass in the module, so both profiles
+    # ran on every invocation regardless of HIVEOS_LOAD_MODE - a "read" run
+    # silently opened chat sessions and spent credits, and the chat turns
+    # competing for the same CPU inflated every read-side percentile. The
+    # per-class weight below is what actually selects a profile.
+    weight = 1 if MODE == "read" else 0
+
     wait_time = between(1, 3)
 
     def on_start(self) -> None:
-        self.headers: dict[str, str] = {}
         self.session_id: str | None = None
-        user = os.environ.get("HIVEOS_LOAD_USER", "")
-        password = os.environ.get("HIVEOS_LOAD_PASS", "")
-        response = self.client.post(
-            "/api/v1/auth/login",
-            json={"username": user, "password": password},
-            name="/api/v1/auth/login",
-        )
-        if response.status_code == 200:
-            self.headers = {
-                "Authorization": f"Bearer {response.json()['data']['session']['token']}"
-            }
+        self.headers = _login(self.client, "HiveOSUser")
 
     @task(6)
     def search(self) -> None:
@@ -84,23 +107,14 @@ class HiveOSUser(HttpUser):
 class HiveOSChatUser(HttpUser):
     """Chat-side load: a real RAG turn, which costs credit and takes seconds."""
 
+    weight = 1 if MODE == "chat" else 0
+
     wait_time = between(3, 8)
 
     def on_start(self) -> None:
-        self.headers: dict[str, str] = {}
         self.session_id: str | None = None
-        response = self.client.post(
-            "/api/v1/auth/login",
-            json={
-                "username": os.environ.get("HIVEOS_LOAD_USER", ""),
-                "password": os.environ.get("HIVEOS_LOAD_PASS", ""),
-            },
-            name="/api/v1/auth/login",
-        )
-        if response.status_code == 200:
-            self.headers = {
-                "Authorization": f"Bearer {response.json()['data']['session']['token']}"
-            }
+        self.headers = _login(self.client, "HiveOSChatUser")
+        if self.headers:
             created = self.client.post("/api/v1/chat/sessions", json={},
                                        headers=self.headers, name="/api/v1/chat/sessions")
             if created.status_code == 200:

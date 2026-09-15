@@ -87,3 +87,70 @@ async def test_background_embed_waits_for_the_interactive_flag_to_clear(
     assert seen == [False], (
         "background embedding proceeded while an interactive call was pending"
     )
+
+async def test_background_embed_releases_the_semaphore_between_batches(
+    monkeypatch,
+) -> None:
+    """The worker must not hold an inference slot for a whole document.
+
+    The first fix added a priority check in front of embed_background, but the
+    semaphore was still taken once around every batch, so the check ran once per
+    document. A 2000-chunk file therefore held the slots for minutes and
+    searches queued behind it - measured on staging as 15.5 s for a single lone
+    search and 0.13 searches/s, with the API at 216% CPU.
+
+    This counts the acquisitions: with N batches there must be N of them, not 1.
+    """
+    acquisitions: list[int] = []
+
+    class _FakeSemaphore:
+        async def __aenter__(self):
+            acquisitions.append(1)
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Settings:
+        embedding_provider = "onnx"
+        embedding_onnx_dir = "unused"
+        embedding_onnx_max_tokens = 8
+        local_inference_batch_size = 4
+
+    # get_settings is imported inside the function body, so the patch has to
+    # land on the defining module rather than on onnx_runtime's namespace.
+    from backend import config as config_module
+
+    monkeypatch.setattr(config_module, "get_settings", lambda: _Settings())
+    monkeypatch.setattr(onnx_runtime, "_get_semaphore", lambda: _FakeSemaphore())
+
+    # _embed_sync is called through asyncio.to_thread, so the stub must be a
+    # plain function; an async one is passed to the thread and never awaited.
+    def _fake_embed_sync(model_dir, texts, max_length, batch_size):
+        return [[0.0] for _ in texts]
+
+    monkeypatch.setattr(onnx_runtime, "_embed_sync", _fake_embed_sync)
+
+    # 10 texts at a batch size of 4 => 3 acquisitions.
+    vectors = await onnx_runtime.embed_background([f"t{i}" for i in range(10)])
+
+    assert len(vectors) == 10
+    assert len(acquisitions) == 3, (
+        "the semaphore must be taken once per batch; taking it once per document "
+        "lets ingestion hold every inference slot until the file is finished"
+    )
+
+
+async def test_background_embed_handles_an_empty_input(monkeypatch) -> None:
+    """An empty document must not take a slot or divide by a zero batch size."""
+
+    class _Settings:
+        embedding_provider = "onnx"
+        embedding_onnx_dir = "unused"
+        embedding_onnx_max_tokens = 8
+        local_inference_batch_size = 4
+
+    from backend import config as config_module
+
+    monkeypatch.setattr(config_module, "get_settings", lambda: _Settings())
+    assert await onnx_runtime.embed_background([]) == []
