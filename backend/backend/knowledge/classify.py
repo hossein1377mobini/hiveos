@@ -131,9 +131,58 @@ def extract_text(asset: KnowledgeAsset, source_path: str | None = None) -> str:
     raise ApiError(400, "REVIEW_QUEUE", "This asset type needs manual review.")
 
 
+# Bytes sampled from the head of a file when deciding whether it is really
+# text. 8 KiB is enough to see a magic number or a run of non-text bytes while
+# keeping the read cheap for the multi-megabyte uploads the API accepts.
+_TEXT_SNIFF_BYTES = 8192
+# A file is treated as binary when more than this share of the sampled bytes are
+# not valid text. Real prose in any UTF-8 language stays far below it; random
+# bytes sit near 1.0.
+_TEXT_BINARY_RATIO = 0.30
+
+
+def _looks_binary(path: Path) -> bool:
+    """True when the file's head is not text, whatever the extension claims.
+
+    A .txt that actually holds a PNG, a zip or random bytes used to be decoded
+    with errors="replace". That produced a page of U+FFFD mojibake which was then
+    embedded like any other chunk. Because garbage embeddings land near the mean
+    of the vector space they are unusually close to *every* query, so a handful
+    of them displaced the genuinely relevant chunks from the candidate pool and
+    semantic search answered "nothing found" for content that was indexed.
+    """
+    try:
+        sample = path.read_bytes()[:_TEXT_SNIFF_BYTES]
+    except OSError:
+        return False
+    if not sample:
+        return False
+    if b"\x00" in sample:
+        return True
+    try:
+        sample.decode("utf-8")
+        return False
+    except UnicodeDecodeError:
+        # Not valid UTF-8. Fall back to a byte-class ratio so that a single bad
+        # byte in an otherwise textual file (common in mixed-encoding exports)
+        # is not enough to reject it.
+        printable = sum(
+            1
+            for byte in sample
+            if 9 <= byte <= 13 or 32 <= byte <= 126 or byte >= 128
+        )
+        return (len(sample) - printable) / len(sample) > _TEXT_BINARY_RATIO
+
+
 def _extract_text_file(path: Path) -> str:
     # E: Postgres rejects NUL in text columns - a binary file that sniffs as a
     # text type made the whole worker batch answer "invalid byte sequence".
+    if _looks_binary(path):
+        raise ApiError(
+            400,
+            "EXTRACTION_FAILED",
+            "This file is not readable as text.",
+        )
     return path.read_text(encoding="utf-8", errors="replace").replace("\x00", "")
 
 

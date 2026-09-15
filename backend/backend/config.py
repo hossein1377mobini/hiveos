@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     # PO decision 2026-09-12: reranking is the single biggest quality win -
     # vector search finds candidates, a cross-encoder orders them.
     rerank_enabled: bool = True
+    # Candidates pulled from the vector index before reranking. Wider means
+    # better recall and slower search: measured on staging 2026-09-15 with real
+    # 800-character chunks (~345 tokens), the cross-encoder costs 8.9 s for 20
+    # candidates, 5.1 s for 12 and 3.5 s for 8 - on a CPU-only host that term
+    # dominates search latency and is linear in candidates. Left at the recall-
+    # first default so relevance is not traded away silently; lower it on
+    # deployments where search latency matters more than the candidate pool.
+    rerank_candidates: int = 20
     # 'onnx' = bge-reranker-v2-m3 on this server (default: no candidate text
     # leaves the host); 'remote' = the provider's /rerank endpoint.
     rerank_provider: str = Field(default="onnx", pattern="^(onnx|remote|off)$")

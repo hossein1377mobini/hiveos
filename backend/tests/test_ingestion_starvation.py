@@ -69,3 +69,22 @@ def test_cap_bounds_embedding_work_per_document() -> None:
 
     assert worst_case_chunks == cap
     assert cap <= 5000
+
+
+def test_cap_keeps_one_document_in_the_tens_of_minutes() -> None:
+    """The cap's purpose in wall-clock terms, at the measured rate.
+
+    Measured on staging 2026-09-15: ~0.7 s per chunk under load. Uncapped, a
+    4908-chunk spreadsheet was ~57 minutes and a 26 MB text file was hours -
+    all of it holding the inference semaphore that search also needs, which is
+    why a search during that window took 15 s and returned nothing.
+    """
+    settings = get_settings()
+    per_chunk_seconds = 0.7
+    worst_case_minutes = (
+        settings.knowledge_max_chunks_per_document * per_chunk_seconds / 60
+    )
+
+    assert worst_case_minutes < 30, (
+        f"one document could still cost {worst_case_minutes:.0f} minutes"
+    )

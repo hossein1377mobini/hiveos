@@ -68,7 +68,8 @@ async def semantic_search(
     # Embedding is async now: the local provider offloads to a thread, the
     # remote one awaits HTTP.
     vector = await embed_one(query)
-    pool = max(limit, RERANK_CANDIDATES if settings.rerank_enabled else limit)
+    candidates_pool = getattr(settings, "rerank_candidates", RERANK_CANDIDATES)
+    pool = max(limit, candidates_pool if settings.rerank_enabled else limit)
     rows = (
         (
             await session.execute(

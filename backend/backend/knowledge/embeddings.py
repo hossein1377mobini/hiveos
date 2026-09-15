@@ -122,5 +122,25 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
         raise ApiError(503, "EMBEDDING_UNAVAILABLE", "The embedding model is unavailable.") from exc
 
 
+async def embed_texts_background(texts: list[str]) -> list[list[float]]:
+    """Embed for ingestion: same result, but yields to interactive inference.
+
+    Only the local ONNX path has a shared semaphore to yield; the remote and
+    mock providers have nothing to contend for, so they reuse embed_texts.
+    """
+    settings = get_settings()
+    if settings.embedding_provider != "onnx":
+        return await embed_texts(texts)
+    from backend.knowledge.onnx_runtime import embed_background
+
+    try:
+        return await embed_background(texts)
+    except ApiError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("embedding model failure (background): %s", exc)
+        raise ApiError(503, "EMBEDDING_UNAVAILABLE", "The embedding model is unavailable.") from exc
+
+
 async def embed_one(text: str) -> list[float]:
     return (await embed_texts([text]))[0]

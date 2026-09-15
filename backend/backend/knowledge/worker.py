@@ -20,7 +20,7 @@ from backend.audit import record_audit
 from backend.config import get_settings
 from backend.knowledge.chunking import build_metadata, normalize_text, replace_chunks
 from backend.knowledge.classify import classify_asset, extract_text
-from backend.knowledge.embeddings import embed_texts
+from backend.knowledge.embeddings import embed_texts_background
 from backend.models import KnowledgeAsset, KnowledgeSource, ProcessingJob
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
                 batch = max(1, get_settings().local_inference_batch_size)
                 for start in range(0, len(chunk_rows), batch):
                     window = chunk_rows[start : start + batch]
-                    vectors = await embed_texts([row.content for row in window])
+                    vectors = await embed_texts_background([row.content for row in window])
                     for row, vector in zip(window, vectors, strict=True):
                         row.embedding = vector  # type: ignore[assignment]
                     await session.commit()

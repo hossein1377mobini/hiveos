@@ -15,6 +15,7 @@ stall behind the tokenizer.
 import asyncio
 import logging
 import threading
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,35 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 _models: dict[str, tuple[object, object]] = {}
 _semaphore: asyncio.Semaphore | None = None
+
+# Interactive calls (a user's search or chat turn) must not queue behind
+# background ingestion. Staging 2026-09-15: with a large document draining,
+# a query embed measured 6.96 s and a 20-candidate rerank 14.56 s, where the
+# same calls warm and uncontended measure 0.03 s and 3.8 s. The ingestion
+# worker holds the inference semaphore continuously, so every interactive
+# call waited for a whole document.
+#
+# This counter lets the worker yield between batches: it embeds one batch,
+# checks whether anything interactive is waiting, and if so sleeps before
+# taking the semaphore again. Interactive callers never wait on this - they
+# only increment it for the duration of their call.
+_interactive_waiting = 0
+
+
+@contextmanager
+def interactive_inference():
+    """Mark the enclosing inference as interactive so ingestion yields."""
+    global _interactive_waiting
+    _interactive_waiting += 1
+    try:
+        yield
+    finally:
+        _interactive_waiting -= 1
+
+
+def interactive_inference_pending() -> bool:
+    """True while an interactive inference is queued or running."""
+    return _interactive_waiting > 0
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -139,10 +169,41 @@ def _score_sync(model_dir: str, pairs: list[list[str]], max_length: int, batch_s
 
 
 async def embed(texts: list[str]) -> list[list[float]]:
-    """Embed texts with the local ONNX model; returns unit vectors."""
+    """Embed texts with the local ONNX model; returns unit vectors.
+
+    Interactive by default: callers are request handlers (search, chat) and
+    ingestion runs in a worker that uses embed_background instead.
+    """
     from backend.config import get_settings
 
     settings = get_settings()
+    with interactive_inference():
+        async with _get_semaphore():
+            return await asyncio.to_thread(
+                _embed_sync,
+                settings.embedding_onnx_dir,
+                texts,
+                settings.embedding_onnx_max_tokens,
+                settings.local_inference_batch_size,
+            )
+
+
+async def embed_background(texts: list[str]) -> list[list[float]]:
+    """Embed for the ingestion worker: yields the semaphore to user traffic.
+
+    Identical math to embed(); the difference is that the worker waits here
+    while an interactive inference is pending, so a large document drains
+    around the user's searches instead of in front of them.
+    """
+    from backend.config import get_settings
+
+    settings = get_settings()
+    delay = 0.05
+    while interactive_inference_pending():
+        # Bounded backoff: long enough to let the interactive call take the
+        # semaphore, short enough that ingestion keeps moving.
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, 0.5)
     async with _get_semaphore():
         return await asyncio.to_thread(
             _embed_sync,
@@ -159,11 +220,12 @@ async def score(query: str, documents: list[str]) -> list[float]:
 
     settings = get_settings()
     pairs = [[query, document] for document in documents]
-    async with _get_semaphore():
-        return await asyncio.to_thread(
-            _score_sync,
-            settings.rerank_onnx_dir,
-            pairs,
-            settings.rerank_onnx_max_tokens,
-            settings.local_inference_batch_size,
-        )
+    with interactive_inference():
+        async with _get_semaphore():
+            return await asyncio.to_thread(
+                _score_sync,
+                settings.rerank_onnx_dir,
+                pairs,
+                settings.rerank_onnx_max_tokens,
+                settings.local_inference_batch_size,
+            )
