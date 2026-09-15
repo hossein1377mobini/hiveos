@@ -360,6 +360,18 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         "tools_available": [spec.name for spec in active_schemas],
         "agent_id": str(agent.id),
     }
+    # Release the transaction before generation. Everything above - the RUNNING
+    # status, the retrieved context, the recalled memories - is already meant to
+    # be durable, so committing here loses nothing and ends the transaction
+    # before a call that takes seconds to tens of seconds.
+    #
+    # Holding it open across generation is what made one slow answer block
+    # unrelated requests: the session sits "idle in transaction", and every
+    # authenticated request refreshes its own row in hiveos.sessions, so a held
+    # transaction turns into lock waits for the whole API. Measured on staging:
+    # sessions idle in transaction for 3+ minutes, with the blocked statement
+    # being "UPDATE hiveos.sessions SET expires_at".
+    await session.commit()
     try:
         generated = await llm.agenerate(
             session,

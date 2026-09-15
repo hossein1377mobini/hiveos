@@ -64,6 +64,17 @@ async def semantic_search(
     # The organization Owner reads the whole organization's knowledge (PO
     # access model: collected org-wide, read by level).
     is_admin = await is_org_admin(session, organization_id, user_id)
+    # Close the read transaction before inference. The transaction this opens
+    # would otherwise stay open - "idle in transaction" - for the whole embed,
+    # which can wait up to the inference queue timeout, and a held transaction
+    # blocks every writer that needs the same rows.
+    #
+    # Measured on staging at 20 users: a search session sat idle in transaction
+    # for 3 m 16 s after a knowledge_chunks SELECT, blocking an
+    # "UPDATE hiveos.sessions SET expires_at" - and because every authenticated
+    # request refreshes its session row, that single blocked update stalled the
+    # whole API, including endpoints that do no inference at all.
+    await session.commit()
 
     # Embedding is async now: the local provider offloads to a thread, the
     # remote one awaits HTTP.
@@ -96,16 +107,33 @@ async def semantic_search(
         )
         .all()
     )
+    # Copy the columns out and release the read transaction BEFORE reranking.
+    # The same reason as above: rerank runs the cross-encoder for seconds per
+    # call, and holding the transaction across it leaves a session idle in
+    # transaction for that whole window. Plain values are copied rather than the
+    # ORM rows so nothing here depends on the session staying open.
+    recalled = [
+        (
+            row[0].asset_id,
+            row[1],
+            row[0].chunk_index,
+            row[0].content,
+            round(1.0 - float(row[2]), 4),
+        )
+        for row in rows
+    ]
+    await session.commit()
+
     # Recall stage done; order the candidates by relevance before trimming to
     # top_k. Falls back to the vector order when reranking is unavailable.
-    order = await rerank(query, [row[0].content for row in rows], limit) if rows else []
+    order = await rerank(query, [item[3] for item in recalled], limit) if recalled else []
     candidates = [
         {
-            "asset_id": rows[index][0].asset_id,
-            "asset_name": rows[index][1],
-            "chunk_index": rows[index][0].chunk_index,
-            "content": rows[index][0].content,
-            "score": round(1.0 - float(rows[index][2]), 4),
+            "asset_id": recalled[index][0],
+            "asset_name": recalled[index][1],
+            "chunk_index": recalled[index][2],
+            "content": recalled[index][3],
+            "score": recalled[index][4],
         }
         for index in order
     ]
