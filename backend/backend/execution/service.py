@@ -8,6 +8,7 @@ real reasoning/retrieval/output steps land with T-S3-4.
 
 import asyncio
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -34,6 +35,66 @@ TERMINAL = ("CANCELLED", "COMPLETED", "FAILED")
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+# An inline citation marker, as the prompt asks the model to write them. Both
+# ASCII and Persian/Arabic-Indic digits, because the model answers in Persian
+# and writes "۱" as readily as "1".
+_CITATION_MARKER = re.compile(r"\[\s*([0-9\u06F0-\u06F9\u0660-\u0669]+)\s*\]")
+
+
+def _marker_number(raw: str) -> int:
+    """Read a marker's number whichever digit set the model used."""
+    return int(raw.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")))
+
+
+def strip_unbacked_citations(text: str, citations: list[dict]) -> str:
+    """Remove citation markers that point at no source.
+
+    The prompt tells the model to write [1], [2] next to claims taken from the
+    retrieved passages. Two things make it write markers that resolve to
+    nothing:
+
+    - a follow-up question in a session whose earlier answer carried markers, so
+      the marker arrives through the conversation history even though this turn
+      retrieved nothing; and
+    - an answer that cites [7] when only five passages were retrieved.
+
+    Either way the user reads a numbered citation and finds no matching entry in
+    the source list, which is worse than no marker at all: it claims provenance
+    the system cannot show. Markers that do resolve are kept exactly as written.
+
+    Seen on staging: the question "دکتر آرمان رهگذر چه نقشی دارد؟" answered with
+    "[1] [3]" and an empty citation list, having picked the markers up from the
+    previous turn's answer in the same session.
+    """
+    valid = {str(index) for index in range(1, len(citations) + 1)}
+
+    # Dropped markers become a sentinel first rather than disappearing straight
+    # away. Markers are usually chained with the conjunction: "[1] و [3] و [5]".
+    # Deleting them outright orphans the conjunctions that only ever linked
+    # them, and the answer ends up reading "است و و ." instead.
+    sentinel = "\x00"
+
+    def _replace(match: re.Match[str]) -> str:
+        return match.group(0) if str(_marker_number(match.group(1))) in valid else sentinel
+
+    marked = _CITATION_MARKER.sub(_replace, text)
+
+    # Drop each maximal run of sentinels and conjunctions, but only when the run
+    # actually contains a dropped marker. A plain " و " in ordinary prose is not
+    # part of any such run and is left untouched.
+    runs = re.compile(f"(?:{sentinel}|\\s*و\\s*)+")
+
+    def _drop_run(match: re.Match[str]) -> str:
+        return "" if sentinel in match.group(0) else match.group(0)
+
+    cleaned = runs.sub(_drop_run, marked)
+    # What is left can still carry the space the marker occupied; tidy so the
+    # answer does not visibly show a hole.
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([.,;:!؟،؛])", r"\1", cleaned)
+    return cleaned.strip()
 
 
 def _payload(execution: AgentExecution) -> dict:
@@ -416,7 +477,7 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
     # belongs in `citations` (a field the UI renders as UI). Neither belongs
     # concatenated into prose the user must scroll past. An answer with no hits
     # still reports its provenance through an empty citation list.
-    text = llm.mask_pii(generated["text"])
+    text = strip_unbacked_citations(llm.mask_pii(generated["text"]), citations)
     # US-1201/1202 metering: usage rides on the execution row.
     execution.usage = {
         "provider": generated["provider"],
