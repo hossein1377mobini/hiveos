@@ -98,6 +98,18 @@ async def process_job(session: AsyncSession, job: ProcessingJob) -> str:
             asset.asset_metadata = build_metadata(asset)
             chunk_rows = await replace_chunks(session, asset, normalized)
             if chunk_rows:
+                # Commit the replacement BEFORE embedding, not after the first
+                # batch. replace_chunks deletes and re-inserts every chunk of
+                # this document, and those row locks were previously held for the
+                # whole of the first embed_texts call - which, with both inference
+                # slots busy, is a wait of minutes rather than seconds. Measured
+                # on staging 2026-09-15: an ingestion transaction sat "idle in
+                # transaction" for 1 m 30 s with DELETE FROM knowledge_chunks as
+                # its last statement, and every authenticated request blocked
+                # behind it, because each request refreshes its own sessions row.
+                # Committing here releases those locks before the slow part, and
+                # makes the replacement durable even if the embed never lands.
+                await session.commit()
                 # Embed in bounded sub-batches and commit each one, so a large
                 # document releases the inference semaphore between batches
                 # instead of holding it for the whole file. A search request
