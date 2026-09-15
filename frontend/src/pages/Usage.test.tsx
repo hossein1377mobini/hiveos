@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Usage from "./Usage";
 
@@ -56,6 +56,48 @@ describe("Usage page", () => {
     stub(null, 500);
     render(<Usage />);
     expect(await screen.findByTestId("usage-retry")).toBeInTheDocument();
+  });
+
+  // The PO's «میزان مصرف هر کاربر»: the caller's own totals, split into the
+  // three token classes AvalAI prices, plus the resulting USD cost. tokens_in
+  // contains the cached ones, so the fresh figure is tokens_in - cached_tokens.
+  it("shows the caller's own consumption by token class and its cost", async () => {
+    stub({
+      ...state,
+      usage: {
+        executions: 9,
+        tokens_in: 9000,
+        tokens_out: 3000,
+        cached_tokens: 4000,
+        reasoning_tokens: 120,
+        cost_usd: 1.25,
+      },
+      my_usage: {
+        executions: 4,
+        tokens_in: 1500,
+        tokens_out: 800,
+        cached_tokens: 300,
+        reasoning_tokens: 50,
+        cost_usd: 0.0004,
+      },
+    });
+    render(<Usage />);
+    const card = await screen.findByTestId("usage-my-usage");
+    // 1500 prompt tokens of which 300 were cached -> 1200 fresh input tokens.
+    expect(within(card).getByTestId("my-usage-input")).toHaveTextContent("۱٬۲۰۰");
+    expect(within(card).getByTestId("my-usage-cached")).toHaveTextContent("۳۰۰");
+    expect(within(card).getByTestId("my-usage-output")).toHaveTextContent("۸۰۰");
+    // $0.0004 must not collapse to "$0".
+    expect(within(card).getByTestId("my-usage-cost")).toHaveTextContent("۰٫۰۰۰۴");
+    // The discount is the point of AvalAI's model, so the copy says it.
+    expect(card).toHaveTextContent(/ارزان.تر از ورودی تازه/);
+  });
+
+  it("does not invent a per-user block when the API sends no my_usage", async () => {
+    stub(state);
+    render(<Usage />);
+    await screen.findByTestId("usage-balance");
+    expect(screen.queryByTestId("usage-my-usage")).not.toBeInTheDocument();
   });
 
   it("warns when the balance is exhausted", async () => {

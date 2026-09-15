@@ -95,6 +95,99 @@ describe("Wallet + subscription page (RG-15/16)", () => {
     );
   });
 
+  // Consumption is priced the AvalAI way, and the wallet must not present a
+  // fallback estimate as if it were an exact catalogue price. A catalogue-priced
+  // deduction shows its real USD cost and no caveat; a fallback-derived one has
+  // no exact USD at all and says «برآوردی — نرخ پشتیبان» plus the reason.
+  it("shows each deduction's real cost and flags a fallback-derived one", async () => {
+    mockApi({
+      "GET /wallet": {
+        balance: 46,
+        welcome_credit: 50,
+        blocked: false,
+        pending_request: null,
+        transactions: [
+          {
+            id: "t-catalog",
+            kind: "DEDUCTION",
+            amount: 1,
+            balance_after: 49,
+            created_at: "",
+            cost_usd: 0.0004,
+            cost_basis: {
+              rate: "avalai_catalog",
+              source: "avalai_public_models",
+              known: true,
+              usd: 0.0004,
+              model: "gpt-5-mini",
+            },
+          },
+          {
+            id: "t-fallback",
+            kind: "DEDUCTION",
+            amount: 3,
+            balance_after: 46,
+            created_at: "",
+            cost_usd: null,
+            cost_basis: {
+              rate: "admin_fallback",
+              source: "admin_fallback_rate",
+              known: false,
+              usd: null,
+              reason: "catalog_unavailable",
+            },
+          },
+        ],
+      },
+    });
+    render(<WalletPage />);
+    const exact = await screen.findByTestId("tx-cost-t-catalog");
+    // $0.0004, not "$0".
+    expect(exact).toHaveTextContent("۰٫۰۰۰۴");
+    expect(exact).not.toHaveTextContent("برآوردی");
+    const estimate = screen.getByTestId("tx-cost-t-fallback");
+    expect(estimate).toHaveTextContent("برآوردی — نرخ پشتیبان");
+    expect(estimate).toHaveTextContent("کاتالوگ قیمت AvalAI در دسترس نبود");
+    // No fabricated dollar figure on the fallback path.
+    expect(estimate).not.toHaveTextContent("$");
+  });
+
+  it("shows the usage summary split by token class", async () => {
+    mockApi({
+      "GET /wallet": {
+        balance: 50,
+        welcome_credit: 50,
+        blocked: false,
+        pending_request: null,
+        transactions: [],
+        usage: {
+          executions: 9,
+          tokens_in: 9000,
+          tokens_out: 3000,
+          cached_tokens: 4000,
+          reasoning_tokens: 120,
+          cost_usd: 1.25,
+        },
+        my_usage: {
+          executions: 2,
+          tokens_in: 1000,
+          tokens_out: 400,
+          cached_tokens: 250,
+          reasoning_tokens: 0,
+          cost_usd: 0.0004,
+        },
+      },
+    });
+    render(<WalletPage />);
+    const summary = await screen.findByTestId("wallet-usage-summary");
+    // 9000 prompt tokens of which 4000 were cached -> 5000 fresh.
+    expect(summary).toHaveTextContent("۵٬۰۰۰");
+    expect(summary).toHaveTextContent("۴٬۰۰۰");
+    expect(summary).toHaveTextContent("۳٬۰۰۰");
+    expect(summary).toHaveTextContent("مصرف من");
+    expect(summary).toHaveTextContent("۰٫۰۰۰۴");
+  });
+
   it("shows the zero-credit banner when blocked", async () => {
     mockApi({
       "GET /wallet": {

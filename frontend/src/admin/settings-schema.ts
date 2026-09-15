@@ -158,15 +158,42 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
         effectiveDefault: "cohere-rerank-v4.0-fast",
         placeholder: "cohere-rerank-v4.0-fast",
       },
+      // The PRIMARY rate now. Consumption is priced the AvalAI way: the
+      // provider's own public catalogue gives this model's input / cached_input
+      // / output rates, the USD figure is
+      //     ((prompt - cached) * input + cached * cached_input + output * output) / 1e6
+      // and that USD is converted to whole wallet credits with the field below.
+      {
+        name: "credits_per_usd",
+        label: "اعتبار به‌ازای هر دلار",
+        kind: "number",
+        min: 0.000001,
+        max: 10000000,
+        group: "قیمت‌گذاری",
+        effectiveDefault: 1000,
+        hint:
+          "نرخ تبدیل هزینهٔ دلاری به اعتبار کیف پول. هزینهٔ هر اجرا با فرمول رسمی AvalAI از کاتالوگ عمومی قیمت آن محاسبه می‌شود، " +
+          "سپس در این عدد ضرب و به بالا گرد می‌شود تا هیچ توکن پرداخت‌شده‌ای هدر نرود. " +
+          "پیش‌فرض ۱۰۰۰ یعنی هر اعتبار دقیقاً یک‌دهم سنت (۰٫۰۰۱ دلار). خالی یعنی مقدار پیش‌فرض سرور (۱۰۰۰).",
+      },
+      // The FALLBACK rate. It is no longer the main pricing control: it only
+      // applies when the AvalAI price catalogue cannot be used (fetch failed,
+      // model absent from it, that model published no usable rates, or the
+      // configured endpoint is not AvalAI at all) - and the wallet records that
+      // fact as «برآوردی — نرخ پشتیبان» so nobody mistakes it for an exact cost.
       {
         name: "credit_per_1000_tokens_out",
-        label: "اعتبار به‌ازای هر ۱۰۰۰ توکن خروجی",
+        label: "اعتبار به‌ازای هر ۱۰۰۰ توکن خروجی (نرخ پشتیبان)",
         kind: "number",
         min: 0,
         max: 10000,
         group: "قیمت‌گذاری",
         effectiveDefault: 1,
-        hint: "مبنای کسر اعتبار از کیف پول سازمان‌ها. صفر یعنی مصرف رایگان.",
+        hint:
+          "نرخ پشتیبان، نه نرخ اصلی. فقط وقتی اعمال می‌شود که قیمت رسمی AvalAI در دسترس نباشد " +
+          "(کاتالوگ قیمت قطع باشد، مدل در آن نباشد، یا درگاه فعال AvalAI نباشد). " +
+          "نرخ اصلی «اعتبار به‌ازای هر دلار» است که بر پایهٔ کاتالوگ عمومی AvalAI حساب می‌شود؛ " +
+          "تا وقتی کاتالوگ AvalAI در دسترس است، تغییر این عدد مصرف را تغییر نمی‌دهد. صفر یعنی مصرف رایگان.",
       },
     ],
   },

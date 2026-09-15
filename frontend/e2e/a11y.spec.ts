@@ -141,8 +141,8 @@ const ADMIN_AGENTS = {
 const ENVELOPE = (data: unknown) => JSON.stringify({ success: true, data, message: null });
 
 const ROUTES = [
+  "/",
   "/chat",
-  "/agent",
   "/knowledge",
   "/wallet",
   "/usage",

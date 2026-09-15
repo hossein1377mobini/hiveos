@@ -27,6 +27,7 @@ from backend.config import get_settings
 from backend.db import audit_session_factory
 from backend.knowledge.assets import ALLOWED_EXTENSIONS
 from backend.knowledge.processing import enqueue_job
+from backend.knowledge.worker import process_now
 from backend.models import (
     KnowledgeAsset,
     KnowledgeSource,
@@ -123,14 +124,22 @@ def count_files(path: Path) -> int:
     return total
 
 
-def _walk_fingerprints(root: Path) -> dict[str, tuple[str, int]]:
-    """US-202 FR-004: recursive walk -> {rel_path: (fingerprint, size)}.
+def _walk_fingerprints(root: Path) -> tuple[dict[str, tuple[str, int]], int]:
+    """US-202 FR-004: walk -> ({rel_path: (fingerprint, size)}, skipped count).
 
     Fingerprint = sha256(rel_path|size|mtime_ns) - change detection without
     reading file contents (FR-005). Content-level change detection beyond
     mtime is the classification concern (US-205, T-S2-4).
+
+    The skipped count is the files the walk SAW but did not take: an extension
+    outside the US-205 table (PO decision 2026-09-12), or a file that could not
+    be stat-ed. It is returned rather than discarded because a folder full of
+    .zip/.html/.doc files used to report "discovered_files: 0" - the PO read
+    that as the "Scan now" button not scanning the folder at all. "Nothing
+    supported in this folder" and "this folder is empty" are different answers.
     """
     found: dict[str, tuple[str, int]] = {}
+    skipped = 0
     resolved_root = root.resolve(strict=False)
     limit_hit = False
     for current_root, _dirs, files in os.walk(root):
@@ -140,18 +149,22 @@ def _walk_fingerprints(root: Path) -> dict[str, tuple[str, int]]:
             full = Path(current_root) / name
             try:
                 if not full.resolve(strict=False).is_relative_to(resolved_root):
+                    skipped += 1
                     continue
             except OSError:
+                skipped += 1
                 continue
             rel = full.relative_to(root).as_posix()
             # PO decision 2026-09-12: the folder scan applies the SAME US-205
             # format table as the upload path - an off-list file is skipped
             # instead of entering the pipeline (and the review queue).
             if full.suffix.lstrip(".").lower() not in ALLOWED_EXTENSIONS:
+                skipped += 1
                 continue
             try:
                 stat = full.stat()
             except OSError:
+                skipped += 1
                 continue  # vanishing mid-walk - next scan catches it
             digest = hashlib.sha256(
                 f"{rel}|{stat.st_size}|{stat.st_mtime_ns}".encode()
@@ -165,7 +178,7 @@ def _walk_fingerprints(root: Path) -> dict[str, tuple[str, int]]:
                 break
         if limit_hit:
             break
-    return found
+    return found, skipped
 
 
 async def _active_brain(session: AsyncSession, organization_id) -> OrganizationBrain | None:
@@ -297,7 +310,7 @@ async def run_scan(
         root = Path(source.path)
         if not root.is_dir():
             raise OSError(f"scan root vanished: {source.path}")
-        found = _walk_fingerprints(root)
+        found, skipped = _walk_fingerprints(root)
     except OSError as exc:
         async with audit_session_factory() as audit_session:
             audit_session.add(
@@ -439,8 +452,28 @@ async def run_scan(
             "added": added,
             "updated": updated,
             "deleted": deleted,
+            "skipped": skipped,
         },
     )
+    # "Scan now" used to STOP at "queued" and hand the queue to the scheduler, so
+    # pressing the button discovered the files and then appeared to do nothing:
+    # the documents sat in the queue (up to a full poll interval) and a question
+    # asked in the meantime found an empty knowledge base (the PO report that the
+    # scan button does not scan the folder). The MANUAL scan now processes what
+    # it queued, bounded by INLINE_PROCESS_LIMIT.
+    #
+    # The other two types deliberately do not. A scheduled run IS the scheduler
+    # tick and that tick drains the whole queue immediately after it. The initial
+    # scan at registration is a bulk import of a folder that may hold thousands
+    # of files - the operator is onboarding, the asset list shows each file
+    # preparing, and blocking the registration response on embeddings would make
+    # onboarding a large folder look like a hang.
+    processed = 0
+    if scan_type == "manual":
+        # Commit the scan's own result first: process_now rolls back on an
+        # unexpected error and must not take the assets and history with it.
+        await session.commit()
+        processed = await process_now(session)
     return {
         "scan_id": history.id,
         "scan_type": scan_type,
@@ -448,6 +481,13 @@ async def run_scan(
         "files_updated": updated,
         "files_deleted": deleted,
         "discovered_files": len(found),
+        # Files the walk saw but did not take (format not in the US-205 table),
+        # so "nothing supported here" is not reported as "nothing here".
+        "files_skipped": skipped,
+        # Files this response actually pushed through the pipeline. The rest are
+        # picked up by the next scheduler tick, which the caller can see as
+        # still-queued assets rather than a silent no-op.
+        "processed": processed,
     }
 
 

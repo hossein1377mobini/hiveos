@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Knowledge from "./Knowledge";
 
@@ -15,7 +15,10 @@ function mockApi(routes: Record<string, unknown>, log: string[] = []) {
     const route = routes[key];
     const value = typeof route === "function" ? (route as () => unknown)() : route;
     if (value === undefined) throw new Error("unexpected call: " + key);
-    return new Response(JSON.stringify({ success: true, data: value, message: null }), {
+    // A route may answer with a Promise: that is how "the upload has started but
+    // has not resolved yet" is modelled (B1), without a real server.
+    const resolved = await value;
+    return new Response(JSON.stringify({ success: true, data: resolved, message: null }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -325,5 +328,405 @@ describe("Knowledge page (RG-04/05 UI)", () => {
     // "No folder yet" is its own state with the same primary action, so the
     // first folder is as easy to add as the second one.
     expect(screen.getByTestId("folders-empty")).toBeInTheDocument();
+  });
+
+  it("closes the dialog the moment the upload STARTS, and shows the file as uploading (B1)", async () => {
+    let assets: Array<Record<string, unknown>> = [];
+    // The upload is deliberately left unresolved: the dialog must not wait for it.
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const log: string[] = [];
+    mockApi(
+      {
+        "GET /knowledge-assets": () => ({ assets }),
+        "GET /processing/jobs": { jobs: [] },
+        "GET /knowledge-sources": [SERVER_FOLDER],
+        "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+        "POST /knowledge-assets/upload": () =>
+          started.then(() => ({ stored: [{ id: "srv-1", name: "report.pdf" }], rejected: [] })),
+      },
+      log,
+    );
+    const { container } = render(<Knowledge />);
+    await screen.findByTestId("folder-s1");
+
+    fireEvent.click(screen.getAllByText("افزودن سند")[0]);
+    const input = container.ownerDocument.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileNamed("report.pdf", 2048)] } });
+    fireEvent.click(await screen.findByTestId("upload"));
+
+    // The request went out, is still open, and the dialog is already gone.
+    await waitFor(() => expect(screen.queryByTestId("upload")).not.toBeInTheDocument());
+    expect(log).toContain("POST /knowledge-assets/upload");
+
+    // The file is in the list straight away, under a status the API never sends.
+    expect(await screen.findByTestId("asset-status-uploading")).toHaveTextContent("در حال بارگذاری");
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+
+    // Reopening the dialog must not resend the previous selection.
+    fireEvent.click(screen.getAllByText("افزودن سند")[0]);
+    expect(await screen.findByTestId("upload")).toBeDisabled();
+    fireEvent.click(screen.getByText("انصراف"));
+
+    // The server answers with the asset's OWN id: the optimistic row is
+    // reconciled away by id, not duplicated.
+    assets = [
+      { id: "srv-1", name: "report.pdf", status: "queued", size_bytes: 2048, extension: ".pdf", origin: "upload" },
+    ];
+    release();
+    await waitFor(() => expect(screen.queryByTestId("asset-status-uploading")).not.toBeInTheDocument());
+    expect(screen.getAllByText("report.pdf")).toHaveLength(1);
+    expect(screen.getByTestId("asset-status-queued")).toBeInTheDocument();
+  });
+
+  it("keeps a failed upload on screen with a Persian reason and a retry (B1)", async () => {
+    let assets: Array<Record<string, unknown>> = [];
+    let offline = true;
+    const log: string[] = [];
+    mockApi(
+      {
+        "GET /knowledge-assets": () => ({ assets }),
+        "GET /processing/jobs": { jobs: [] },
+        "GET /knowledge-sources": [SERVER_FOLDER],
+        "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+        "POST /knowledge-assets/upload": () => {
+          if (offline) {
+            offline = false;
+            // The request itself fails: the file must NOT be dropped.
+            throw new Error("network down");
+          }
+          return { stored: [{ id: "srv-2", name: "broken.pdf" }], rejected: [] };
+        },
+      },
+      log,
+    );
+    const { container } = render(<Knowledge />);
+    await screen.findByTestId("folder-s1");
+
+    fireEvent.click(screen.getAllByText("افزودن سند")[0]);
+    const input = container.ownerDocument.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileNamed("broken.pdf", 512)] } });
+    fireEvent.click(await screen.findByTestId("upload"));
+
+    const failed = await screen.findByTestId("asset-status-failed");
+    expect(failed).toHaveTextContent("ناموفق");
+    // The reason is Persian; the thrown English string never reaches the owner.
+    expect(failed).toHaveTextContent("ارتباط با سرور برقرار نشد");
+    expect(screen.queryByText(/network down/)).not.toBeInTheDocument();
+
+    // Retry re-sends the SAME file and reconciles once the server lists it.
+    assets = [
+      { id: "srv-2", name: "broken.pdf", status: "queued", size_bytes: 512, extension: ".pdf", origin: "upload" },
+    ];
+    fireEvent.click(screen.getByTestId("upload-retry-broken.pdf"));
+    await waitFor(() => expect(screen.queryByTestId("asset-status-failed")).not.toBeInTheDocument());
+    expect(screen.getByTestId("asset-status-queued")).toBeInTheDocument();
+    expect(log.filter((key) => key === "POST /knowledge-assets/upload")).toHaveLength(2);
+  });
+
+  it("polls while a document can still change and stops once it settles (B2)", async () => {
+    vi.useFakeTimers();
+    try {
+      let status = "queued";
+      const log: string[] = [];
+      mockApi(
+        {
+          "GET /knowledge-assets": () => ({
+            assets: [{ id: "a1", name: "flow.pdf", status, size_bytes: 10, extension: ".pdf", origin: "upload" }],
+          }),
+          "GET /processing/jobs": { jobs: [] },
+          "GET /knowledge-sources": [SERVER_FOLDER],
+          "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+        },
+        log,
+      );
+      render(<Knowledge />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByTestId("asset-status-queued")).toBeInTheDocument();
+
+      const beforePoll = log.filter((key) => key === "GET /knowledge-assets").length;
+      // One interval later the server reports the finished document.
+      status = "ready";
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.getByTestId("asset-status-ready")).toBeInTheDocument();
+      expect(log.filter((key) => key === "GET /knowledge-assets").length).toBeGreaterThan(beforePoll);
+
+      // Everything is terminal now: the timer must be gone, not merely quiet.
+      const settled = log.filter((key) => key === "GET /knowledge-assets").length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(log.filter((key) => key === "GET /knowledge-assets").length).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("offers exactly ONE «افزودن پوشه جدید» control, and it is the page-head one (PO request)", async () => {
+    // The empty-state card used to repeat the very same button that is always
+    // visible in the page head, so a page with no folders showed it twice.
+    mockApi({
+      "GET /knowledge-assets": { assets: [] },
+      "GET /processing/jobs": { jobs: [] },
+      "GET /knowledge-sources": {},
+      "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+    });
+    render(<Knowledge />);
+    await screen.findByTestId("folders-empty");
+
+    // The head control survives, testid intact, and it is the only one.
+    expect(screen.getByTestId("add-folder")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /افزودن پوشه جدید/ })).toHaveLength(1);
+
+    // The empty-state card keeps its explanation and gained no button back.
+    const empty = screen.getByTestId("folders-empty");
+    expect(within(empty).getByText("هنوز پوشه‌ای ثبت نشده است.")).toBeInTheDocument();
+    expect(empty).toHaveTextContent("پوشهٔ اسناد را ثبت کنید تا پردازش آغاز شود");
+    expect(within(empty).queryByRole("button")).not.toBeInTheDocument();
+
+    // And the surviving button still opens the dialog.
+    fireEvent.click(screen.getByTestId("add-folder"));
+    expect(await screen.findByTestId("new-folder-path")).toBeInTheDocument();
+  });
+
+  it("shows a percentage and a bar only when the server sent a progress value", async () => {
+    // The backend is adding progress/stage RIGHT NOW, so three shapes arrive in
+    // one list: a real number, an explicit null, and an older server that sends
+    // neither field at all. Only the first may show a number.
+    mockApi({
+      "GET /knowledge-assets": {
+        assets: [
+          {
+            id: "p1",
+            name: "prep.pdf",
+            status: "processing",
+            size_bytes: 10,
+            extension: ".pdf",
+            origin: "upload",
+            progress: 50,
+            stage: "chunking",
+          },
+          {
+            id: "p2",
+            name: "unknown.docx",
+            status: "processing",
+            size_bytes: 10,
+            extension: ".docx",
+            origin: "upload",
+            progress: null,
+            stage: null,
+          },
+          {
+            id: "p3",
+            name: "older.txt",
+            status: "queued",
+            size_bytes: 10,
+            extension: ".txt",
+            origin: "upload",
+          },
+          {
+            id: "p4",
+            name: "done.pdf",
+            status: "ready",
+            size_bytes: 10,
+            extension: ".pdf",
+            origin: "upload",
+            progress: 100,
+            stage: "indexed",
+            chunks: 5,
+          },
+        ],
+      },
+      "GET /processing/jobs": { jobs: [] },
+      "GET /knowledge-sources": [SERVER_FOLDER],
+      "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+    });
+    render(<Knowledge />);
+    await screen.findByText("prep.pdf");
+
+    // 50 -> «۵۰٪», with a real progress affordance and the Persian stage name.
+    const bar = screen.getByTestId("asset-percent-p1");
+    expect(bar).toHaveTextContent("۵۰٪");
+    expect(within(bar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+    expect(bar).toHaveTextContent("تقسیم به واحد دانش");
+    // A file still being prepared is unmistakable, not a quiet status chip.
+    expect(bar).toHaveTextContent("در حال آماده‌سازی");
+
+    // null: no percentage, no bar — the stage label stands in, as before.
+    expect(screen.queryByTestId("asset-percent-p2")).not.toBeInTheDocument();
+    const nullRow = screen.getByTestId("asset-progress-p2");
+    expect(nullRow).not.toHaveTextContent("٪");
+    expect(within(nullRow).queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(nullRow).toHaveTextContent("در صف پردازش");
+
+    // Absent (older server) behaves exactly like null.
+    expect(screen.queryByTestId("asset-percent-p3")).not.toBeInTheDocument();
+    expect(screen.getByTestId("asset-progress-p3")).not.toHaveTextContent("٪");
+
+    // Terminal rows hide it: the status badge already says what happened.
+    expect(screen.queryByTestId("asset-percent-p4")).not.toBeInTheDocument();
+    expect(screen.getByTestId("asset-progress-p4")).toHaveTextContent("۵ واحد دانش");
+    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+
+    // PO report: the page says out loud that some files cannot answer yet.
+    expect(screen.getByTestId("knowledge-preparing")).toHaveTextContent("سند هنوز در حال آماده‌سازی است");
+  });
+
+  it("never lets the percentage rewind between polls of the same attempt", async () => {
+    let progress = 80;
+    let scanned = false;
+    const log: string[] = [];
+    mockApi(
+      {
+        "GET /knowledge-assets": () => ({
+          assets: [
+            {
+              id: "m1",
+              name: "slow.pdf",
+              status: "processing",
+              size_bytes: 10,
+              extension: ".pdf",
+              origin: "upload",
+              progress,
+              stage: "extracting",
+            },
+          ],
+        }),
+        "GET /processing/jobs": { jobs: [] },
+        // The folder row moves on the scan, which is how the test knows the
+        // reload carrying the LOWER number has landed.
+        "GET /knowledge-sources": () =>
+          scanned ? [{ ...SERVER_FOLDER, discovered_files: 99 }] : [SERVER_FOLDER],
+        "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+        "POST /knowledge-sources/s1/scan": () => {
+          scanned = true;
+          return { discovered_files: 1, files_added: 0, files_updated: 0, files_deleted: 0 };
+        },
+      },
+      log,
+    );
+    render(<Knowledge />);
+    expect(await screen.findByTestId("asset-percent-m1")).toHaveTextContent("۸۰٪");
+
+    // The next sample of the SAME attempt reports less — a dropped poll, a job
+    // that restarted a stage. The bar must not jump backwards.
+    progress = 40;
+    fireEvent.click(screen.getByTestId("folder-scan-s1"));
+    await waitFor(() => expect(screen.getByTestId("folder-files-s1")).toHaveTextContent("۹۹"));
+
+    expect(screen.getByTestId("asset-percent-m1")).toHaveTextContent("۸۰٪");
+    expect(screen.getByTestId("asset-percent-m1")).not.toHaveTextContent("۴۰٪");
+    expect(log.filter((key) => key === "GET /knowledge-assets").length).toBeGreaterThan(1);
+  });
+
+  it("reports the REAL counts a manual scan answered with, not a generic success", async () => {
+    const log: string[] = [];
+    mockApi(
+      {
+        "GET /knowledge-assets": { assets: [] },
+        "GET /processing/jobs": { jobs: [] },
+        "GET /knowledge-sources": [SERVER_FOLDER],
+        "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+        // scan_source answers the source payload spread together with the scan
+        // result (backend knowledge/service.py).
+        "POST /knowledge-sources/s1/scan": {
+          id: "s1",
+          path: "C:/server-docs",
+          status: "active",
+          scan_id: "h1",
+          scan_type: "manual",
+          discovered_files: 12,
+          last_scanned_at: "2026-09-15T09:00:00Z",
+          files_added: 3,
+          files_updated: 2,
+          files_deleted: 1,
+        },
+      },
+      log,
+    );
+    render(<Knowledge />);
+    await screen.findByTestId("folder-s1");
+    fireEvent.click(screen.getByTestId("folder-scan-s1"));
+
+    const notice = await screen.findByTestId("knowledge-notice");
+    expect(notice).toHaveTextContent("۱۲ فایل بررسی شد");
+    expect(notice).toHaveTextContent("۳ فایل تازه اضافه شد");
+    expect(notice).toHaveTextContent("۲ فایل تغییرکرده به‌روزرسانی شد");
+    expect(notice).toHaveTextContent("۱ فایل حذف‌شده علامت خورد");
+    // The old, information-free sentence must be gone.
+    expect(notice).not.toHaveTextContent("پویش دستی اجرا شد");
+  });
+
+  it("says out loud that a scan found no new file", async () => {
+    const log: string[] = [];
+    mockApi(
+      {
+        "GET /knowledge-assets": { assets: [] },
+        "GET /processing/jobs": { jobs: [] },
+        "GET /knowledge-sources": [SERVER_FOLDER],
+        "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+        "POST /knowledge-sources/s1/scan": {
+          scan_type: "manual",
+          discovered_files: 0,
+          files_added: 0,
+          files_updated: 0,
+          files_deleted: 0,
+        },
+      },
+      log,
+    );
+    render(<Knowledge />);
+    await screen.findByTestId("folder-s1");
+    fireEvent.click(screen.getByTestId("folder-scan-s1"));
+
+    const notice = await screen.findByTestId("knowledge-notice");
+    expect(notice).toHaveTextContent("پویش انجام شد");
+    expect(notice).toHaveTextContent("نداشت");
+    expect(notice).not.toHaveTextContent("فایل بررسی شد");
+  });
+
+  it("keeps the server's own reason when a scan fails", async () => {
+    // A 409 straight from the scan route: the page repeats the SERVER's reason
+    // (ApiError.message, which persianError already turned into Persian) and
+    // shows no success notice at all.
+    const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input).split("?")[0].replace("/api/v1", "");
+      const key = (init?.method ?? "GET") + " " + url;
+      if (key === "POST /knowledge-sources/s1/scan") {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            data: null,
+            error: { code: "SCAN_ALREADY_RUNNING", message: "A scan is already running for this source." },
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      const routes: Record<string, unknown> = {
+        "GET /knowledge-assets": { assets: [] },
+        "GET /processing/jobs": { jobs: [] },
+        "GET /knowledge-sources": [SERVER_FOLDER],
+        "GET /knowledge-sources/client-folder/sync-plan": PLAN,
+      };
+      return new Response(JSON.stringify({ success: true, data: routes[key], message: null }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fn);
+    render(<Knowledge />);
+    await screen.findByTestId("folder-s1");
+    fireEvent.click(screen.getByTestId("folder-scan-s1"));
+
+    expect(await screen.findByTestId("knowledge-error")).toHaveTextContent(
+      "پویش این پوشه از قبل در حال اجراست.",
+    );
+    expect(screen.queryByTestId("knowledge-notice")).not.toBeInTheDocument();
   });
 });

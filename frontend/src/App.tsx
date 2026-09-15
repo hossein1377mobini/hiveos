@@ -26,7 +26,6 @@ const Wallet = lazy(() => import("./pages/WalletPage"))
 const Usage = lazy(() => import("./pages/Usage"))
 const Chat = lazy(() => import("./pages/Chat"))
 const Knowledge = lazy(() => import("./pages/Knowledge"))
-const Agent = lazy(() => import("./pages/Agent"))
 const AdminApp = lazy(() => import("./admin/AdminApp"))
 
 /**
@@ -136,14 +135,6 @@ export default function App() {
         element={
           <RequireSession>
             <ShellRoutes screen="chat" />
-          </RequireSession>
-        }
-      />
-      <Route
-        path="/agent"
-        element={
-          <RequireSession>
-            <ShellRoutes screen="agent" />
           </RequireSession>
         }
       />
@@ -465,8 +456,6 @@ function ShellRoutes({ screen }: { screen: NavId }) {
         <Wallet />
       ) : screen === "chat" ? (
         <Chat />
-      ) : screen === "agent" ? (
-        <Agent />
       ) : screen === "knowledge" ? (
         <Knowledge />
       ) : (

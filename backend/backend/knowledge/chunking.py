@@ -104,6 +104,37 @@ async def replace_chunks(
     return rows
 
 
+async def embed_chunk_rows(
+    session: AsyncSession, rows: list[KnowledgeChunk], batch_size: int | None = None
+) -> int:
+    """Fill the embeddings of freshly written chunk rows; returns how many.
+
+    Same sub-batching rule as the worker (one inference batch per call, so the
+    shared embedding semaphore is released between groups instead of being held
+    for a whole document), used by the on-demand classification path.
+
+    That path wrote the chunks and marked the asset "ready" WITHOUT embedding
+    them, so the document list showed a finished file with knowledge units while
+    semantic search - which only looks at chunks that carry a vector - could not
+    see a single one of them. The user saw a ready document and an answer that
+    said no document existed.
+    """
+    if not rows:
+        return 0
+    from backend.knowledge.embeddings import embed_texts_background
+
+    size = batch_size or get_settings().local_inference_batch_size
+    batch = max(1, size)
+    done = 0
+    for start in range(0, len(rows), batch):
+        window = rows[start : start + batch]
+        vectors = await embed_texts_background([row.content for row in window])
+        for row, vector in zip(window, vectors, strict=True):
+            row.embedding = vector  # type: ignore[assignment]
+            done += 1
+    return done
+
+
 async def list_chunks(session: AsyncSession, organization_id, asset: KnowledgeAsset) -> list[dict]:
     """Chunks of the asset's current version (tenant-isolated)."""
     rows = (

@@ -7,15 +7,22 @@ zero balance blocks the run. The local/mock provider is exempt
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend import pricing as pricing_service
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
 from backend.llm import read_setting
 from backend.models import ChargeRequest, Wallet, WalletTransaction
+
+# PO requirement 2026-09: consumption is calculated the AvalAI way, in USD.
+# The wallet ledger is an integer credit, so the admin sets the plain,
+# documented conversion (providers_pricing.credits_per_usd); the default makes
+# one credit worth exactly one tenth of a cent.
+DEFAULT_CREDITS_PER_USD = 1000.0
 
 
 async def _effective_provider(session: AsyncSession) -> str:
@@ -50,8 +57,68 @@ async def get_or_create_wallet(session: AsyncSession, organization_id) -> Wallet
     return wallet
 
 
-async def get_wallet_state(session: AsyncSession, organization_id) -> dict:
-    """US-1203 AC1: balance + recent transactions."""
+# Consumption is stored as the execution's own usage JSON, so the aggregate is
+# a JSON extraction rather than a join. The guards keep a malformed or older
+# record from failing the whole sum: anything that is not a plain number counts
+# as zero.
+_USAGE_SUM = (
+    "COALESCE(sum(CASE WHEN e.usage->>'{key}' ~ '^[0-9]+$'"
+    " THEN (e.usage->>'{key}')::bigint ELSE 0 END), 0) AS {key}"
+)
+
+
+def _usage_expr() -> str:
+    keys = ("tokens_in", "tokens_out", "cached_tokens", "reasoning_tokens")
+    parts = [_USAGE_SUM.format(key=key) for key in keys]
+    parts.append(
+        "COALESCE(sum(CASE WHEN e.usage->>'cost_usd' ~ '^[0-9]+(\.[0-9]+)?$'"
+        " THEN (e.usage->>'cost_usd')::numeric ELSE 0 END), 0) AS cost_usd"
+    )
+    return ", ".join(parts)
+
+
+async def usage_totals(session: AsyncSession, organization_id, user_id=None) -> dict:
+    """Per-user (or whole-organization) consumption, from the stored usage.
+
+    PO requirement 2026-09: consumption has to be auditable per user, so this
+    reads the same fields the pricing layer wrote on each execution - the token
+    classes, the provider's USD figure and the credits actually deducted.
+    """
+    clause = " WHERE e.organization_id = :org"
+    params: dict = {"org": str(organization_id)}
+    if user_id is not None:
+        clause += " AND e.requested_by = :user"
+        params["user"] = str(user_id)
+    row = (
+        (
+            await session.execute(
+                text(
+                    "SELECT count(*) AS executions, " + _usage_expr()
+                    + " FROM hiveos.agent_executions e" + clause
+                ),
+                params,
+            )
+        )
+        .mappings()
+        .one()
+    )
+    return {
+        "executions": int(row["executions"] or 0),
+        "tokens_in": int(row["tokens_in"] or 0),
+        "tokens_out": int(row["tokens_out"] or 0),
+        "cached_tokens": int(row["cached_tokens"] or 0),
+        "reasoning_tokens": int(row["reasoning_tokens"] or 0),
+        "cost_usd": float(row["cost_usd"] or 0),
+    }
+
+
+async def get_wallet_state(session: AsyncSession, organization_id, user_id=None) -> dict:
+    """US-1203 AC1: balance + recent transactions.
+
+    Also the consumption view: the organization total, and - when the caller
+    says who is asking - the same totals for that user, which is the number the
+    PO asked to see per user. Additive fields; existing readers are unaffected.
+    """
     wallet = await get_or_create_wallet(session, organization_id)
     rows = (
         (
@@ -80,6 +147,10 @@ async def get_wallet_state(session: AsyncSession, organization_id) -> dict:
         "balance": wallet.balance,
         "welcome_credit": get_settings().wallet_welcome_credit,
         "blocked": wallet.balance <= 0,
+        "usage": await usage_totals(session, organization_id),
+        "my_usage": (
+            await usage_totals(session, organization_id, user_id) if user_id is not None else None
+        ),
         "pending_request": (
             {"id": pending.id, "amount": pending.amount, "created_at": pending.created_at}
             if pending
@@ -92,6 +163,10 @@ async def get_wallet_state(session: AsyncSession, organization_id) -> dict:
                 "amount": row.amount,
                 "balance_after": row.balance_after,
                 "execution_id": row.execution_id,
+                # Why this charge was this size: the provider's USD figure and
+                # the token classes behind it, when AvalAI's catalogue priced it.
+                "cost_usd": float(row.cost_usd) if row.cost_usd is not None else None,
+                "cost_basis": row.cost_basis,
                 "created_at": row.created_at,
             }
             for row in rows
@@ -141,17 +216,120 @@ async def ensure_not_blocked(session: AsyncSession, organization_id) -> None:
         raise ApiError(402, "CREDIT_EXHAUSTED", "The wallet balance is zero — charge first.")
 
 
+def normalise_usage(usage) -> dict:
+    """Accept both shapes: the execution usage dict, or a bare output count.
+
+    The bare count is the shape every pre-existing caller (and wallet test)
+    passes; keeping it working means the new cost basis never forces a caller
+    to know about token classes it does not have.
+    """
+    if isinstance(usage, dict):
+        return usage
+    try:
+        tokens_out = int(usage or 0)
+    except (TypeError, ValueError):
+        tokens_out = 0
+    return {"tokens_in": 0, "tokens_out": tokens_out, "cached_tokens": 0, "reasoning_tokens": 0}
+
+
+def _token_count(value) -> int:
+    """A malformed count must not abort a charge; it counts as zero."""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _credits_per_usd(pricing: dict) -> float:
+    try:
+        rate = float(pricing.get("credits_per_usd"))
+    except (TypeError, ValueError):
+        rate = 0.0
+    return rate if rate > 0 else DEFAULT_CREDITS_PER_USD
+
+
+async def cost_basis_for(pricing: dict, usage: dict, provider: str) -> dict:
+    """What this execution costs, priced the AvalAI way when it can be.
+
+    Two possible answers, and the difference is recorded on the transaction:
+
+    - AvalAI priced it: the provider's public catalogue gives this model's
+      input/cached_input/output rates and the USD figure is their own formula
+      applied to the token classes in the response usage object. The USD is
+      converted at the admin's documented credits_per_usd.
+    - It could not be priced (catalogue unreachable, model absent from it, no
+      usable pricing block, or an endpoint that is not AvalAI): the admin's
+      credit_per_1000_tokens_out fallback rate applies, exactly as it did
+      before, and the basis says so instead of pretending the cost is known.
+
+    Nothing here may ever fail a user's answer: the catalogue fetch swallows
+    its own transport failures and this wrapper swallows anything else.
+    """
+    tokens = normalise_usage(usage)
+    tokens_out = _token_count(tokens.get("tokens_out"))
+    model = str(tokens.get("model") or "")
+    base_url = pricing.get("base_url")
+    reason = None
+    if provider != "openai-compatible":
+        reason = "provider_not_avalai"
+    elif not pricing_service.is_avalai(base_url):
+        reason = "endpoint_not_avalai"
+    else:
+        try:
+            catalog = await pricing_service.fetch_catalog()
+        except Exception:  # noqa: BLE001 - pricing must never break an answer
+            catalog = None
+        priced = pricing_service.price_usage(catalog, model, tokens)
+        if priced["known"]:
+            rate = _credits_per_usd(pricing)
+            return {
+                **priced,
+                "credits": pricing_service.ceil_credits(float(priced["usd"]), rate),
+                "credits_per_usd": rate,
+                "fallback_credit_per_1000_tokens_out": None,
+                "rate": "avalai_catalog",
+                "reason": None,
+            }
+        reason = priced["source"]
+
+    fallback_rate = max(1, _token_count(pricing.get("credit_per_1000_tokens_out")) or 1)
+    return {
+        "catalog_url": pricing_service.CATALOG_URL,
+        "source": "admin_fallback_rate",
+        "known": False,
+        "usd": None,
+        "model": model,
+        "tokens_in": _token_count(tokens.get("tokens_in")),
+        "tokens_out": tokens_out,
+        "cached_tokens": _token_count(tokens.get("cached_tokens")),
+        "reasoning_tokens": _token_count(tokens.get("reasoning_tokens")),
+        "pricing": None,
+        "credits": max(1, -(-tokens_out * fallback_rate // 1000)),
+        "credits_per_usd": None,
+        "fallback_credit_per_1000_tokens_out": fallback_rate,
+        "rate": "admin_fallback",
+        "reason": reason or "catalog_unavailable",
+    }
+
+
 async def deduct_for_execution(
-    session: AsyncSession, organization_id, execution_id, tokens_out: int
-) -> None:
-    """US-1203: atomic deduction. The credit rate comes from the admin panel
-    (providers_pricing.credit_per_1000_tokens_out, default 1): cost =
-    ceil(tokens_out * rate / 1000)."""
+    session: AsyncSession, organization_id, execution_id, usage
+) -> dict | None:
+    """US-1203: atomic deduction, priced from AvalAI's own published rates.
+
+    `usage` is the execution's usage dict (tokens_in/tokens_out/cached_tokens/
+    reasoning_tokens/model), or - as every pre-existing caller passed - a bare
+    output-token count, which still bills through the admin fallback rate.
+
+    Returns the cost basis that was written to the transaction (None for the
+    mock provider, which is billed nothing, exactly as before).
+    """
     pricing = await read_setting(session, "providers_pricing")
-    if (pricing.get("provider") or get_settings().llm_provider) == "mock":
-        return
-    rate = max(1, int(pricing.get("credit_per_1000_tokens_out") or 1))
-    cost = max(1, -(-tokens_out * rate // 1000))
+    provider = pricing.get("provider") or get_settings().llm_provider
+    if provider == "mock":
+        return None
+    basis = await cost_basis_for(pricing, normalise_usage(usage), provider)
+    cost = basis["credits"]
     result = await session.execute(
         update(Wallet)
         .where(Wallet.organization_id == organization_id, Wallet.balance >= cost)
@@ -168,6 +346,8 @@ async def deduct_for_execution(
             amount=cost,
             balance_after=new_balance,
             execution_id=execution_id,
+            cost_usd=basis["usd"],
+            cost_basis=basis,
         )
     )
     await record_audit(
@@ -176,8 +356,14 @@ async def deduct_for_execution(
         organization_id=organization_id,
         entity_type="wallet",
         entity_id=execution_id,
-        detail={"cost": cost, "balance_after": new_balance},
+        detail={
+            "cost": cost,
+            "balance_after": new_balance,
+            "cost_usd": basis["usd"],
+            "rate": basis["rate"],
+        },
     )
+    return basis
 
 
 async def create_charge_request(

@@ -328,6 +328,26 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         )
     )
 
+    # An empty retrieval result is NOT the same fact as "this organization has
+    # no documents", and the answer used to say the second one either way - the
+    # PO's report: "فایل اضافه کردم ولی می‌گه هیچ سندی وجود نداشت". A file that
+    # was uploaded a moment ago is queued or still embedding, so the honest
+    # answer is "come back shortly", not "there is no document", and the user
+    # must not be pushed into uploading the same file twice. search.py already
+    # distinguishes the cases, so pass that through instead of letting the model
+    # guess which one it is.
+    empty_rule = ""
+    if not hits:
+        indexing = results.get("indexing") or {}
+        preparing = int(indexing.get("preparing") or 0)
+        if results.get("status") == "documents_preparing" or preparing:
+            empty_rule = (
+                "\n\nدر دانش سازمان هنوز سند آماده‌ای برای این پرسش وجود ندارد، اما "
+                f"{preparing} سند همین حالا در حال آماده‌سازی است. صریح بگو که سندها "
+                "هنوز آماده نشده‌اند و باید کمی بعد دوباره پرسید؛ نگو که هیچ سندی "
+                "وجود ندارد و کاربر را به بارگذاری دوبارهٔ همان فایل تشویق نکن."
+            )
+
     # Prior turns of this session. Loaded before generation and scoped to the
     # caller, so a follow-up question has a referent and the model can use what
     # was already said. A failure here degrades to a stateless answer rather than
@@ -444,7 +464,7 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
             # The organization's persona (falls back to a pre-existing
             # per-user one only if the organization set none).
             persona=persona_for(agent, org_agent_settings),
-            extra_system=memory_block + citation_rule,
+            extra_system=memory_block + citation_rule + empty_rule,
             history=history,
         )
     except ApiError as error:
@@ -478,20 +498,31 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
     # concatenated into prose the user must scroll past. An answer with no hits
     # still reports its provenance through an empty citation list.
     text = strip_unbacked_citations(llm.mask_pii(generated["text"]), citations)
+    tool_calls = generated.get("tool_calls") or []
+    # The files this turn actually created. The agent's report/chart tools write
+    # a real KnowledgeAsset and report its id in the tool result meta; without
+    # this the user is told a report was built and then cannot find it in the
+    # chat or in the reply. Read back under the same permission predicate the
+    # files list uses, so one user's tool cannot surface a colleague's file.
+    artifacts = await _artifacts_for(session, organization_id, user_id, tool_calls)
     # US-1201/1202 metering: usage rides on the execution row.
+    # Every token class AvalAI bills rides on the execution row, so the charge
+    # below and the record of it are computed from the same numbers.
     execution.usage = {
         "provider": generated["provider"],
         "model": generated["model"],
         "tokens_in": generated["tokens_in"],
         "tokens_out": generated["tokens_out"],
+        "cached_tokens": generated.get("cached_tokens", 0),
+        "reasoning_tokens": generated.get("reasoning_tokens", 0),
         "tool_rounds": generated.get("tool_rounds", 0),
-        "tool_calls": len(generated.get("tool_calls") or []),
+        "tool_calls": len(tool_calls),
     }
 
     # Trace every tool call the model made. This is the PO's "every action must
     # be logged": the audit row says a generation happened, this says the agent
     # actually built a chart, with which arguments, and how long it took.
-    for call in generated.get("tool_calls") or []:
+    for call in tool_calls:
         session.add(
             AgentToolInvocation(
                 organization_id=organization_id,
@@ -508,13 +539,31 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
                 round_index=int(call.get("round") or 0),
             )
         )
-    # US-1203: atomic deduction after a successful online-model cycle.
+    # US-1203: atomic deduction after a successful online-model cycle, priced
+    # the AvalAI way (PO requirement 2026-09). The basis it returns is the
+    # audit trail for the number the user was charged.
     from backend import wallet as wallet_service
 
-    await wallet_service.deduct_for_execution(
-        session, organization_id, execution.id, generated["tokens_out"]
+    cost_basis = await wallet_service.deduct_for_execution(
+        session, organization_id, execution.id, execution.usage
     )
+    if cost_basis is not None:
+        # Reassigned rather than mutated in place: a plain JSON column does not
+        # track in-place changes, so the cost fields would never reach the row.
+        execution.usage = {
+            **execution.usage,
+            "cost_usd": cost_basis["usd"],
+            "cost_credits": cost_basis["credits"],
+            "cost_rate": cost_basis["rate"],
+            "cost_source": cost_basis["source"],
+            "cost_basis": cost_basis,
+        }
+    # An artifact-free reply serializes exactly as it did before this field
+    # existed: the key is present only when a file was actually produced, so an
+    # existing client or test that reads `text` and `citations` is unaffected.
     execution.output = {"text": text, "citations": citations}
+    if artifacts:
+        execution.output["artifacts"] = artifacts
     execution.status = "COMPLETED"
     execution.completed_at = _utc_now()
     await record_audit(
@@ -526,17 +575,24 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
         detail={"citations": len(citations)},
     )
     # US-0909/RG-07: map the reply back into the originating chat session.
+    # persist_assistant_reply returns the stored message payload, and its id is
+    # what source_message_id needs: without it every memory was written with
+    # source_message_id NULL while the comment below claimed a memory can point
+    # at the message it came from.
+    message_id = None
     if execution.chat_session_id is not None:
         from backend.chat.service import persist_assistant_reply
 
-        await persist_assistant_reply(
+        reply = await persist_assistant_reply(
             session,
             organization_id,
             execution.requested_by,
             execution.chat_session_id,
             text,
             citations=citations,
+            artifacts=artifacts,
         )
+        message_id = reply.get("id") if isinstance(reply, dict) else None
 
     # Remember the exchange for this user's agent. After the reply is persisted
     # so a memory can point at the message it came from, and wrapped because a
@@ -550,6 +606,7 @@ async def run_cycle(session: AsyncSession, organization_id, execution_id) -> dic
             question=query,
             answer=text,
             execution_id=execution.id,
+            message_id=message_id,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory extraction failed for %s: %s", execution.id, exc)
@@ -582,6 +639,75 @@ def _as_uuid(value: Any):
         return _uuid.UUID(str(value))
     except (TypeError, ValueError):
         return None
+
+
+async def _artifacts_for(
+    session: AsyncSession, organization_id, user_id, tool_calls: list
+) -> list[dict]:
+    """The files this turn created, described the way the user may see them.
+
+    Why this exists at all. The report and chart tools write a real
+    KnowledgeAsset row and return its id in the ToolResult meta. That id was
+    written to agent_tool_invocations - an audit trace - but never to the
+    execution output, so the client had no way to learn that a file had been
+    built or where it was. The PO reported exactly that: "فایل که می‌سازه اولاً
+    توی چت نمایش نمیده و دوماً معلوم نیست اصن ساخته میشه یا نه یا ادرس ساختش چیه".
+
+    Only ids that resolve to a row THIS caller may read are surfaced. The check
+    is `_readable`, the same seam the files list, metadata and download
+    endpoints use - deliberately not a second, re-derived ownership test, because
+    the leak that seam closes came from several read paths each filtering on
+    organization_id alone. A tool-reported id for a colleague's file is dropped
+    exactly as the files list would drop it.
+
+    One query for every id (the tools produce a handful per turn at most), then
+    the permission filter in Python against the already-loaded rows.
+    """
+    from backend.knowledge.assets import _readable, is_org_admin
+    from backend.models import KnowledgeAsset
+
+    asset_ids: list = []
+    for call in tool_calls:
+        asset_id = _as_uuid((call.get("meta") or {}).get("asset_id"))
+        if asset_id is not None and asset_id not in asset_ids:
+            asset_ids.append(asset_id)
+    if not asset_ids:
+        return []
+
+    rows = (
+        (
+            await session.execute(
+                select(KnowledgeAsset).where(
+                    KnowledgeAsset.id.in_(asset_ids),
+                    KnowledgeAsset.organization_id == organization_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_id = {row.id: row for row in rows}
+
+    organization = await session.get(Organization, organization_id)
+    if organization is None:
+        return []
+    is_admin = await is_org_admin(session, organization_id, user_id)
+
+    artifacts: list[dict] = []
+    for asset_id in asset_ids:
+        asset = by_id.get(asset_id)
+        if not _readable(asset, organization, user_id, is_admin):
+            continue
+        artifacts.append(
+            {
+                "asset_id": str(asset.id),
+                "name": asset.name,
+                "extension": asset.extension,
+                "size_bytes": asset.size_bytes,
+                "asset_type": asset.asset_type,
+            }
+        )
+    return artifacts
 
 
 async def cancel_execution(

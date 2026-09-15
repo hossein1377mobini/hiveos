@@ -7,11 +7,13 @@ transactions keep charges/deductions with the resulting balance.
 import uuid
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Uuid,
     text,
@@ -62,6 +64,12 @@ class WalletTransaction(Base):
     execution_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("agent_executions.id", ondelete="SET NULL")
     )
+    # The cost basis of a DEDUCTION (PO requirement 2026-09): the provider's
+    # own USD figure and the token classes it was computed from, so a charge
+    # can be reconciled against AvalAI's dashboard line by line. NULL on
+    # CHARGE rows, and NULL on a DEDUCTION that predates this column.
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(18, 8))
+    cost_basis: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[object | None] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

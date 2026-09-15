@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, Coins, Info, TrendingDown } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Coins, Info, TrendingDown, UserRound } from "lucide-react";
 import { api } from "../api/client";
 import { Banner } from "../components/ui/banner";
 import { RetryNotice } from "../components/ui/retry";
@@ -34,12 +34,55 @@ interface WalletTransaction {
   created_at: string;
 }
 
+/**
+ * Consumption totals, exactly as backend/backend/wallet.py:usage_totals returns
+ * them: {executions, tokens_in, tokens_out, cached_tokens, reasoning_tokens,
+ * cost_usd}. There is deliberately no cost_credits here - usage_totals does not
+ * send one, and inventing it would be a lie about the arithmetic.
+ */
+interface UsageTotals {
+  executions: number;
+  tokens_in: number;
+  tokens_out: number;
+  cached_tokens: number;
+  reasoning_tokens: number;
+  cost_usd: number;
+}
+
 interface WalletState {
   balance: number;
   welcome_credit: number;
   blocked: boolean;
   pending_request: { id: string; amount: number; created_at?: string } | null;
   transactions: WalletTransaction[];
+  /** Organisation-wide totals (wallet.py:get_wallet_state "usage"). */
+  usage?: UsageTotals | null;
+  /** The caller's own totals ("my_usage") - the PO's «میزان مصرف هر کاربر». */
+  my_usage?: UsageTotals | null;
+}
+
+/**
+ * USD with enough decimals to stay honest.
+ *
+ * Intl's default (2) renders a real $0.0004 charge as "$0", which reads as
+ * "free" - the one thing it was not. Anything under a cent gets six decimals,
+ * so the smallest billable amount still shows a non-zero number.
+ */
+function usdText(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  const usd = Number(value);
+  if (usd === 0) return "$" + faNum(0, 4);
+  return "$" + faNum(usd, usd < 0.01 ? 6 : 4);
+}
+
+/**
+ * AvalAI prices a cached input token at its own (usually much lower) rate, so
+ * the fresh part of the prompt is tokens_in - cached_tokens. cached_tokens sits
+ * INSIDE tokens_in in the provider's usage object, so showing both numbers
+ * unadjusted would double-count the cached ones.
+ */
+function freshInputTokens(usage: UsageTotals): number {
+  return Math.max(0, usage.tokens_in - usage.cached_tokens);
 }
 
 /** Transaction kinds as the backend writes them (wallet.py). */
@@ -100,6 +143,8 @@ export default function Usage() {
     return <p className="text-body text-muted-foreground">در حال بارگذاری…</p>;
   }
 
+  const my = state.my_usage ?? null;
+
   return (
     <section className="mx-auto max-w-3xl space-y-4" aria-label="اعتبار و مصرف">
       <div>
@@ -147,6 +192,71 @@ export default function Usage() {
           </CardContent>
         </Surface>
       </div>
+
+      {my && (
+        <Surface data-testid="usage-my-usage">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-body font-bold">
+              <UserRound className="size-4" /> مصرف من
+            </CardTitle>
+            <CardDescription className="text-caption">
+              بر پایهٔ <span data-numeric>{faNum(my.executions)}</span> اجرا، با همان سه دسته‌ای که
+              AvalAI صورت‌حساب می‌کند: ورودی تازه، ورودی کش‌شده و خروجی — هر کدام با نرخ خودش.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-control border border-border bg-secondary p-3">
+                <div className="text-micro text-muted-foreground">ورودی تازه (بدون کش)</div>
+                <div className="mt-1 text-heading" data-numeric data-testid="my-usage-input">
+                  {faNum(freshInputTokens(my))}
+                </div>
+                <div className="mt-0.5 text-micro text-muted-foreground">توکن — با نرخ ورودی</div>
+              </div>
+              <div className="rounded-control border border-border bg-accent p-3">
+                <div className="text-micro text-muted-foreground">ورودی کش‌شده</div>
+                <div
+                  className="mt-1 text-heading text-primary"
+                  data-numeric
+                  data-testid="my-usage-cached"
+                >
+                  {faNum(my.cached_tokens)}
+                </div>
+                <div className="mt-0.5 text-micro text-muted-foreground">
+                  توکن — ارزان‌تر از ورودی تازه
+                </div>
+              </div>
+              <div className="rounded-control border border-border bg-secondary p-3">
+                <div className="text-micro text-muted-foreground">خروجی مدل</div>
+                <div className="mt-1 text-heading" data-numeric data-testid="my-usage-output">
+                  {faNum(my.tokens_out)}
+                </div>
+                <div className="mt-0.5 text-micro text-muted-foreground">توکن — با نرخ خروجی</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-border pt-3">
+              <span className="text-caption text-muted-foreground">هزینهٔ مصرف من (دلار)</span>
+              <span className="text-body font-bold" dir="ltr" data-numeric data-testid="my-usage-cost">
+                {usdText(my.cost_usd)}
+              </span>
+            </div>
+
+            <p className="flex items-start gap-1.5 text-caption text-muted-foreground">
+              <Info className="mt-0.5 size-3 shrink-0" />
+              توکن کش‌شده با نرخ مخصوص خودش و ارزان‌تر از توکن ورودی تازه حساب می‌شود؛ فقط بخش تازهٔ
+              پرسش با نرخ کامل ورودی صورت‌حساب می‌شود.
+              {my.reasoning_tokens > 0 && (
+                <>
+                  {" "}
+                  از توکن‌های خروجی، <span data-numeric>{faNum(my.reasoning_tokens)}</span> توکن
+                  استدلال است که داخل همان خروجی شمرده می‌شود و جداگانه حساب نمی‌شود.
+                </>
+              )}
+            </p>
+          </CardContent>
+        </Surface>
+      )}
 
       <Surface>
         <CardHeader className="pb-2">

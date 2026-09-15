@@ -1,19 +1,22 @@
 import {
   AlertCircle,
   ArrowRight,
+  Brain,
   ChevronDown,
   Copy,
+  Download,
   FileText,
   History,
   House,
   Plus,
   Search,
   Send,
+  Square,
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, API_BASE } from "../api/client";
 import { Button } from "../components/ui/button";
 import { LoadingButton } from "../components/ui/button-loading";
 import { ConfirmDialog } from "../components/ui/confirm-dialog";
@@ -32,7 +35,8 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Input } from "../components/ui/input";
 import { ZeroCreditBanner } from "../components/ZeroCreditBanner";
-import { faDate, faNum, faTime, norm } from "../utils/format";
+import { useLive } from "../lib/live";
+import { faDate, faNum, faRelative, faTime, humanSize, norm } from "../utils/format";
 
 // 09-conversation mockups (01/02/03) at mockup fidelity: chat-list rail with
 // search + relative groups, thread with msg pattern (32px avatar, name+time,
@@ -53,6 +57,14 @@ interface SessionItem {
    * unknown row is kept.
    */
   message_count?: number;
+  /**
+   * Server-reported in-flight flag (B4).
+   *
+   * Optional because an older server omits it; the client also tracks the
+   * conversations it started itself, and the two sources are unioned. A missing
+   * field must never be read as "not generating" when this tab knows better.
+   */
+  generating?: boolean;
 }
 
 /**
@@ -72,9 +84,115 @@ interface SessionItem {
 interface ChatMessage {
   id: string;
   role: string;
-  content: { text?: string } | null;
+  content: { text?: string; artifacts?: Artifact[] | null } | null;
   citations?: Citation[] | null;
+  /**
+   * Files the agent created while answering (B3).
+   *
+   * Server-side the "artifacts" array rides on the execution output and is
+   * copied onto the persisted assistant message. It is optional on purpose: an
+   * older server answers without it, and an empty array means "nothing was
+   * created". Neither may crash the page or paint an empty box.
+   */
+  artifacts?: Artifact[] | null;
+  /**
+   * The execution behind this row, when the server reports it.
+   *
+   * Used only to match a live execution output to the answer it produced, so
+   * the artifact cards can be shown on the live turn as well as in history.
+   * The field is not guaranteed, so every read falls back to a text match.
+   */
+  execution_id?: string | null;
   created_at: string;
+}
+
+/**
+ * Keep the current array when a refresh delivered the same rows.
+ *
+ * The transcript effect follows new content, and a poll that returned an
+ * identical list would hand React a new array on every tick - which re-fires
+ * the smooth scroll and drags the pane to the bottom while the user is reading.
+ * Identity is the ordered list of message ids: nothing else the transcript
+ * renders can change without a row arriving or leaving.
+ */
+function mergeMessages(current: ChatMessage[], next: ChatMessage[]): ChatMessage[] {
+  if (current.length === next.length && current.every((m, i) => m.id === next[i]?.id)) {
+    return current;
+  }
+  return next;
+}
+
+/**
+ * One file the agent produced, as POST /executions/{id}/run reports it.
+ *
+ * Every field is optional at the type level. This array is being added by a
+ * parallel backend change, so the page has to survive a payload that is missing
+ * a key, carries an extra one, or arrives as an empty array.
+ */
+interface Artifact {
+  asset_id?: string;
+  name?: string;
+  extension?: string;
+  size_bytes?: number;
+  asset_type?: string;
+}
+
+/**
+ * The files an answer produced, from every place the server puts them.
+ *
+ * Read from "artifacts" (the persisted assistant message) first, then from
+ * "content.artifacts" the way citations are read off a stored message, and
+ * finally from the enclosing execution output - which is the only source for a
+ * live answer while the transcript is being refreshed. Anything that is not an
+ * array is treated as absent, because guessing here would render a broken card.
+ */
+function artifactsOf(message: ChatMessage, output?: unknown): Artifact[] {
+  const lists: unknown[] = [
+    message.artifacts,
+    message.content?.artifacts,
+    (output as { artifacts?: unknown } | undefined)?.artifacts,
+  ];
+  for (const list of lists) {
+    if (Array.isArray(list) && list.length > 0) return list as Artifact[];
+  }
+  return [];
+}
+
+/**
+ * A human size, in Persian digits.
+ *
+ * An absent or non-numeric size is reported as an unknown size rather than as
+ * "zero" - a zero-byte file and an unreported one are different facts, and only
+ * one of them is about the file.
+ */
+function artifactSize(bytes: number | undefined): string {
+  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "حجم نامشخص";
+  return humanSize(bytes);
+}
+
+/**
+ * What the file is, in Persian. Reports are .html and charts .png; anything
+ * else is described by its own extension rather than by a guess.
+ */
+function artifactLabel(artifact: Artifact): string {
+  const kind = (artifact.asset_type ?? "").toLowerCase();
+  const ext = (artifact.extension ?? "").toLowerCase().replace(/^\./, "");
+  if (kind.includes("chart") || ext === "png" || ext === "jpg" || ext === "jpeg") return "نمودار";
+  if (kind.includes("report") || ext === "html" || ext === "htm" || ext === "pdf") return "گزارش";
+  return ext ? "فایل " + ext.toUpperCase() : "فایل";
+}
+
+/**
+ * The download URL for a stored asset.
+ *
+ * Built from API_BASE, not a hardcoded prefix: the client already owns the
+ * "/api/v1" root (see api/client.ts) and a second copy here is how the two
+ * silently drift apart. The backend route is
+ * GET /knowledge-assets/{asset_id}/download (backend/knowledge/router.py:434).
+ */
+function artifactHref(assetId: string): string {
+  const root = API_BASE.replace(/\/+$/, "");
+  return root + "/knowledge-assets/" + encodeURIComponent(assetId) + "/download";
 }
 
 /** The text of a message, tolerating a null content or a missing text key. */
@@ -453,6 +571,32 @@ interface Citation {
   document_id?: string;
 }
 
+/**
+ * One remembered line, exactly as GET /agent/memory returns it (B5).
+ *
+ * Read from the current Agent.tsx before that page is deleted rather than
+ * guessed: the row carries its kind and creation date, which is what the
+ * compact surface lists, and the delete endpoint is keyed by this id.
+ */
+interface MemoryRow {
+  id: string;
+  kind: string;
+  content: string;
+  weight: number;
+  hits: number;
+  misses: number;
+  active: boolean;
+  created_at: string | null;
+}
+
+/** The kinds the server stores, named in Persian (mirrors Agent.tsx). */
+const KIND_LABEL: Record<string, string> = {
+  fact: "واقعیت",
+  preference: "ترجیح",
+  decision: "تصمیم",
+  summary: "خلاصه",
+};
+
 const SUGGESTS: ReadonlyArray<{ text: string; hint: string }> = [
   { text: "ساختار قیمت‌گذاری محصولات چگونه است؟", hint: "بر پایه اسناد فروش" },
   { text: "خلاصه‌ای از گزارش فروش ۱۴۰۴ بده", hint: "بر پایه اسناد سازمان" },
@@ -591,14 +735,92 @@ function CitationList({
   );
 }
 
+/**
+ * The files an answer created, as evidence rather than as a claim.
+ *
+ * The model may say it wrote a report; this card is what proves it: the row
+ * comes from the server's own artifact list and the link downloads the stored
+ * asset. "data-artifacts-block" lets the bubble's click handler stand down, the
+ * same way the citation disclosure does.
+ *
+ * Nothing renders for an empty or absent list. A "no files" box under every
+ * answer would be pure noise, and the PO's complaint was the opposite - that a
+ * created file was invisible.
+ */
+function ArtifactList({ message, output }: { message: ChatMessage; output?: unknown }) {
+  const artifacts = artifactsOf(message, output);
+  if (artifacts.length === 0) return null;
+  return (
+    <div
+      className="mt-2.5 border-t border-dashed border-border pt-2.5"
+      data-artifacts-block={"artifacts-" + message.id}
+    >
+      <div className="mb-2 flex items-center gap-1.5 text-micro font-bold text-muted-foreground">
+        <FileText aria-hidden className="size-3.5" />
+        {faNum(artifacts.length)} فایل ساخته شد
+      </div>
+      <ul className="flex flex-wrap gap-2">
+        {artifacts.map((artifact, index) => {
+          const name = artifact.name ?? "فایل بدون نام";
+          const downloadable = typeof artifact.asset_id === "string" && artifact.asset_id.length > 0;
+          return (
+            <li
+              key={(artifact.asset_id ?? "") + ":" + name + ":" + index}
+              data-testid="chat-artifact"
+              className="flex min-w-0 max-w-full items-center gap-2.5 rounded-control border border-border bg-secondary px-3 py-2 text-caption"
+            >
+              <span
+                aria-hidden
+                className="flex size-8 shrink-0 items-center justify-center rounded-control bg-card text-muted-foreground"
+              >
+                <FileText className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <span dir="auto" className="block truncate font-bold">
+                  {name}
+                </span>
+                <span className="block text-micro text-muted-foreground">
+                  {artifactLabel(artifact)} · {artifactSize(artifact.size_bytes)}
+                </span>
+              </span>
+              {downloadable ? (
+                <a
+                  href={artifactHref(artifact.asset_id as string)}
+                  download={name}
+                  data-testid="chat-artifact-download"
+                  aria-label={"دانلود " + name}
+                  className="ms-1 inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xs border border-border bg-card px-2 py-1 text-micro font-semibold text-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  <Download aria-hidden className="size-3.5" />
+                  دانلود
+                </a>
+              ) : (
+                // No asset id means there is nothing to download: a dead link
+                // would be worse than an honest "saved on the server".
+                <span className="ms-1 shrink-0 text-micro text-muted-foreground">ذخیره شد</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export default function Chat() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [wallet, setWallet] = useState<WalletMini | null>(null);
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState("");
-  const [busy, setBusy] = useState(false);
+  /**
+   * Whether the conversation on screen is generating (B1/B2).
+   *
+   * Derived from the per-session map, so switching to another conversation
+   * cannot inherit it: the composer is free and stays typable. Declared early
+   * because the transcript's scroll effect reads it.
+   */
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
    * The last text that failed to send, so «تلاش مجدد» can resend it.
@@ -624,6 +846,37 @@ export default function Chat() {
   const followRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeIdRef = useRef<string | null>(null);
+  /** The session the pane is showing, readable from an async callback. */
+  const viewedRef = useRef<string | null>(null);
+  /**
+   * Single-flight guard per conversation, covering only the send-to-start
+   * window: up to and including the POST that starts the run.
+   *
+   * It is released the moment the run exists, because from then on the
+   * generating state (below) is what refuses a second send - and that state is
+   * also what the stop control and the rail indicator read.
+   */
+  const sendingRef = useRef<Record<string, boolean>>({});
+  /**
+   * Synchronous mirror of the generating set.
+   *
+   * The refusal in startGeneration cannot read React state: the keydown that
+   * triggers it may run before React has re-rendered with the new map, and a
+   * guard that reads stale state lets the second send through. A ref updates
+   * in the same tick, so the refusal is deterministic.
+   */
+  const genRef = useRef<Record<string, boolean>>({});
+  /**
+   * Conversations whose run THIS tab started and is still watching.
+   *
+   * The server's "generating" flag and this tab's own set are two sources for
+   * one fact. This ref is what keeps them from fighting: a server row that says
+   * "not generating" clears a stale indicator, but never one this tab is still
+   * driving - a status poll that lags behind the run must not flicker the rail.
+   */
+  const editingRunRef = useRef<Record<string, boolean>>({});
+  /** Callbacks run when a generation for one conversation finishes. */
+  const runListenersRef = useRef<Record<string, (() => void) | undefined>>({});
   /** Below md the history rail is a dialog, not a column. */
   const [railOpen, setRailOpen] = useState(false);
   /** Set when a different conversation is opened, to reset its scroll to top. */
@@ -638,6 +891,49 @@ export default function Chat() {
   /** "messageId:index" of the citation an inline marker just jumped to. */
   const [flashCitation, setFlashCitation] = useState<string | null>(null);
   const flashTimerRef = useRef<number | null>(null);
+  /**
+   * B1/B2: which conversations are generating, keyed by session id.
+   *
+   * This replaced ONE global boolean that froze the whole page: the composer
+   * was disabled and the send path returned early, so a single in-flight answer
+   * made every other conversation unusable. The key is the session, so two
+   * conversations can be in flight at once and neither blocks the other.
+   */
+  const [generating, setGenerating] = useState<Record<string, boolean>>({});
+  /** The execution behind each generating conversation, so it can be stopped. */
+  const [runIds, setRunIds] = useState<Record<string, string>>({});
+  /**
+   * Conversations whose answer landed while the user was elsewhere (B1).
+   *
+   * The rail marks them so the finished answer is discoverable without being
+   * yanked back to it - the view must not be hijacked by a background answer.
+   */
+  const [unseen, setUnseen] = useState<Record<string, boolean>>({});
+  /** What POST /executions/{id}/run returned, kept per execution id. */
+  const [execOutputs, setExecOutputs] = useState<
+    Record<string, { text?: string; artifacts?: Artifact[] }>
+  >({});
+  /** The clipboard confirmation, keyed by message id. */
+  const [copied, setCopied] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  /** «حافظه» - the compact memory surface folded into the chat page (B5). */
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memories, setMemories] = useState<MemoryRow[]>([]);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryDraft, setMemoryDraft] = useState("");
+  const [memoryBusy, setMemoryBusy] = useState(false);
+  const [memoryBusyId, setMemoryBusyId] = useState<string | null>(null);
+
+  /**
+   * Whether the conversation on screen is generating (B1/B2).
+   *
+   * Derived from the per-session map, so switching to another conversation
+   * cannot inherit it: the composer is free and stays typable. Declared before
+   * every effect because the transcript's scroll effect reads it.
+   */
+  const viewGenerating = activeId !== null && generating[activeId] === true;
+  /** Credit gate: a blocked wallet disables the composer, nothing else. */
+  const blocked = wallet?.blocked === true;
   /** The session waiting for the delete confirmation to be accepted. */
   const [pendingDelete, setPendingDelete] = useState<SessionItem | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -654,6 +950,48 @@ export default function Chat() {
   // The chat list endpoint is paginated: it answers {items, total_count, page,
   // page_size, has_more}, not {sessions}. Reading the wrong key yielded [] every
   // time, so the rail was permanently empty and history unreachable.
+  /** Refresh the credit state; the composer and the banner both read it. */
+  const loadWallet = useCallback(async () => {
+    try {
+      const w = await api<WalletMini>("GET", "/wallet");
+      setWallet({ balance: w.balance, blocked: w.blocked });
+    } catch (e) {
+      // F: swallowing this left 'blocked' at its old value - the composer and
+      // the zero-credit banner could both contradict the real balance.
+      setError(e instanceof Error ? e.message : "دریافت وضعیت اعتبار ناموفق بود.");
+    }
+  }, []);
+
+  /**
+   * Take the server's own conversation list as the rail's truth (B4).
+   *
+   * The list endpoint reports a per-conversation "generating" flag, which is
+   * how a run started in another tab - or finishing in one - shows up here
+   * without a reload. The local set still wins for a conversation this tab is
+   * driving, because that run's end is known here first.
+   */
+  const applyServerSessions = useCallback((items: SessionItem[]) => {
+    setSessions(items);
+    setGenerating((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const row of items) {
+        if (row.generating === true) {
+          if (!next[row.id]) {
+            next[row.id] = true;
+            changed = true;
+          }
+        } else if (next[row.id] && editingRunRef.current[row.id] !== true) {
+          // The server no longer reports it as generating and this tab is not
+          // the one running it: the indicator is stale and goes.
+          delete next[row.id];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, []);
+
   const loadSessions = useCallback(async () => {
     const data = await api<{ items: SessionItem[] }>("GET", "/chat/sessions");
     // PO request 2026-09: a conversation with nothing in it must never be
@@ -666,9 +1004,9 @@ export default function Chat() {
     const items = (data.items ?? []).filter(
       (s) => s.message_count === undefined || s.message_count > 0,
     );
-    setSessions(items);
+    applyServerSessions(items);
     return items;
-  }, []);
+  }, [applyServerSessions]);
 
   /**
    * Load a conversation's transcript.
@@ -690,7 +1028,9 @@ export default function Chat() {
       );
       // Two fast rail clicks can land out of order: keep only the newest answer.
       if (activeIdRef.current !== id) return;
-      setMessages(data.items ?? []);
+      setMessages((current) => mergeMessages(current, data.items ?? []));
+      // Looking at a conversation is what marks its finished answer as seen.
+      setUnseen((current) => (current[id] ? { ...current, [id]: false } : current));
       setError(null);
       // Only a deliberate selection resets the pane; a bootstrap restore does not.
       if (resetScroll) setOpeningSession(true);
@@ -714,15 +1054,8 @@ export default function Chat() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "دریافت گفتگوها ناموفق بود.");
     }
-    try {
-      const w = await api<WalletMini>("GET", "/wallet");
-      setWallet({ balance: w.balance, blocked: w.blocked });
-    } catch (e) {
-      // F: swallowing this left 'blocked' at its old value - the composer and
-      // the zero-credit banner could both contradict the real balance.
-      setError(e instanceof Error ? e.message : "دریافت وضعیت اعتبار ناموفق بود.");
-    }
-  }, [loadSessions, openSession]);
+    await loadWallet();
+  }, [loadSessions, openSession, loadWallet]);
 
   useEffect(() => {
     void bootstrap();
@@ -756,7 +1089,8 @@ export default function Chat() {
     // Following is opt-in, so returning to the page never yanks the view down.
     if (!followRef.current) return;
     bottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
-  }, [messages, busy]);
+  }, [messages, viewGenerating]);
+
 
   // Selecting another conversation scrolls that transcript to its beginning.
   // Declared before the persistence effect so the offset is republished only
@@ -898,55 +1232,317 @@ export default function Chat() {
     }, 0);
   }
 
-  async function send(e?: React.FormEvent, override?: string) {
-    e?.preventDefault();
-    // The retry button passes the failed text explicitly: reading 'input' here
-    // would see the already-cleared state and the retry would silently no-op.
-    const text = (override ?? input).trim();
+  /**
+   * Send a message and start watching its answer.
+   *
+   * Concurrency choice (B2): a SECOND send into a conversation that is already
+   * generating is refused, with a Persian sentence, and the text stays in the
+   * composer. Queueing was the alternative. It was rejected because a queued
+   * question has no visible state - the user cannot see what is waiting, cannot
+   * cancel it, and if the first answer fails the queue either runs anyway or
+   * silently disappears. It also bills twice for one gesture. Refusing keeps
+   * the text where the user can edit or resend it, which is the smaller lie.
+   *
+   * The refusal is scoped to the SAME conversation: another conversation is
+   * free to send at the same time, which is what B1/B2 asked for.
+   */
+  async function startGeneration(text: string): Promise<void> {
     // A brand-new organization has no sessions, so activeId is null on the
     // first screen. This used to return here with no message and no error,
     // which made the send button look broken. Create the session on demand
     // instead - typing a question should never require a separate click.
-    if (!text || busy) return;
-    // This send is the one case that should move the transcript.
+    let sessionId = activeIdRef.current;
+    // Because the composer stays enabled while an answer is in flight (B2),
+    // Enter can be pressed twice before a created session's id exists. This
+    // ref, not the rendering state, is what makes that double-send single: a
+    // "draft" key covers the window before the first session id exists, and the
+    // session id covers every send after that.
+    const guardKey = sessionId === null ? "draft" : sessionId;
+    if (sendingRef.current[guardKey]) return;
+    if (sessionId !== null && genRef.current[sessionId] === true) {
+      setError("این گفتگو هنوز در حال پاسخ‌گویی است؛ تا پایان پاسخ صبر کنید یا آن را متوقف کنید.");
+      return;
+    }
+    sendingRef.current[guardKey] = true;
     followRef.current = true;
     setLastSent(text);
     setInput("");
-    setBusy(true);
     setError(null);
     try {
-      let sessionId = activeId;
-      if (!sessionId) {
+      if (sessionId === null) {
         const createdSession = await api<{ id: string }>("POST", "/chat/sessions", {});
         sessionId = createdSession.id;
         activeIdRef.current = sessionId;
+        viewedRef.current = sessionId;
         setActiveId(sessionId);
         // From here the conversation is real and may be returned to.
         saveChatView(sessionId, 0);
       }
-      await api("POST", "/chat/sessions/" + sessionId + "/messages", { text });
+      const target: string = sessionId;
+      await api("POST", "/chat/sessions/" + target + "/messages", { text });
       setMessages((m) => [
         ...m,
         { id: "local-" + Date.now(), role: "USER", content: { text }, created_at: "" },
       ]);
+      genRef.current = { ...genRef.current, [target]: true };
+      editingRunRef.current[target] = true;
+      setGenerating((g) => ({ ...g, [target]: true }));
       const created = await api<{ id: string }>("POST", "/executions", {
         input: { text },
-        chat_session_id: sessionId,
+        chat_session_id: target,
       });
-      const done = await api<{ status: string; output: { text: string } | null; error: { message: string } | null }>(
-        "POST",
-        "/executions/" + created.id + "/run",
-      );
-      if (done.status !== "COMPLETED") {
+      setRunIds((r) => ({ ...r, [target]: created.id }));
+      // The window this guard protects is over: the run now exists, so a second
+      // send must be refused by the generating state with a Persian reason -
+      // not silently swallowed by this lock.
+      sendingRef.current[target] = false;
+      if (sessionId === target) sendingRef.current.draft = false;
+      // Registered before the blocking POST returns: if the status poll sees
+      // the run finish first, the handler still awaits this request and can
+      // then decide what to say about it.
+      const runFinished = new Promise<void>((resolve) => {
+        runListenersRef.current[target] = resolve;
+      });
+      const done = await api<{
+        status: string;
+        output: { text?: string; artifacts?: Artifact[] } | null;
+        error: { message: string } | null;
+      }>("POST", "/executions/" + created.id + "/run");
+      let settledByPoller = false;
+      await Promise.race([
+        runFinished.then(() => {
+          settledByPoller = true;
+        }),
+        new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 0);
+        }),
+      ]);
+      if (done.output) {
+        setExecOutputs((o) => ({ ...o, [created.id]: done.output as { text?: string; artifacts?: Artifact[] } }));
+      }
+      if (settledByPoller) {
+        // The live watch already reported the outcome and refreshed the
+        // transcript; re-reporting it here would only duplicate the work.
+      } else if (done.status === "CANCELLED") {
+        // Cancelled before the answer landed: say so. A cancelled run must
+        // never be dressed up as a completed answer.
+        setError("پاسخ‌گویی متوقف شد.");
+      } else if (done.status === "COMPLETED") {
+        await openSession(target);
+        await loadWallet();
+      } else {
         setError(done.error?.message ?? "اجرای پاسخ ناموفق بود.");
       }
-      await openSession(sessionId);
-      const w = await api<WalletMini>("GET", "/wallet");
-      setWallet({ balance: w.balance, blocked: w.blocked });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "ارسال پیام ناموفق بود.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ارسال پیام ناموفق بود.");
     } finally {
-      setBusy(false);
+      sendingRef.current[guardKey] = false;
+    }
+  }
+
+  /** The form and the retry control both route here; Enter is the PO's path. */
+  function send(e?: React.FormEvent, override?: string) {
+    e?.preventDefault();
+    // The retry button passes the failed text explicitly: reading 'input' here
+    // would see the already-cleared state and the retry would silently no-op.
+    const text = (override ?? input).trim();
+    if (!text) return;
+    void startGeneration(text);
+  }
+
+  /**
+   * Clear the generating state for a conversation and mark it unread when the
+   * user is not looking at it.
+   *
+   * The view is never redirected: a background answer is a rail indicator, not
+   * a jump. Yanking the pane to the generating conversation is exactly the
+   * behaviour B1 reported as "cannot switch chats".
+   */
+  function settleRun(sessionId: string) {
+    editingRunRef.current[sessionId] = false;
+    if (genRef.current[sessionId]) {
+      const next = { ...genRef.current };
+      delete next[sessionId];
+      genRef.current = next;
+    }
+    setGenerating((g) => {
+      if (!g[sessionId]) return g;
+      const next = { ...g };
+      delete next[sessionId];
+      return next;
+    });
+    if (viewedRef.current !== sessionId) {
+      setUnseen((u) => ({ ...u, [sessionId]: true }));
+    }
+  }
+
+  async function cancelRun(sessionId: string) {
+    const executionId = runIds[sessionId];
+    setCancelling(true);
+    try {
+      if (executionId) {
+        // POST /executions/{id}/cancel is scoped to the caller: the service
+        // resolves the row by organization_id and answers 404 for a foreign id
+        // (backend/execution/service.py:cancel_execution).
+        await api("POST", "/executions/" + executionId + "/cancel");
+      }
+      settleRun(sessionId);
+      // Drop the run id too, so the status poll stops asking about a run that
+      // is already over.
+      setRunIds((r) => (r[sessionId] ? { ...r, [sessionId]: "" } : r));
+      setError("پاسخ‌گویی متوقف شد.");
+    } catch (err) {
+      // The run keeps going, so its indicator must too: only the reason lands.
+      setError(err instanceof Error ? err.message : "توقف پاسخ‌گویی ناموفق بود.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  /**
+   * B4: poll the transcript of the conversation on screen while it generates.
+   *
+   * "path === null" when idle is deliberate: the hook runs no timer at all, so
+   * a settled page costs nothing. A failed poll keeps the rows already on
+   * screen (the hook's own rule), so a dropped request cannot blank the thread.
+   */
+  const viewSessionId = activeId;
+  const isViewGenerating = viewSessionId !== null && generating[viewSessionId] === true;
+  const liveMessages = useLive<{ items: ChatMessage[] }>(
+    isViewGenerating && viewSessionId
+      ? "/chat/sessions/" + viewSessionId + "/messages"
+      : null,
+    2000,
+  );
+
+  useEffect(() => {
+    if (!isViewGenerating) return;
+    const items = liveMessages.data?.items;
+    if (!items) return;
+    // Only ever apply rows for the conversation on screen: a poll that lands
+    // after the user switched away must not paint another thread's messages.
+    if (viewSessionId === null || activeIdRef.current !== viewSessionId) return;
+    setMessages((current) => mergeMessages(current, items));
+  }, [liveMessages.data, isViewGenerating, viewSessionId]);
+
+  /**
+   * B4: the rail follows the server while anything is in flight.
+   *
+   * "path === null" while idle, so a settled page runs no timer. This is what
+   * keeps another tab's (or another device's) running answer visible here, and
+   * what clears the indicator once that run ends.
+   */
+  const anyGenerating = Object.keys(generating).length > 0;
+  const liveSessions = useLive<{ items: SessionItem[] }>(
+    anyGenerating ? "/chat/sessions" : null,
+    2500,
+  );
+
+  useEffect(() => {
+    const items = liveSessions.data?.items;
+    if (!items) return;
+    applyServerSessions(
+      items.filter((s) => s.message_count === undefined || s.message_count > 0),
+    );
+  }, [liveSessions.data, applyServerSessions]);
+
+  /**
+   * B4 + the stop control: watch the run itself, so the answer lands and the
+   * indicator clears without navigating away and back.
+   *
+   * The transcript poll alone cannot end the generating state: the server says
+   * nothing about a conversation's in-flight flag on the message list, so the
+   * execution's own status is the one honest source for "it is finished".
+   */
+  // Only watched while the conversation is genuinely generating: a run id left
+  // over from a finished run must not keep a timer (or a request) alive, and
+  // the completed run's output is already captured by the poller itself.
+  const watchedRunId =
+    viewSessionId !== null && generating[viewSessionId] === true
+      ? runIds[viewSessionId] || null
+      : null;
+  const runStatus = useLive<{ status: string; output?: { text?: string; artifacts?: Artifact[] } | null }>(
+    watchedRunId ? "/executions/" + watchedRunId : null,
+    1000,
+  );
+
+  useEffect(() => {
+    const data = runStatus.data;
+    if (!watchedRunId || !viewSessionId || !data) return;
+    if (viewSessionId !== null && generating[viewSessionId] !== true) return;
+    if (data.status !== "COMPLETED" && data.status !== "FAILED" && data.status !== "CANCELLED") return;
+    if (data.output) {
+      setExecOutputs((o) => ({ ...o, [watchedRunId]: data.output as { text?: string; artifacts?: Artifact[] } }));
+    }
+    // The answer has landed, so the send path must not announce "still going"
+    // when its own request finally returns - and the transcript must be
+    // refreshed so the answer and its files appear without navigation (B4).
+    runListenersRef.current[viewSessionId]?.();
+    settleRun(viewSessionId);
+    setRunIds((r) => (r[viewSessionId] ? { ...r, [viewSessionId]: "" } : r));
+    void openSession(viewSessionId);
+    void loadWallet();
+    // settleRun and openSession are stable enough here: the effect is keyed on
+    // the run status, and re-running it is a no-op once the id is cleared.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runStatus.data, watchedRunId, viewSessionId]);
+
+  /** Load the user's memories when the surface is opened. */
+  const loadMemories = useCallback(async () => {
+    setMemoryError(null);
+    try {
+      const data = await api<{ memories: MemoryRow[] }>("GET", "/agent/memory");
+      setMemories(data.memories ?? []);
+    } catch (err) {
+      setMemoryError(err instanceof Error ? err.message : "دریافت حافظه ناموفق بود.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (memoryOpen) void loadMemories();
+  }, [memoryOpen, loadMemories]);
+
+  async function forgetMemory(id: string) {
+    setMemoryBusyId(id);
+    setMemoryError(null);
+    try {
+      await api("DELETE", "/agent/memory/" + id);
+      setMemories((rows) => rows.filter((row) => row.id !== id));
+    } catch (err) {
+      setMemoryError(err instanceof Error ? err.message : "حذف ناموفق بود.");
+    } finally {
+      setMemoryBusyId(null);
+    }
+  }
+
+  async function addMemory() {
+    const content = memoryDraft.trim();
+    if (!content) return;
+    setMemoryBusy(true);
+    setMemoryError(null);
+    try {
+      // kind "fact" is the manual-entry kind, matching the deleted page.
+      await api("POST", "/agent/memory", { content, kind: "fact" });
+      setMemoryDraft("");
+      await loadMemories();
+    } catch (err) {
+      setMemoryError(err instanceof Error ? err.message : "افزودن ناموفق بود.");
+    } finally {
+      setMemoryBusy(false);
+    }
+  }
+
+  /** Copy an answer, confirming it in the row rather than in a toast. */
+  async function copyMessage(message: ChatMessage) {
+    try {
+      // Absent in an insecure context and in the desktop shell's older builds;
+      // the guard keeps the click a no-op instead of a thrown rejection.
+      if (!navigator.clipboard?.writeText) return;
+      await navigator.clipboard.writeText(messageText(message));
+      setCopied(message.id);
+      window.setTimeout(() => setCopied((current) => (current === message.id ? null : current)), 2000);
+    } catch {
+      /* Nothing was copied; the label simply does not change. */
     }
   }
 
@@ -963,7 +1559,7 @@ export default function Chat() {
     return BUCKET_ORDER.filter((k) => groups.has(k)).map((k) => ({ label: k, items: groups.get(k)! }));
   }, [sessions, filter]);
 
-  const blocked = wallet?.blocked === true;
+
   /**
    * The conversation rail.
    *
@@ -1056,6 +1652,32 @@ export default function Chat() {
                       (activeId === s.id ? "bg-accent" : "hover:bg-secondary")
                     }
                   >
+                    {/*
+                      B1/B4: the row states that this conversation is generating
+                      (or has an unseen answer) while the user is elsewhere. The
+                      indicator is per row, so it is the discoverable stand-in
+                      for the view jump that used to happen.
+                    */}
+                    {(generating[s.id] === true || unseen[s.id] === true) && (
+                      <span
+                        className="absolute end-2.5 top-1/2 -translate-y-1/2"
+                        data-testid={generating[s.id] ? "chat-row-generating" : "chat-row-unseen"}
+                      >
+                        {generating[s.id] ? (
+                          <span
+                            role="status"
+                            aria-label="در حال پاسخ‌گویی"
+                            className="block size-3 animate-spin rounded-full border-2 border-primary border-t-transparent"
+                          />
+                        ) : (
+                          <span
+                            role="status"
+                            aria-label="پاسخ تازه"
+                            className="block size-2 rounded-full bg-primary"
+                          />
+                        )}
+                      </span>
+                    )}
                     <span
                       className={
                         "block truncate text-caption font-bold " +
@@ -1124,6 +1746,84 @@ export default function Chat() {
         </DialogContent>
       </Dialog>
 
+      {/*
+        B5: the memory surface lives inside the chat route now. The standalone
+        «ایجنت من» page is being deleted, and memory is part of what the
+        assistant knows about the user - not a separate destination.
+      */}
+      <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto">
+          <DialogHeader className="text-start">
+            <DialogTitle>حافظه</DialogTitle>
+            <DialogDescription>
+              چیزهایی که دستیار از گفتگوهای شما به خاطر سپرده است. هر مورد را می‌توانید حذف کنید.
+            </DialogDescription>
+          </DialogHeader>
+          {memoryError && (
+            <p role="alert" data-testid="memory-error" className="text-caption text-error">
+              {memoryError}
+            </p>
+          )}
+          <ul className="grid max-h-[40dvh] gap-2 overflow-y-auto" aria-label="فهرست حافظه">
+            {memories.length === 0 && (
+              <li className="text-caption text-muted-foreground">
+                هنوز چیزی به خاطر سپرده نشده است.
+              </li>
+            )}
+            {memories.map((memory) => (
+              <li
+                key={memory.id}
+                data-testid="memory-row"
+                className="flex items-start gap-3 rounded-control border border-border px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2 text-micro text-muted-foreground">
+                    <span className="rounded-pill bg-secondary px-2 py-0.5">
+                      {KIND_LABEL[memory.kind] ?? memory.kind}
+                    </span>
+                    <span>{memory.created_at ? faRelative(memory.created_at) : ""}</span>
+                  </div>
+                  <p className="mt-1 text-caption text-foreground">{memory.content}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={"حذف این خاطره: " + memory.content}
+                  data-testid="memory-forget"
+                  disabled={memoryBusyId === memory.id}
+                  onClick={() => void forgetMemory(memory.id)}
+                >
+                  <Trash2 aria-hidden className="size-4" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <div className="grid gap-2">
+            <textarea
+              rows={2}
+              maxLength={600}
+              aria-label="افزودن به حافظه"
+              data-testid="memory-draft"
+              placeholder="چیزی که می‌خواهید دستیار همیشه بداند…"
+              className="w-full rounded-control border border-border bg-card px-3 py-2 text-caption text-foreground outline-none focus-visible:border-primary"
+              value={memoryDraft}
+              onChange={(event) => setMemoryDraft(event.target.value)}
+            />
+            <div>
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="memory-add"
+                disabled={memoryBusy || memoryDraft.trim().length === 0}
+                onClick={() => void addMemory()}
+              >
+                {memoryBusy ? "در حال افزودن…" : "افزودن به حافظه"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* — chat-main — */}
       <section className="flex min-w-0 flex-1 flex-col bg-secondary" aria-label="پیام‌ها">
         {/* Below md there is no rail column, so this is the only way into the
@@ -1138,6 +1838,17 @@ export default function Chat() {
           >
             <History aria-hidden className="size-4" />
             گفتگوها
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="rounded-control"
+            data-testid="chat-memory-open"
+            onClick={() => setMemoryOpen(true)}
+          >
+            <Brain aria-hidden className="size-4" />
+            حافظه
           </Button>
           <Button
             type="button"
@@ -1167,7 +1878,7 @@ export default function Chat() {
         <div
           ref={transcriptRef}
           aria-live="polite"
-          aria-busy={busy}
+          aria-busy={viewGenerating}
           // PO report: right-click inside the chat text did not open the
           // browser's own menu. Nothing in the app suppresses contextmenu (no
           // global listener, no preventDefault - every listener is
@@ -1179,7 +1890,7 @@ export default function Chat() {
           // utility landing on an ancestor.
           className="min-h-0 flex-1 select-text space-y-[18px] overflow-y-auto px-[8%] py-[26px]"
         >
-          {messages.length === 0 && !busy && (
+          {messages.length === 0 && !viewGenerating && (
             <div className="flex h-full flex-col items-center justify-center px-[30px] text-center">
               <span
                 aria-hidden
@@ -1291,6 +2002,16 @@ export default function Chat() {
                       ) : (
                         <AnswerBody message={m} onReveal={(marker) => revealCitation(m, marker)} />
                       )}
+                      {!isUser && (
+                        <ArtifactList
+                          message={m}
+                          output={
+                            m.execution_id
+                              ? execOutputs[m.execution_id]
+                              : Object.values(execOutputs).find((o) => o.text === messageText(m))
+                          }
+                        />
+                      )}
                       {hasCitations && (
                         <CitationList
                           message={m}
@@ -1303,17 +2024,23 @@ export default function Chat() {
                       )}
                     </div>
                   </div>
-                  {!busy && (
-                    <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  {!viewGenerating && (
+                    <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                       <button
                         type="button"
+                        data-testid={"chat-copy-" + m.id}
                         className="inline-flex cursor-pointer items-center gap-[5px] rounded-xs border border-transparent px-2 py-[3px] text-micro font-semibold text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground min-h-11 md:min-h-0"
-                        onClick={() => void navigator.clipboard?.writeText(messageText(m))}
-                        aria-label="کپی پیام"
+                        onClick={() => void copyMessage(m)}
+                        aria-label={isUser ? "کپی پیام من" : "کپی پاسخ هوش سازمان"}
                       >
                         <Copy aria-hidden className="size-[13px] rtl:-scale-x-100" />
-                        کپی
+                        {copied === m.id ? "کپی شد" : "کپی"}
                       </button>
+                      {copied === m.id && (
+                        <span role="status" aria-live="polite" className="sr-only">
+                          پاسخ کپی شد.
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1321,7 +2048,7 @@ export default function Chat() {
             );
           })}
 
-          {busy && (
+          {viewGenerating && (
             <div role="status" aria-live="polite" className="flex gap-3" data-testid="thinking">
               <span
                 aria-hidden
@@ -1344,7 +2071,7 @@ export default function Chat() {
               <AlertCircle aria-hidden className="mt-0.5 size-[17px] shrink-0" />
               <div>
                 {error}
-                {lastSent && !busy ? (
+                {lastSent && !viewGenerating ? (
                   <div className="mt-2">
                     <LoadingButton
                       variant="secondary"
@@ -1390,11 +2117,28 @@ export default function Chat() {
                   void send();
                 }
               }}
-              disabled={busy || blocked}
+              disabled={blocked}
             />
+            {viewGenerating && (
+              // Stopping is not the same as sending: it acts on the run, so it
+              // sits beside the send control and only while one is in flight.
+              <button
+                type="button"
+                data-testid="chat-stop"
+                disabled={cancelling}
+                onClick={() => {
+                  if (activeId !== null) void cancelRun(activeId);
+                }}
+                className="flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-control border border-border px-3 text-caption font-bold text-foreground transition-colors hover:border-destructive hover:text-destructive disabled:opacity-55"
+                aria-label="توقف پاسخ‌گویی"
+              >
+                <Square aria-hidden className="size-3.5" />
+                توقف
+              </button>
+            )}
             <button
               type="submit"
-              disabled={busy || blocked || input.trim().length === 0}
+              disabled={blocked || input.trim().length === 0}
               className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-control transition-colors disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-muted-foreground bg-primary text-primary-foreground hover:bg-primary/90"
               data-testid="send"
               aria-label="ارسال"

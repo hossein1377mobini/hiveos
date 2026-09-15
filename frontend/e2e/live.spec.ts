@@ -99,7 +99,10 @@ test.describe("live staging", () => {
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await login(page);
-    for (const path of ["/chat", "/agent", "/knowledge", "/usage", "/wallet"]) {
+    // /agent is no longer a route: the standalone agent page was folded into
+    // the chat surface, whose memory panel now owns it (see AppShell). Only the
+    // real routes are walked, so this test cannot pass by following a redirect.
+    for (const path of ["/chat", "/knowledge", "/usage", "/wallet"]) {
       await page.goto(`${BASE}${path}`);
       await page.waitForLoadState("networkidle");
       await expect(page.locator("body")).not.toContainText("خطای غیرمنتظره");

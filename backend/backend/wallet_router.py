@@ -26,8 +26,11 @@ async def wallet_endpoint(
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """US-1203 AC1: balance + recent transactions (blocked flag for the banner)."""
-    return ok(await wallet.get_wallet_state(session, auth.organization.id))
+    """US-1203 AC1: balance + recent transactions (blocked flag for the banner).
+
+    Also the caller's own consumption totals (PO requirement 2026-09).
+    """
+    return ok(await wallet.get_wallet_state(session, auth.organization.id, auth.user.id))
 
 
 @router.post("/charge", dependencies=[Depends(_rate_limit)])

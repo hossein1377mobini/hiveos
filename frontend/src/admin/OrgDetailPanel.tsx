@@ -16,6 +16,51 @@ export interface OrgDetail {
   knowledge_source: Record<string, unknown> | null
 }
 
+/**
+ * backend/backend/admin.py:organization_detail folds the aggregate columns of
+ * the user query into users[].usage: {executions, tokens_in, tokens_out,
+ * cached_tokens, reasoning_tokens, cost_usd, cost_credits}. Those are exactly
+ * the fields below - nothing is invented here.
+ */
+export interface UserUsage {
+  executions: number
+  tokens_in: number
+  tokens_out: number
+  cached_tokens: number
+  reasoning_tokens: number
+  cost_usd: number
+  cost_credits: number
+}
+
+export function readUsage(value: unknown): UserUsage | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  const num = (key: string) => {
+    const n = Number(raw[key] ?? 0)
+    return Number.isFinite(n) ? n : 0
+  }
+  return {
+    executions: num("executions"),
+    tokens_in: num("tokens_in"),
+    tokens_out: num("tokens_out"),
+    cached_tokens: num("cached_tokens"),
+    reasoning_tokens: num("reasoning_tokens"),
+    cost_usd: num("cost_usd"),
+    cost_credits: num("cost_credits"),
+  }
+}
+
+/** USD with honest decimals: a real $0.0004 must not render as "$0". */
+export function usdText(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "$" + faNum(0, 4)
+  return "$" + faNum(value, value < 0.01 ? 6 : 4)
+}
+
+/** Cached tokens sit inside tokens_in and are priced at their own, lower rate. */
+export function freshInputTokens(usage: UserUsage): number {
+  return Math.max(0, usage.tokens_in - usage.cached_tokens)
+}
+
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0">
@@ -175,11 +220,32 @@ export function OrgDetailPanel({
           <ul className="divide-y divide-border rounded-control border border-border">
             {detail.users.map((user) => {
               const isOwner = String(user.id) === String(org.owner_user_id ?? "")
+              const usage = readUsage(user.usage)
               return (
                 <li key={String(user.id)} className="flex items-center gap-3 px-3 py-2">
-                  <span className="mono min-w-0 flex-1 truncate text-caption" dir="ltr">
-                    {String(user.username)}
-                  </span>
+                  <div className="min-w-0 flex-1">
+                    <span className="mono block truncate text-caption" dir="ltr">
+                      {String(user.username)}
+                    </span>
+                    {/*
+                      Per-user consumption (users[].usage). The three token
+                      classes, the USD cost and the credits actually deducted,
+                      in that order, so the PO can audit one user's usage
+                      without opening the organisation's aggregate.
+                    */}
+                    {usage && (
+                      <span
+                        className="block text-micro text-muted-foreground"
+                        data-testid={"user-usage-" + String(user.id)}
+                      >
+                        مصرف: <span data-numeric>{faNum(freshInputTokens(usage))}</span> ورودی تازه ·{" "}
+                        <span data-numeric>{faNum(usage.cached_tokens)}</span> کش‌شده ·{" "}
+                        <span data-numeric>{faNum(usage.tokens_out)}</span> خروجی ·{" "}
+                        <span dir="ltr" data-numeric>{usdText(usage.cost_usd)}</span> ·{" "}
+                        <span data-numeric>{faNum(usage.cost_credits)}</span> اعتبار
+                      </span>
+                    )}
+                  </div>
                   <span className="text-micro text-muted-foreground">
                     {String(user.membership ?? user.status ?? "")}
                   </span>

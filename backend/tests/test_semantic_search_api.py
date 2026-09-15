@@ -105,27 +105,40 @@ def test_gibberish_returns_nothing_instead_of_a_confident_page(client, tmp_path)
     0.31-0.37 - and the gibberish still came back as a full page of "sources",
     so an answer about something absent from the knowledge base looked grounded.
     The floor sits in the measured gap.
+
+    The floor is provider-aware (see relevance_floor): the test suite runs the
+    sha256 stub, whose scores carry no semantics at all, so the semantic floor
+    is switched on here the way a real embedding model switches it on. Under the
+    stub the ranking is hash noise and filtering it would discard roughly half
+    of a fully indexed corpus at random.
     """
+    from backend.knowledge import search as search_module
     from backend.knowledge.search import MIN_RELEVANCE_SCORE
 
     ctx = _register_asset(client, tmp_path, "note.md", "دستورالعمل نصب سرور لینوکس")
     _drain()
 
-    # A question the corpus says nothing about.
-    response = client.post(
-        f"{SEARCH}",
-        json={"query": "xyzzy plugh frobnicate qqqqq zzz"},
-        headers=ctx["headers"],
-    )
-    assert response.status_code == 200
-    assert response.json()["data"]["results"] == []
+    original = search_module.relevance_floor
+    search_module.relevance_floor = lambda provider=None: MIN_RELEVANCE_SCORE
+    try:
+        # A question the corpus says nothing about.
+        response = client.post(
+            f"{SEARCH}",
+            json={"query": "xyzzy plugh frobnicate qqqqq zzz"},
+            headers=ctx["headers"],
+        )
+        assert response.status_code == 200
+        assert response.json()["data"]["results"] == []
 
-    # The relevant query still comes back, so the floor did not close the door.
-    relevant = client.post(
-        f"{SEARCH}",
-        json={"query": "دستورالعمل نصب سرور لینوکس"},
-        headers=ctx["headers"],
-    ).json()["data"]["results"]
+        # The relevant query still comes back, so the floor did not close the
+        # door.
+        relevant = client.post(
+            f"{SEARCH}",
+            json={"query": "دستورالعمل نصب سرور لینوکس"},
+            headers=ctx["headers"],
+        ).json()["data"]["results"]
+    finally:
+        search_module.relevance_floor = original
     assert relevant and relevant[0]["score"] >= MIN_RELEVANCE_SCORE
 
 

@@ -229,6 +229,35 @@ async def _reclaim_orphaned_jobs(session: AsyncSession) -> int:
     return reclaimed
 
 
+# How much work a USER-TRIGGERED request may do inline. The queue is otherwise
+# consumed only by the scheduler loop, whose poll cadence is 60 s (config:
+# ingestion_scheduler_poll_seconds), so a file added and a question asked in the
+# same minute found an empty knowledge base - the PO report "I added a file, but
+# it says no document was sent with the question". The work is genuinely heavy
+# (extraction + embedding at ~0.7 s per chunk on the staging CPU), so it is
+# bounded rather than unbounded: the operator gets the first batch indexed inside
+# the scan response and the remainder is picked up by the next scheduler tick,
+# which the scan response reports as a count instead of hiding.
+INLINE_PROCESS_LIMIT = 5
+
+
+async def process_now(session: AsyncSession, limit: int = INLINE_PROCESS_LIMIT) -> int:
+    """Drain the queue inside the caller's request, bounded, never raising.
+
+    Called after a user-initiated ingestion action (registration, "Scan now", a
+    direct upload) so the files it just queued are actually indexed by the time
+    the response is sent, instead of at the next scheduled tick. The caller must
+    have COMMITTED first: the failure path below rolls back, and a scan's own
+    history row must not be collateral damage of a processing error.
+    """
+    try:
+        return await drain_queue(session, limit=limit)
+    except Exception:  # noqa: BLE001 - the scheduler tick is the safety net
+        logger.exception("inline processing failed; the scheduler will retry")
+        await session.rollback()
+        return 0
+
+
 async def drain_queue(session: AsyncSession, limit: int = 20) -> int:
     """Process up to limit queued jobs (highest priority, oldest first)."""
     await _reclaim_orphaned_jobs(session)

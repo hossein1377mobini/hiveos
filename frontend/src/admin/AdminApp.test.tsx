@@ -1,6 +1,7 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import AdminApp from "./AdminApp";
+import { OrgDetailPanel, type OrgDetail } from "./OrgDetailPanel";
 import { renderWithRouter } from "../test/render";
 
 afterEach(() => {
@@ -107,7 +108,12 @@ describe("Admin panel", () => {
     // Values arrive as typed controls with Persian labels...
     expect(await screen.findByLabelText("درگاه فعال")).toBeInTheDocument();
     expect(await screen.findByLabelText("مدل پاسخ‌دهی")).toHaveValue("deepseek-v4.1-flash");
-    expect(screen.getByLabelText("اعتبار به‌ازای هر ۱۰۰۰ توکن خروجی")).toHaveValue(7);
+    expect(screen.getByLabelText("اعتبار به‌ازای هر ۱۰۰۰ توکن خروجی (نرخ پشتیبان)")).toHaveValue(7);
+    // The primary rate is the AvalAI-catalogue USD -> credit conversion, and it
+    // is rendered even when the server has stored no value: the panel shows the
+    // runtime default (1000) instead of an empty box that reads as "unset".
+    expect(screen.getByLabelText("اعتبار به‌ازای هر دلار")).toBeInTheDocument();
+    expect(await screen.findByTestId("setting-default-credits_per_usd")).toHaveTextContent("1000");
     // ...in one labelled section per subject, in reading order, all on the page
     // at once. v0.1 hid each behind a menu, so the prompt was not reachable from
     // the provider it belongs to.
@@ -220,6 +226,112 @@ describe("Operations workspace", () => {
     stub({ host: hostPayload, ai: { state: "unsupported", reason: "NO_ACCOUNT_API", credit: null, usage: null, usage_by_model: [], packages: [], covered_models: [] } });
     renderAdmin("/admin/ai");
     expect(await screen.findByText(/امکان گزارش اعتبار را ارائه نمی‌دهد/)).toBeInTheDocument();
+  });
+
+  // The admin half of the PO's requirement: GET /admin/organizations/{id}
+  // returns users[].usage with the same field set as the org app, so the panel
+  // must show each member's token classes, USD cost and deducted credits.
+  it("renders per-user consumption from the organisation detail", () => {
+    const detail: OrgDetail = {
+      organization: { id: "o1", owner_user_id: "u1" },
+      users: [
+        {
+          id: "u1",
+          username: "owner",
+          usage: {
+            executions: 3,
+            tokens_in: 1500,
+            tokens_out: 800,
+            cached_tokens: 300,
+            reasoning_tokens: 50,
+            cost_usd: 0.0004,
+            cost_credits: 4,
+          },
+        },
+        {
+          id: "u2",
+          username: "member",
+          usage: {
+            executions: 0,
+            tokens_in: 0,
+            tokens_out: 0,
+            cached_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: 0,
+            cost_credits: 0,
+          },
+        },
+      ],
+      wallet_transactions: [],
+      charge_requests: [],
+      recent_events: [],
+      assets_by_status: {},
+      knowledge_source: null,
+    };
+    renderWithRouter(<OrgDetailPanel detail={detail} />);
+    const usage = screen.getByTestId("user-usage-u1");
+    // 1500 prompt tokens with 300 cached -> 1200 fresh input tokens.
+    expect(usage).toHaveTextContent("۱٬۲۰۰");
+    expect(usage).toHaveTextContent("۳۰۰");
+    expect(usage).toHaveTextContent("۸۰۰");
+    expect(usage).toHaveTextContent("۰٫۰۰۰۴");
+    expect(usage).toHaveTextContent("۴");
+    expect(screen.getByTestId("user-usage-u2")).toHaveTextContent("۰");
+  });
+
+  it("shows the org-level usage summary on a pending charge request", async () => {
+    sessionStorage.setItem("hiveos.admin", "adm-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/organizations/o1")) {
+          return json({
+            organization: { id: "o1" },
+            users: [
+              {
+                id: "u1",
+                username: "owner",
+                usage: {
+                  executions: 3,
+                  tokens_in: 1500,
+                  tokens_out: 800,
+                  cached_tokens: 300,
+                  reasoning_tokens: 50,
+                  cost_usd: 0.0004,
+                  cost_credits: 4,
+                },
+              },
+            ],
+            wallet_transactions: [],
+            charge_requests: [],
+            recent_events: [],
+            assets_by_status: {},
+            knowledge_source: null,
+          });
+        }
+        if (url.includes("/charge-requests")) {
+          return json({
+            requests: [
+              {
+                id: "r1",
+                organization_id: "o1",
+                amount: 200,
+                status: "PENDING",
+                note: null,
+                created_at: "2026-09-01T00:00:00Z",
+              },
+            ],
+          });
+        }
+        return json({});
+      }),
+    );
+    renderAdmin("/admin/billing");
+    const usage = await screen.findByTestId("org-usage-o1");
+    expect(usage).toHaveTextContent("۱٬۲۰۰");
+    expect(usage).toHaveTextContent("۰٫۰۰۰۴");
+    expect(usage).toHaveTextContent("اعتبار");
   });
 
   it("warns when the nightly backup has gone stale", async () => {

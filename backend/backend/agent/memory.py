@@ -31,6 +31,27 @@ This used to claim the blend "is tunable per agent through settings" while
 TRUST_GAIN was a module constant and user_agents.settings was an empty dict that
 nothing ever read - a documented capability that did not exist.
 
+WHY EVERY EXCHANGE IS REMEMBERED, AND WHY THE LAST FEW ARE ALWAYS
+RECALLED. Marker-gated extraction answers "is this sentence durable?", which is
+the right question for a fact and the wrong one for context. Ordinary
+conversation contains no marker, so it stored nothing, and the next chat - a
+NEW session asking a follow-up - recalled nothing about the previous one. That
+is the PO's report verbatim: "I write something, go to the next chat, and it
+should have my previous chat's content in mind."
+
+The fix is two bounded additions, not a looser marker list:
+
+  * remember_exchange always stores ONE `summary` row carrying the user's own
+    question. The answer is deliberately not stored: it is prose the agent
+    generated, and a transcript row per turn buys no recall.
+  * recall always returns the newest RECENCY_LIMIT summaries (and any row whose
+    embedding is NULL) IN ADDITION to the semantically relevant set, because a
+    follow-up question is usually worded nothing like what preceded it.
+
+Both are capped, and neither can push the result past the organization's
+recall_limit: recency takes a reserved slice of the budget and the vector stage
+spends only what is left.
+
 WHY MEMORIES ARE NEVER HARD-DELETED BY THE LEARNING LOOP. An inference about
 what matters can be wrong. Deactivating (or down-weighting) is recoverable and
 auditable; deleting is not. Only the user's explicit forget call removes a row.
@@ -43,7 +64,7 @@ import math
 import re
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import AgentMemory, UserAgent
@@ -74,6 +95,19 @@ MIN_ACTIVE_WEIGHT = 0.2
 # The fix is a bounded multiplier over relevance: log1p grows slowly, so no
 # amount of repetition can rescue a memory that does not match the question.
 TRUST_GAIN = 0.25
+
+# How many of the most recent exchanges are put in front of the model no matter
+# what the question is about. This is the half of the fix that a similarity
+# search cannot provide: the current question is usually worded nothing like
+# what preceded it, so "what did I just say" is exactly the query a vector stage
+# fails.
+#
+# Three is deliberately small. Recency is a blunt instrument - it cannot tell a
+# throwaway line from a decision - so it gets a fixed, tiny slice of the budget
+# and relevance keeps the rest. It can never grow the result past recall_limit.
+RECENCY_LIMIT = 3
+# Bounded here as well as in the schema, matching the vector stage's own clamp.
+_MAX_RECALL = 50
 
 # Extraction heuristics. These are deliberately conservative: a wrong memory is
 # worse than no memory, because it will be repeated back to the user as fact in
@@ -163,6 +197,32 @@ def extract_candidates(question: str, answer: str) -> list[tuple[str, str]]:
     return found[:3]
 
 
+def summary_candidate(question: str) -> tuple[str, str] | None:
+    """The unconditional record of what the user wrote this turn.
+
+    Marker-gated extraction is deliberately conservative, and the cost of that
+    conservatism is that ordinary conversation stores nothing: a plain question
+    in one chat leaves the next chat with no idea what was just discussed. This
+    is the one candidate that is stored every time, so the exchange itself is
+    the memory.
+
+    Only the QUESTION is kept. The answer is prose the agent generated, and
+    storing it verbatim would add a transcript-sized row to the store on every
+    single turn for no added recall. Returns None for an empty question - there
+    is nothing to remember - otherwise the same normalization and the same
+    _MAX_MEMORY_CHARS bound every other memory gets.
+
+    There is deliberately no marker requirement and no minimum-length gate
+    here: "always" means always, and a short question ("قیمت چنده؟") is still
+    what the user said. The bound that stops this from flooding anything is
+    one row per turn plus the capped recency slice in recall().
+    """
+    cleaned = question.strip().strip("-•·").strip()
+    if not cleaned:
+        return None
+    return ("summary", cleaned[:_MAX_MEMORY_CHARS])
+
+
 async def ensure_agent(session: AsyncSession, organization_id, user_id) -> UserAgent:
     """Get-or-create this user's agent.
 
@@ -229,6 +289,47 @@ async def agent_settings(session: AsyncSession) -> dict:
     return {**DEFAULT_AGENT_SETTINGS, **(stored or {})}
 
 
+async def _recent_memories(
+    session: AsyncSession,
+    organization_id,
+    user_id,
+    cap: int,
+) -> list[AgentMemory]:
+    """The newest memories worth showing no matter what the question is.
+
+    Two populations that a pure similarity search cannot serve:
+
+      * every `summary` - one is written for every exchange, marker or not, so
+        this IS the previous chat's content;
+      * any row whose embedding is NULL - an embed that failed twice would
+        otherwise be invisible to the vector stage forever, because that stage
+        filters on embedding.is_not(None). Included for EVERY kind, not only
+        summaries: a marker-gated fact that failed to embed must not be lost
+        either.
+
+    Ordered newest-first and hard-capped by the caller, so this can only ever
+    add a small, fixed slice to the result rather than growing recall.
+    """
+    if cap <= 0:
+        return []
+    statement = (
+        select(AgentMemory)
+        .where(
+            AgentMemory.organization_id == organization_id,
+            AgentMemory.user_id == user_id,
+            AgentMemory.active.is_(True),
+            AgentMemory.weight >= MIN_ACTIVE_WEIGHT,
+            or_(
+                AgentMemory.kind == "summary",
+                AgentMemory.embedding.is_(None),
+            ),
+        )
+        .order_by(AgentMemory.created_at.desc())
+        .limit(cap)
+    )
+    return list((await session.execute(statement)).scalars().all())
+
+
 async def recall(
     session: AsyncSession,
     organization_id,
@@ -238,9 +339,23 @@ async def recall(
 ) -> list[AgentMemory]:
     """The memories most worth putting in front of the model for this question.
 
-    Two stages: vector similarity narrows to the semantically relevant set,
-    then weight and usage reorder it. Filtering by active/weight happens in SQL
-    so a faded memory never costs an embedding comparison.
+    Three stages, and the budget is settled BEFORE any of them runs because
+    boundedness is the invariant that matters:
+
+      1. RECENT CONTEXT. The newest summaries (plus any NULL-embedding row),
+         capped at RECENCY_LIMIT and further capped by `limit`. Returned even
+         when the query embedding is unrelated to them - that is exactly what
+         makes a follow-up question in a NEW chat carry the previous chat.
+      2. SEMANTIC. Vector similarity narrows the REST of the budget to the
+         relevant set. Its width is `limit` minus the recency rows actually
+         found, so the two stages together can never exceed `limit`.
+      3. RE-RANK. Weight and usage reorder the semantic set, unchanged.
+
+    Results are deduplicated by id and ordered semantic-first: a memory that is
+    both recent and relevant appears once, in its ranked position, and a
+    marker-gated fact or decision still outranks a mere summary. Filtering by
+    active/weight happens in SQL so a faded memory never costs an embedding
+    comparison.
     """
     from backend.knowledge.embeddings import embed_one
 
@@ -250,40 +365,26 @@ async def recall(
     # still wins.
     settings = await agent_settings(session)
     if not settings.get("memory_enabled", True):
-        # Off means no recall at all. The memories stay in the database - this
-        # disables their use, it does not delete anything.
+        # Off means no recall at all, and that includes the recency slice. The
+        # memories stay in the database - this disables their use, it does not
+        # delete anything.
         return []
     if limit is None:
         limit = int(settings.get("recall_limit") or DEFAULT_RECALL_LIMIT)
     trust_gain = float(settings.get("trust_gain", TRUST_GAIN))
+    # recall_limit IS the budget. Bounded here as well as in the schema so a
+    # value that reached the database by another route cannot make recall
+    # unbounded, and so the two stages below can be balanced against each other.
+    limit = max(1, min(int(limit), _MAX_RECALL))
 
-    try:
-        vector = await embed_one(query)
-    except Exception as exc:  # noqa: BLE001 - a memory miss must not fail the answer
-        logger.warning("memory recall embedding failed: %s", exc)
-        return []
-
-    # The distance is selected, not merely ordered by: the re-rank below needs
-    # it, and the previous version paid for the embedding comparison and then
-    # threw the result away.
-    distance = AgentMemory.embedding.cosine_distance(vector).label("distance")
-    statement = (
-        select(AgentMemory, distance)
-        .where(
-            AgentMemory.organization_id == organization_id,
-            AgentMemory.user_id == user_id,
-            AgentMemory.active.is_(True),
-            AgentMemory.weight >= MIN_ACTIVE_WEIGHT,
-            AgentMemory.embedding.is_not(None),
-        )
-        .order_by(distance)
-        # Bounded here as well as in the schema: a value that reached the database
-        # by another route must not be able to make this query unbounded.
-        .limit(max(1, min(limit, 50)) * 3)
+    # Stage 1 spends its slice first, which is what reserves room for it: the
+    # vector stage below is told how much is LEFT, so recency can never push
+    # the total past the budget.
+    recent = await _recent_memories(
+        session, organization_id, user_id, min(RECENCY_LIMIT, limit)
     )
-    rows = list((await session.execute(statement)).all())
-    if not rows:
-        return []
+    recent_ids = {memory.id for memory in recent}
+    remaining = limit - len(recent)
 
     def score(row) -> float:
         memory, distance_value = row
@@ -296,8 +397,48 @@ async def recall(
         # not yet below the floor) is damped rather than boosted.
         return relevance * (1.0 + trust_gain * math.log1p(max(trust, 0.0)))
 
-    rows.sort(key=score, reverse=True)
-    return [memory for memory, _distance in rows[: max(1, min(limit, 50))]]
+    ranked: list[AgentMemory] = []
+    if remaining > 0:
+        vector = None
+        try:
+            vector = await embed_one(query)
+        except Exception as exc:  # noqa: BLE001 - a memory miss must not fail the answer
+            # The recency stage needs no embedding and has already run, so a
+            # dead embedding provider now degrades to "recent context only"
+            # instead of amnesia.
+            logger.warning("memory recall embedding failed: %s", exc)
+
+        if vector is not None:
+            # The distance is selected, not merely ordered by: the re-rank
+            # needs it, and the previous version paid for the embedding
+            # comparison and then threw the result away.
+            distance = AgentMemory.embedding.cosine_distance(vector).label("distance")
+            statement = (
+                select(AgentMemory, distance)
+                .where(
+                    AgentMemory.organization_id == organization_id,
+                    AgentMemory.user_id == user_id,
+                    AgentMemory.active.is_(True),
+                    AgentMemory.weight >= MIN_ACTIVE_WEIGHT,
+                    AgentMemory.embedding.is_not(None),
+                )
+                .order_by(distance)
+                # Over-fetch by 3x; the recency rows below are dropped from it.
+                .limit(remaining * 3)
+            )
+            rows = list((await session.execute(statement)).all())
+            rows.sort(key=score, reverse=True)
+            # A row already in the recency block is skipped rather than served
+            # twice, and taking only `remaining` of the rest keeps the total at
+            # or below the budget.
+            ranked = [
+                memory for memory, _distance in rows if memory.id not in recent_ids
+            ][:remaining]
+
+    # Semantic first, recency tail: relevance decides, so a typed fact still
+    # ranks above a summary; the recency rows are the guaranteed floor of
+    # context, not the top of the ranking.
+    return ranked + recent
 
 
 def render_memories(memories: list[AgentMemory]) -> str:
@@ -323,6 +464,30 @@ def render_memories(memories: list[AgentMemory]) -> str:
     return "\n".join(lines)
 
 
+async def _embed_texts_with_retry(texts: list[str]) -> list[list[float] | None]:
+    """Embed, retry once, and never raise.
+
+    A memory stored with embedding=NULL used to be invisible to the vector
+    stage forever, and nothing ever retried it, so one transient model/runtime
+    failure silently made that memory PERMANENTLY unreachable - the worst form
+    of "the agent forgot". One immediate retry covers the transient case. If it
+    still fails the row is stored anyway - never deleted, never dropped -
+    carrying no vector, and recall()'s recency stage is what keeps it findable.
+
+    No backoff and no sleep: recording has to stay as close to instant as the
+    exchange itself, and a failing provider does not get faster by making the
+    user's turn wait longer.
+    """
+    from backend.knowledge.embeddings import embed_texts
+
+    for attempt in (1, 2):
+        try:
+            return list(await embed_texts(texts))
+        except Exception as exc:  # noqa: BLE001 - a failed embed must not fail the turn
+            logger.warning("memory embed failed (attempt %d/2): %s", attempt, exc)
+    return [None] * len(texts)
+
+
 async def remember_exchange(
     session: AsyncSession,
     *,
@@ -334,19 +499,33 @@ async def remember_exchange(
     execution_id=None,
     message_id=None,
 ) -> list[AgentMemory]:
-    """Extract and store what this exchange is worth remembering."""
-    from backend.knowledge.embeddings import embed_texts
+    """Extract and store what this exchange is worth remembering.
 
+    Two things are written per turn, and both go through the SAME candidate and
+    storage loop below, so dedupe, vector handling and the flush stay in one
+    place:
+
+      1. every marker-gated sentence extract_candidates() found;
+      2. ALWAYS one `summary` carrying the user's own question, even when no
+         marker matched. Without it, ordinary conversation stored nothing and
+         the next chat recalled nothing about the previous one - the exact
+         behaviour the PO reported. The answer is NOT stored: it is prose the
+         agent generated, and one transcript-shaped row per turn buys no recall.
+
+    The summary is appended AFTER the extracted candidates on purpose: when the
+    question itself carries a marker ("قیمت محصول ما ..."), the typed
+    fact/preference/decision row claims the content and the summary collapses
+    into it as a duplicate instead of replacing it with something weaker.
+    """
     candidates = extract_candidates(question, answer)
+    summary = summary_candidate(question)
+    if summary is not None:
+        candidates = [*candidates, summary]
     if not candidates:
         return []
 
     texts = [content for _, content in candidates]
-    try:
-        vectors = await embed_texts(texts)
-    except Exception as exc:  # noqa: BLE001 - a failed embed must not fail the turn
-        logger.warning("memory embed failed, storing without vector: %s", exc)
-        vectors = [None] * len(texts)
+    vectors = await _embed_texts_with_retry(texts)
 
     stored: list[AgentMemory] = []
     for (kind, content), vector in zip(candidates, vectors, strict=False):

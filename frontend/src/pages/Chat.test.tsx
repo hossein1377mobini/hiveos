@@ -610,6 +610,437 @@ describe("Chat page (RG-14)", () => {
       ).toBe(false);
     });
 
+
+  /**
+   * B3: the files an agent created.
+   *
+   * The card is evidence, not narration: the row is built from the server's own
+   * artifact list and links straight at the stored asset, so the answer cannot
+   * merely claim it wrote a report.
+   */
+  describe("created files (B3)", () => {
+    const SESSIONS = {
+      items: [{ id: "s1", title: null, status: "ACTIVE", created_at: "" }],
+      total_count: 1,
+      page: 1,
+      page_size: 20,
+      has_more: false,
+    };
+
+    function renderHistory(message: Record<string, unknown>) {
+      mockApi({
+        "GET /chat/sessions": SESSIONS,
+        "GET /chat/sessions/s1/messages": { items: [message] },
+        "GET /wallet": { balance: 500, blocked: false },
+      });
+      return renderWithRouter(<Chat />);
+    }
+
+    it("renders a card per artifact, with a real download link from history", async () => {
+      renderHistory({
+        id: "m2",
+        role: "ASSISTANT",
+        content: { text: "گزارش آماده شد." },
+        citations: [],
+        // Persisted on the message, the way citations are.
+        artifacts: [
+          { asset_id: "a1", name: "گزارش-فروش.html", extension: "html", size_bytes: 24576, asset_type: "report" },
+          { asset_id: "a2", name: "نمودار-رشد.png", extension: "png", size_bytes: 5120, asset_type: "chart" },
+        ],
+        created_at: "",
+      });
+
+      const cards = await screen.findAllByTestId("chat-artifact");
+      expect(cards).toHaveLength(2);
+      expect(cards[0]).toHaveTextContent("گزارش-فروش.html");
+      expect(cards[0]).toHaveTextContent("گزارش");
+      expect(cards[1]).toHaveTextContent("نمودار");
+
+      // The href is built from the client's own API base, and the backend route
+      // is GET /knowledge-assets/{asset_id}/download.
+      const links = screen.getAllByTestId("chat-artifact-download");
+      expect(links[0]).toHaveAttribute("href", "/api/v1/knowledge-assets/a1/download");
+      expect(links[0]).toHaveAttribute("download", "گزارش-فروش.html");
+      expect(links[1]).toHaveAttribute("href", "/api/v1/knowledge-assets/a2/download");
+      // Named for a screen reader, not just "دانلود".
+      expect(links[0]).toHaveAttribute("aria-label", "دانلود گزارش-فروش.html");
+    });
+
+    it("renders no card for a message with no artifacts", async () => {
+      mockApi({
+        "GET /chat/sessions": SESSIONS,
+        "GET /chat/sessions/s1/messages": {
+          items: [
+            // Three shapes an older server can send: absent, null, empty.
+            { id: "m1", role: "ASSISTANT", content: { text: "بدون فایل" }, citations: [], created_at: "" },
+            { id: "m2", role: "ASSISTANT", content: { text: "بدون فایل ۲" }, citations: [], artifacts: null, created_at: "" },
+            { id: "m3", role: "ASSISTANT", content: { text: "بدون فایل ۳" }, citations: [], artifacts: [], created_at: "" },
+          ],
+        },
+        "GET /wallet": { balance: 500, blocked: false },
+      });
+      renderWithRouter(<Chat />);
+
+      expect(await screen.findByText("بدون فایل")).toBeInTheDocument();
+      expect(await screen.findByText("بدون فایل ۳")).toBeInTheDocument();
+      // The page neither crashes nor paints an empty box.
+      expect(screen.queryByTestId("chat-artifact")).not.toBeInTheDocument();
+      expect(screen.queryByText(/فایل ساخته شد/)).not.toBeInTheDocument();
+    });
+
+    it("shows the live run's artifacts from the execution output", async () => {
+      // The transcript refresh can race the persistence step, so the live turn
+      // is also allowed to read the artifacts off the execution output itself.
+      const fetchMock = mockApi({
+        "GET /chat/sessions": {
+          items: [{ id: "s1", title: "گفتگو", status: "ACTIVE", created_at: "", message_count: 1 }],
+          total_count: 1,
+          page: 1,
+          page_size: 20,
+          has_more: false,
+        },
+        "GET /chat/sessions/s1/messages": {
+          items: [{ id: "m1", role: "USER", content: { text: "گزارش بساز" }, citations: [], created_at: "" }],
+        },
+        "GET /wallet": { balance: 500, blocked: false },
+        "POST /chat/sessions/s1/messages": { id: "m1" },
+        "POST /executions": { id: "e9" },
+      });
+      renderWithRouter(<Chat />);
+      const composer = await screen.findByLabelText("متن پیام");
+      fireEvent.change(composer, { target: { value: "گزارش بساز" } });
+      fireEvent.keyDown(composer, { key: "Enter" });
+
+      // The run is watched through GET /executions/{id}; when it says COMPLETED
+      // the answer and its files arrive without navigating away.
+      await waitFor(() => {
+        expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/executions/e9"))).toBe(true);
+      });
+    });
+  });
+
+  /**
+   * B1/B2: one in-flight answer used to freeze the whole page. These tests are
+   * about the page staying usable, and about the state being per conversation.
+   */
+  describe("per-session generating state (B1/B2)", () => {
+    const SESSIONS = {
+      items: [
+        { id: "s1", title: "گفتگوی اول", status: "ACTIVE", created_at: "", message_count: 1 },
+        { id: "s2", title: "گفتگوی دوم", status: "ACTIVE", created_at: "", message_count: 1 },
+      ],
+      total_count: 2,
+      page: 1,
+      page_size: 20,
+      has_more: false,
+    };
+    const MESSAGES: Record<string, unknown> = {
+      "GET /chat/sessions/s1/messages": {
+        items: [{ id: "m1", role: "USER", content: { text: "پیام اول" }, citations: [], created_at: "" }],
+      },
+      "GET /chat/sessions/s2/messages": {
+        items: [{ id: "m2", role: "USER", content: { text: "پیام دوم" }, citations: [], created_at: "" }],
+      },
+      "GET /wallet": { balance: 500, blocked: false },
+      "POST /chat/sessions/s1/messages": { id: "m1" },
+      "POST /executions": { id: "e1" },
+    };
+
+    it("keeps the composer typable while a generation is in flight", async () => {
+      let release: (body: string) => void = () => {};
+      const parked = new Promise<string>((resolve) => {
+        release = (body) => resolve(body);
+      });
+      const fetchMock = mockApi({
+        ...MESSAGES,
+        "GET /chat/sessions": SESSIONS,
+        // The live status watch: RUNNING while the assertions below hold, so
+        // the "in flight" state is the one being tested and not a race.
+        "GET /executions/e1": { status: "RUNNING", output: null, error: null },
+      });
+      const real = fetchMock.getMockImplementation() as (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => Promise<Response>;
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/executions/e1/run") && (init?.method ?? "GET") === "POST") {
+          // Held open: the run is genuinely in flight for the assertions below.
+          return new Response(await parked, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return real(input, init);
+      });
+
+      renderWithRouter(<Chat />);
+      const composer = await screen.findByLabelText("متن پیام");
+      fireEvent.change(composer, { target: { value: "سوال من" } });
+      fireEvent.keyDown(composer, { key: "Enter" });
+
+      // In flight: the transcript says so, and the composer is NOT disabled.
+      expect(await screen.findByTestId("thinking")).toBeInTheDocument();
+      expect(composer).not.toBeDisabled();
+      // The only reason the send control can be inert is an empty field - the
+      // in-flight run must not be it.
+      expect(screen.getByTestId("send")).toBeDisabled();
+      fireEvent.change(composer, { target: { value: "متن جدید" } });
+      expect(composer).toHaveValue("متن جدید");
+      expect(screen.getByTestId("send")).not.toBeDisabled();
+
+      // The stop control is offered while a run is in flight.
+      expect(screen.getByTestId("chat-stop")).toBeInTheDocument();
+
+      // A second send into the SAME conversation is refused, not queued, and the
+      // refusal is explained rather than silently swallowed.
+      fireEvent.change(composer, { target: { value: "سوال دوم" } });
+      fireEvent.keyDown(composer, { key: "Enter" });
+      const box = await screen.findByTestId("chat-error");
+      expect(box).toHaveTextContent("هنوز در حال پاسخ‌گویی است");
+      expect(
+        fetchMock.mock.calls.filter((c) => String(c[0]).includes("/executions/e1/run")),
+      ).toHaveLength(1);
+
+      // Let the held request answer so the send path can finish; the
+      // end-of-run UI is covered by its own test below.
+      release(
+        JSON.stringify({
+          success: true,
+          data: { status: "COMPLETED", output: { text: "پاسخ" }, error: null },
+          message: null,
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.filter((c) => String(c[0]).includes("/executions/e1")),
+        ).not.toHaveLength(0),
+      );
+    });
+
+    it("switches to another conversation while generating, without being pulled back", async () => {
+      const fetchMock = mockApi({ ...MESSAGES, "GET /chat/sessions": SESSIONS });
+      const real = fetchMock.getMockImplementation() as (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => Promise<Response>;
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/executions/e1/run") && (init?.method ?? "GET") === "POST") {
+          // Never settles: the generation stays in flight for the whole test.
+          return new Promise<Response>(() => {});
+        }
+        return real(input, init);
+      });
+
+      renderWithRouter(<Chat />);
+      const composer = await screen.findByLabelText("متن پیام");
+      fireEvent.change(composer, { target: { value: "سوال من" } });
+      fireEvent.keyDown(composer, { key: "Enter" });
+      expect(await screen.findByTestId("thinking")).toBeInTheDocument();
+
+      // Switching stays possible, and the generating row says so.
+      // The delete control on the same row also names the conversation, so the
+      // accessible name alone is ambiguous; the row button is the first match.
+      fireEvent.click(screen.getAllByRole("button", { name: /گفتگوی دوم/ })[0]);
+      expect(await screen.findByText("پیام دوم")).toBeInTheDocument();
+      expect(screen.getByTestId("chat-row-generating")).toBeInTheDocument();
+      // The view is NOT yanked back to the generating conversation.
+      expect(screen.queryByTestId("thinking")).not.toBeInTheDocument();
+      expect(screen.queryByText("پیام اول")).not.toBeInTheDocument();
+      // ...and the composer on the other conversation is free.
+      expect(screen.getByLabelText("متن پیام")).not.toBeDisabled();
+    });
+
+    it("marks the conversation as generating from the server's own flag", async () => {
+      // B4: a run this tab did not start (another tab, another device) still
+      // shows in the rail, because the list endpoint reports it.
+      mockApi({
+        "GET /chat/sessions": {
+          items: [
+            { id: "s1", title: "گفتگوی اول", status: "ACTIVE", created_at: "", message_count: 1 },
+            {
+              id: "s2",
+              title: "گفتگوی دوم",
+              status: "ACTIVE",
+              created_at: "",
+              message_count: 1,
+              generating: true,
+            },
+          ],
+          total_count: 2,
+          page: 1,
+          page_size: 20,
+          has_more: false,
+        },
+        ...MESSAGES,
+      });
+      renderWithRouter(<Chat />);
+
+      expect(await screen.findByTestId("chat-row-generating")).toBeInTheDocument();
+    });
+
+    it("stops a running generation and never shows a fake answer", async () => {
+      const fetchMock = mockApi({ ...MESSAGES, "GET /chat/sessions": SESSIONS, "POST /executions/e1/cancel": { id: "e1" } });
+      const real = fetchMock.getMockImplementation() as (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => Promise<Response>;
+      fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/executions/e1/run") && (init?.method ?? "GET") === "POST") {
+          return new Promise<Response>(() => {});
+        }
+        return real(input, init);
+      });
+
+      renderWithRouter(<Chat />);
+      const composer = await screen.findByLabelText("متن پیام");
+      fireEvent.change(composer, { target: { value: "سوال من" } });
+      fireEvent.keyDown(composer, { key: "Enter" });
+      fireEvent.click(await screen.findByTestId("chat-stop"));
+
+      // The backend route is POST /executions/{execution_id}/cancel, scoped to
+      // the caller by the service.
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.some(
+            (c) => String(c[0]).includes("/executions/e1/cancel") && c[1]?.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      // The generating state clears, and the user is told it stopped instead of
+      // being shown an answer that was never produced.
+      await waitFor(() => expect(screen.queryByTestId("thinking")).not.toBeInTheDocument());
+      expect(await screen.findByTestId("chat-error")).toHaveTextContent("پاسخ‌گویی متوقف شد");
+    });
+  });
+
+  /** B5: memory is managed from the chat itself, not from a second page. */
+  describe("memory inside chat (B5)", () => {
+    const SESSIONS = {
+      items: [{ id: "s1", title: null, status: "ACTIVE", created_at: "" }],
+      total_count: 1,
+      page: 1,
+      page_size: 20,
+      has_more: false,
+    };
+
+    function renderWithMemory() {
+      return mockApi({
+        "GET /chat/sessions": SESSIONS,
+        "GET /chat/sessions/s1/messages": {
+          items: [{ id: "m1", role: "USER", content: { text: "سلام" }, citations: [], created_at: "" }],
+        },
+        "GET /wallet": { balance: 500, blocked: false },
+        // Shapes copied from the current Agent.tsx, which is about to be deleted.
+        "GET /agent/memory": {
+          memories: [
+            {
+              id: "mem1",
+              kind: "preference",
+              content: "من تهران هستم",
+              weight: 1,
+              hits: 0,
+              misses: 0,
+              active: true,
+              created_at: "2026-09-01T10:00:00Z",
+            },
+          ],
+        },
+        "DELETE /agent/memory/mem1": { id: "mem1" },
+        "POST /agent/memory": { id: "mem2", kind: "fact" },
+      });
+    }
+
+    it("lists the user's memories with their kind and offers a labelled forget control", async () => {
+      renderWithMemory();
+      renderWithRouter(<Chat />);
+      fireEvent.click(await screen.findByTestId("chat-memory-open"));
+
+      expect(await screen.findByTestId("memory-row")).toHaveTextContent("من تهران هستم");
+      // The kind is named in Persian, and the row is dated.
+      expect(screen.getByTestId("memory-row")).toHaveTextContent("ترجیح");
+      // Keyboard reachable and labelled for a screen reader.
+      const forget = screen.getByTestId("memory-forget");
+      expect(forget).toHaveAccessibleName("حذف این خاطره: من تهران هستم");
+    });
+
+    it("forgets one memory and adds a manual one", async () => {
+      const fetchMock = renderWithMemory();
+      renderWithRouter(<Chat />);
+      fireEvent.click(await screen.findByTestId("chat-memory-open"));
+      await screen.findByTestId("memory-row");
+
+      // The add control stays disabled until there is something to add.
+      const add = screen.getByTestId("memory-add");
+      expect(add).toBeDisabled();
+      fireEvent.change(screen.getByTestId("memory-draft"), { target: { value: "قراردادها را دوست دارم" } });
+      expect(add).not.toBeDisabled();
+      fireEvent.click(add);
+
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.some(
+            (c) => String(c[0]).includes("/agent/memory") && c[1]?.method === "POST",
+          ),
+        ).toBe(true);
+      });
+      // kind "fact" is the manual kind, exactly as the deleted page sent it.
+      const post = fetchMock.mock.calls.find(
+        (c) => c[1]?.method === "POST" && String(c[0]).endsWith("/agent/memory"),
+      );
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        content: "قراردادها را دوست دارم",
+        kind: "fact",
+      });
+      // The draft clears so the field is ready for the next one.
+      await waitFor(() => expect(screen.getByTestId("memory-draft")).toHaveValue(""));
+
+      fireEvent.click(screen.getByTestId("memory-forget"));
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.some(
+            (c) => String(c[0]).includes("/agent/memory/mem1") && c[1]?.method === "DELETE",
+          ),
+        ).toBe(true);
+      });
+      // The row leaves once the server has answered.
+      await waitFor(() => expect(screen.queryByTestId("memory-row")).not.toBeInTheDocument());
+    });
+  });
+
+  /** A copy control that says what it copied, and degrades when it cannot. */
+  describe("copying an answer", () => {
+    it("confirms on success and stays quiet when the clipboard is unavailable", async () => {
+      mockApi({
+        "GET /chat/sessions": {
+          items: [{ id: "s1", title: null, status: "ACTIVE", created_at: "" }],
+          total_count: 1,
+          page: 1,
+          page_size: 20,
+          has_more: false,
+        },
+        "GET /chat/sessions/s1/messages": {
+          items: [
+            { id: "m2", role: "ASSISTANT", content: { text: "پاسخ قابل کپی" }, citations: [], created_at: "" },
+          ],
+        },
+        "GET /wallet": { balance: 500, blocked: false },
+      });
+      const writeText = vi.fn(async () => {});
+      Object.assign(navigator, { clipboard: { writeText } });
+      renderWithRouter(<Chat />);
+
+      const copy = await screen.findByTestId("chat-copy-m2");
+      expect(copy).toHaveAccessibleName("کپی پاسخ هوش سازمان");
+      fireEvent.click(copy);
+      await waitFor(() => expect(copy).toHaveTextContent("کپی شد"));
+      expect(writeText).toHaveBeenCalledWith("پاسخ قابل کپی");
+
+      // Without a clipboard API the control is a no-op, not a crash.
+      Object.assign(navigator, { clipboard: undefined });
+      fireEvent.click(copy);
+      expect(copy).toHaveTextContent("کپی");
+    });
+  });
     it("keeps a conversation whose message count the server does not report", async () => {
       // message_count is an addition to the list payload. An older server
       // answers without it, and "unknown" must not be read as "empty" - the

@@ -9,6 +9,7 @@ import { DomainStatus } from "../../components/ui/domain-status"
 import { Surface } from "../../components/ui/surface"
 import { faNum } from "../../lib/dates"
 import { adminApi, AdminSessionExpired } from "../api"
+import { freshInputTokens, readUsage, usdText, type UserUsage } from "../OrgDetailPanel"
 import { Section } from "../page-layout"
 import { Retry } from "../useLive"
 
@@ -23,6 +24,37 @@ interface ChargeRequestItem {
 }
 
 /**
+ * The organisation's consumption, summed from the per-user usage blocks of
+ * GET /admin/organizations/{id} (backend/backend/admin.py:organization_detail).
+ * The detail payload carries usage per member, not one organisation total, so
+ * adding the members is the only honest way to get the org figure - and the
+ * label says as much. A failed lookup leaves null rather than a fake zero.
+ */
+function sumUsage(users: Array<Record<string, unknown>>): UserUsage {
+  const total: UserUsage = {
+    executions: 0,
+    tokens_in: 0,
+    tokens_out: 0,
+    cached_tokens: 0,
+    reasoning_tokens: 0,
+    cost_usd: 0,
+    cost_credits: 0,
+  }
+  for (const user of users) {
+    const usage = readUsage(user.usage)
+    if (!usage) continue
+    total.executions += usage.executions
+    total.tokens_in += usage.tokens_in
+    total.tokens_out += usage.tokens_out
+    total.cached_tokens += usage.cached_tokens
+    total.reasoning_tokens += usage.reasoning_tokens
+    total.cost_usd += usage.cost_usd
+    total.cost_credits += usage.cost_credits
+  }
+  return total
+}
+
+/**
  * Billing workspace.
  *
  * Approving a charge request moves money into an organisation's wallet and v0.1
@@ -34,6 +66,8 @@ export default function BillingView({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [target, setTarget] = useState<{ item: ChargeRequestItem; approve: boolean } | null>(null)
+  /** organisation_id -> its summed usage, null when the lookup failed. */
+  const [orgUsage, setOrgUsage] = useState<Record<string, UserUsage | null>>({})
 
   const load = useCallback(async () => {
     try {
@@ -49,6 +83,39 @@ export default function BillingView({ token }: { token: string }) {
   useEffect(() => {
     void load()
   }, [load])
+
+  /**
+   * The org-level usage/cost summary for every organisation with a pending
+   * request: approving credit is a consumption decision, so the operator needs
+   * to see what that organisation has already consumed. Any org already in
+   * orgUsage is skipped, so this settles instead of re-fetching on every render.
+   */
+  useEffect(() => {
+    const ids = [
+      ...new Set(items.filter((item) => item.status === "PENDING").map((item) => item.organization_id)),
+    ].filter((id) => !(id in orgUsage))
+    if (ids.length === 0) return
+    let cancelled = false
+    void (async () => {
+      for (const id of ids) {
+        try {
+          const detail = await adminApi<{ users?: Array<Record<string, unknown>> }>(
+            token,
+            "GET",
+            "/organizations/" + id,
+          )
+          if (cancelled) return
+          setOrgUsage((prev) => ({ ...prev, [id]: sumUsage(detail.users ?? []) }))
+        } catch (err) {
+          if (cancelled || err instanceof AdminSessionExpired) return
+          setOrgUsage((prev) => ({ ...prev, [id]: null }))
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [items, token, orgUsage])
 
   async function decide(reason: string) {
     if (!target) return
@@ -106,6 +173,26 @@ export default function BillingView({ token }: { token: string }) {
                 <span data-numeric className="text-caption text-muted-foreground">
                   درخواست {faNum(item.amount)} واحد اعتبار
                 </span>
+                {/*
+                  Org-level consumption/cost summary, the admin half of the
+                  PO's «میزان مصرف هر کاربر»: token classes, USD cost and the
+                  credits deducted, summed over this organisation's members. A
+                  failed lookup stays silent rather than printing a zero that
+                  would read as "this organisation consumed nothing".
+                */}
+                {orgUsage[item.organization_id] && (
+                  <span
+                    className="text-micro text-muted-foreground"
+                    data-testid={"org-usage-" + item.organization_id}
+                  >
+                    مصرف سازمان تاکنون:{" "}
+                    <span data-numeric>{faNum(freshInputTokens(orgUsage[item.organization_id]!))}</span> ورودی تازه ·{" "}
+                    <span data-numeric>{faNum(orgUsage[item.organization_id]!.cached_tokens)}</span> کش‌شده ·{" "}
+                    <span data-numeric>{faNum(orgUsage[item.organization_id]!.tokens_out)}</span> خروجی ·{" "}
+                    <span dir="ltr" data-numeric>{usdText(orgUsage[item.organization_id]!.cost_usd)}</span> ·{" "}
+                    <span data-numeric>{faNum(orgUsage[item.organization_id]!.cost_credits)}</span> اعتبار
+                  </span>
+                )}
                 {item.note && (
                   <span className="text-caption text-muted-foreground">یادداشت: {item.note}</span>
                 )}

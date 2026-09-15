@@ -20,7 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api_errors import ApiError
 from backend.audit import record_audit
 from backend.config import get_settings
-from backend.knowledge.chunking import build_metadata, list_chunks, normalize_text, replace_chunks
+from backend.knowledge.chunking import (
+    build_metadata,
+    embed_chunk_rows,
+    list_chunks,
+    normalize_text,
+    replace_chunks,
+)
 from backend.knowledge.classify import classify_asset, extract_text
 from backend.knowledge.processing import enqueue_job
 from backend.models import KnowledgeAsset, KnowledgeChunk, KnowledgeSource, Organization
@@ -386,27 +392,44 @@ async def list_assets(
     # reported nothing but a coarse status, so "queued" looked identical for a
     # file waiting its turn and one that had been OCR'd but not chunked. The
     # pipeline stage and text length are already on the row - they were simply
-    # never read. Reported as-is, not as a percentage: a percentage here would
-    # be invented, and an invented progress bar is worse than an honest label.
-    chunk_counts = await _chunk_counts(session, organization.id, [row.id for row in rows])
-    return [
-        {
-            "id": row.id,
-            "name": row.name,
-            "status": row.status,
-            "size_bytes": row.size_bytes,
-            "extension": row.extension,
-            "origin": "upload" if row.source_id is None else "folder_scan",
-            "deleted_at": row.deleted_at,
-            "asset_type": row.asset_type,
-            "pipeline": row.pipeline,
-            # 0 for a file whose text has not been extracted yet.
-            "text_length": len(row.extracted_text or ""),
-            "chunks": chunk_counts.get(row.id, 0),
-            "classified_at": row.classified_at,
-        }
-        for row in rows
-    ]
+    # never read.
+    #
+    # PO request 2026-09-15: a percentage per file, so an operator can see that
+    # a document is still being prepared. The number is DERIVED from real
+    # pipeline state rather than stored: the furthest checkpoint the worker has
+    # actually persisted, plus the one real fraction it produces (how many of
+    # the current version's chunks already carry an embedding). See
+    # prepare_progress(); it is coarse by design and never invents a value.
+    ids = [row.id for row in rows]
+    chunk_counts = await _chunk_counts(session, organization.id, ids)
+    chunk_state = await _chunk_state(session, organization.id, rows)
+    items = []
+    for row in rows:
+        total, embedded = chunk_state.get(row.id, (0, 0))
+        progress, stage = prepare_progress(row, total, embedded)
+        items.append(
+            {
+                "id": row.id,
+                "name": row.name,
+                "status": row.status,
+                "size_bytes": row.size_bytes,
+                "extension": row.extension,
+                "origin": "upload" if row.source_id is None else "folder_scan",
+                "deleted_at": row.deleted_at,
+                "asset_type": row.asset_type,
+                "pipeline": row.pipeline,
+                # 0 for a file whose text has not been extracted yet.
+                "text_length": len(row.extracted_text or ""),
+                "chunks": chunk_counts.get(row.id, 0),
+                "classified_at": row.classified_at,
+                # PO contract (frontend built against it): both keys are always
+                # present; progress is an int 0..100 or null, stage a pipeline
+                # stage string or null.
+                "progress": progress,
+                "stage": stage,
+            }
+        )
+    return items
 
 
 async def _chunk_counts(
@@ -424,6 +447,94 @@ async def _chunk_counts(
         .group_by(KnowledgeChunk.asset_id)
     )
     return {asset_id: int(count) for asset_id, count in rows.all()}
+
+
+async def _chunk_state(
+    session: AsyncSession, organization_id, assets: list
+) -> dict:
+    """(chunks, embedded) of each asset, CURRENT VERSION only, in one query.
+
+    The version filter is what makes the number honest: replace_chunks() writes
+    the current version and deletes the previous one, so a row still embedding
+    version N must not be credited with version N-1 chunks.
+    """
+    if not assets:
+        return {}
+    by_id = {asset.id: asset.version for asset in assets}
+    rows = await session.execute(
+        select(
+            KnowledgeChunk.asset_id,
+            KnowledgeChunk.asset_version,
+            func.count(),
+            func.count(KnowledgeChunk.embedding),
+        )
+        .where(
+            KnowledgeChunk.organization_id == organization_id,
+            KnowledgeChunk.asset_id.in_(list(by_id)),
+        )
+        .group_by(KnowledgeChunk.asset_id, KnowledgeChunk.asset_version)
+    )
+    state = {}
+    for asset_id, version, total, embedded in rows.all():
+        if by_id.get(asset_id) == version:
+            state[asset_id] = (int(total), int(embedded))
+    return state
+
+
+# The pipeline stages this module can report, in the order the worker actually
+# performs them (knowledge/worker.py: process_job). Read from that function, not
+# invented: classify (magic bytes) -> extract text -> chunk -> embed -> ready.
+#
+# The percentage is a CHECKPOINT SCALE, not a smooth animation: 0 at the queue,
+# 25 once classification is persisted, 55 once the text is extracted and chunked,
+# then 55..90 while the embedding step works through the chunks, 95 when every
+# current-version chunk carries a vector and the row is about to flip to ready.
+# The only fine-grained number the pipeline can honestly report is the embedding
+# fraction, and it is a real measurement (embedded chunks / chunks written), so
+# the bar moves in chunk-sized steps rather than pretending to know more.
+_PROGRESS_QUEUED = 0
+_PROGRESS_CLASSIFIED = 25
+_PROGRESS_CHUNKED = 55
+_PROGRESS_EMBEDDING_TOP = 90
+_PROGRESS_FINALIZING = 95
+_PROGRESS_DONE = 100
+
+
+def prepare_progress(
+    asset: KnowledgeAsset, chunks_total: int, chunks_embedded: int
+) -> tuple[int | None, str | None]:
+    """(progress 0..100, stage) for one asset, or (None, None) when meaningless.
+
+    Monotonic WITHIN one processing attempt, because every input only moves
+    forward while the worker runs that attempt: classified_at and extracted_text
+    are written once and never cleared, and chunks are written once and only have
+    their embedding filled in. A retry or a new file version is a NEW attempt
+    (replace_chunks deletes the old chunks, the asset version is bumped), and
+    then the number may legitimately start over - the client keys its own
+    monotonicity guard on the row reaching a terminal state.
+
+    Terminal rows report 100 with a terminal stage. The failed case also reports
+    100 rather than a partial number: the attempt is over, and the run did not
+    stop halfway because of progress. Callers must branch on status, not on the
+    percentage, to know whether the file is usable.
+    """
+    if asset.status == "ready":
+        return _PROGRESS_DONE, "ready"
+    if asset.status == "failed":
+        return _PROGRESS_DONE, "failed"
+    if asset.classified_at is None:
+        return _PROGRESS_QUEUED, "queued"
+    if chunks_total <= 0:
+        # Classified, but no text stored yet (or a review-queue type that will
+        # never produce chunks). Extraction is the step in front of chunking.
+        if not asset.extracted_text:
+            return _PROGRESS_CLASSIFIED, "extracting"
+        return _PROGRESS_CHUNKED, "chunking"
+    if chunks_embedded >= chunks_total:
+        return _PROGRESS_FINALIZING, "finalizing"
+    span = _PROGRESS_EMBEDDING_TOP - _PROGRESS_CHUNKED
+    value = _PROGRESS_CHUNKED + (span * chunks_embedded) // chunks_total
+    return value, "embedding"
 
 
 async def classify_single_asset(
@@ -444,7 +555,13 @@ async def classify_single_asset(
         normalized = normalize_text(asset.extracted_text or "")
         asset.extracted_text = normalized
         asset.asset_metadata = build_metadata(asset)
-        await replace_chunks(session, asset, normalized)
+        chunk_rows = await replace_chunks(session, asset, normalized)
+        # Embed before declaring the asset ready. Without this the row was
+        # "ready" with chunks that had no vectors, and semantic search only
+        # reads chunks that carry one - so the operator saw a finished document
+        # that no answer could ever be grounded in (PO report: "I added a file,
+        # but it says there was no document").
+        await embed_chunk_rows(session, chunk_rows)
         asset.status = "ready"
     except ApiError as exc:
         if exc.code in ("REVIEW_QUEUE", "OCR_UNAVAILABLE"):

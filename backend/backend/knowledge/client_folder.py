@@ -430,6 +430,23 @@ async def upload_client_file(
     asset.size_bytes = len(content)
     asset.extension = extension
     asset.status = "queued"
+    # Re-queue on the arrival of the BYTES, not only on the manifest entry.
+    #
+    # The manifest sync queues a job the moment the file is discovered - but the
+    # server cannot read the file yet, because the bytes travel in a separate
+    # request that follows. A scheduler tick that lands in between ran that job
+    # against a storage_path that did not exist yet: the job failed with
+    # ASSET_FILE_MISSING, the asset was marked failed, and when the bytes did
+    # arrive nothing re-queued it - the manifest fingerprint is unchanged, so
+    # even the next sync created no job. The file sat "queued" forever with no
+    # chunks and never appeared in any answer.
+    #
+    # enqueue_job dedups on (asset, version, type) over the ACTIVE statuses, so a
+    # job that is still pending/queued/processing is reused rather than doubled.
+    # This does not drain inline: the client uploads its whole queue in a loop,
+    # and each request blocking on embedding would make a folder sync crawl. The
+    # scheduler tick processes the queue within its poll interval.
+    await enqueue_job(session, organization.id, asset, "create")
     await record_audit(
         session,
         "knowledge-asset.synced",

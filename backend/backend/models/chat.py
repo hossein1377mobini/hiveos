@@ -86,6 +86,12 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String(10), nullable=False)
     content: Mapped[dict] = mapped_column(JSON, nullable=False)
     citations: Mapped[list | None] = mapped_column(JSON)
+    # Files this reply produced (the agent's report/chart tools). Stored beside
+    # citations rather than inside content: the chat pane renders both as
+    # structured UI, and nesting them in the text blob would make the transcript
+    # and the tool output drift apart. NULL/[] for a reply that created nothing,
+    # which is every reply that did not call a file-producing tool.
+    artifacts: Mapped[list | None] = mapped_column(JSON)
     tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     message_metadata: Mapped[dict] = mapped_column(
         "metadata", JSON, nullable=False, server_default=text("'{}'::jsonb")

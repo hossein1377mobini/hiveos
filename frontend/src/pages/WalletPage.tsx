@@ -37,6 +37,40 @@ import { faDate, faDateTime, faNum, norm } from "../utils/format";
  * the System Administrator (US-1207).
  */
 
+/**
+ * Consumption totals from backend/backend/wallet.py:usage_totals - the exact
+ * key set that function returns. No cost_credits: the endpoint does not send one.
+ */
+interface UsageTotals {
+  executions: number;
+  tokens_in: number;
+  tokens_out: number;
+  cached_tokens: number;
+  reasoning_tokens: number;
+  cost_usd: number;
+}
+
+/**
+ * The cost basis backend/backend/wallet.py:cost_basis_for writes onto every
+ * DEDUCTION (wallet_transactions.cost_basis). `rate` is "avalai_catalog" when
+ * AvalAI's public catalogue priced the run and "admin_fallback" when it could
+ * not; `reason` says why the fallback happened. The USD figure is null on the
+ * fallback path, so a fallback charge has no exact dollar amount - only its
+ * credits - and the UI must say so instead of printing a fake number.
+ */
+interface CostBasis {
+  rate?: string | null;
+  source?: string | null;
+  reason?: string | null;
+  known?: boolean;
+  credits?: number | null;
+  credits_per_usd?: number | null;
+  fallback_credit_per_1000_tokens_out?: number | null;
+  model?: string | null;
+  catalog_url?: string | null;
+  pricing?: Record<string, number | null> | null;
+}
+
 interface WalletState {
   balance: number;
   welcome_credit: number;
@@ -48,7 +82,13 @@ interface WalletState {
     amount: number;
     balance_after: number;
     created_at: string;
+    cost_usd?: number | null;
+    cost_basis?: CostBasis | null;
   }>;
+  /** Organisation-wide totals (wallet.py:get_wallet_state "usage"). */
+  usage?: UsageTotals | null;
+  /** The caller's own totals ("my_usage"). */
+  my_usage?: UsageTotals | null;
 }
 
 interface SubscriptionState {
@@ -59,6 +99,98 @@ interface SubscriptionState {
 
 const AMOUNTS = [100, 250, 500];
 const PAGE_SIZE = 6;
+
+/**
+ * Why a cost had to be estimated instead of priced from AvalAI's catalogue.
+ * The vocabulary is backend/backend/wallet.py:cost_basis_for's own reason value.
+ */
+const FALLBACK_REASON_FA: Record<string, string> = {
+  catalog_unavailable: "کاتالوگ قیمت AvalAI در دسترس نبود",
+  model_not_in_catalog: "این مدل در کاتالوگ AvalAI نیست",
+  pricing_missing: "نرخ این مدل در کاتالوگ ثبت نشده است",
+  provider_not_avalai: "درگاه فعال، AvalAI نیست",
+  endpoint_not_avalai: "نشانی درگاه، AvalAI نیست",
+};
+
+/**
+ * USD with honest decimals. Intl's default two would render a real $0.0004
+ * charge as "$0", which reads as free; sub-cent amounts get six decimals.
+ */
+function usdText(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  const usd = Number(value);
+  if (usd === 0) return "$" + faNum(0, 4);
+  return "$" + faNum(usd, usd < 0.01 ? 6 : 4);
+}
+
+/** True when the cost came from the admin fallback rate, not AvalAI's catalogue. */
+function isFallbackCost(basis: CostBasis | null | undefined): boolean {
+  return (
+    basis?.rate === "admin_fallback" ||
+    basis?.source === "admin_fallback_rate" ||
+    basis?.known === false
+  );
+}
+
+/**
+ * The sentence that separates an exact AvalAI-priced cost from an estimate.
+ * Shown next to any fallback-derived charge so the two never look alike.
+ */
+function fallbackCaveat(basis: CostBasis | null | undefined): string {
+  const reason = basis?.reason ? FALLBACK_REASON_FA[basis.reason] : undefined;
+  return reason
+    ? "برآوردی — نرخ پشتیبان (" + reason + ")"
+    : "برآوردی — نرخ پشتیبان";
+}
+
+/** Cached tokens live inside tokens_in; a cached one is priced at its own rate. */
+function freshInputTokens(usage: UsageTotals): number {
+  return Math.max(0, usage.tokens_in - usage.cached_tokens);
+}
+
+/**
+ * One consumption summary block: the three token classes AvalAI prices, plus
+ * the resulting dollar cost. Rendered for the organisation total and for the
+ * caller's own total, because the PO asked for both and the difference matters.
+ */
+function UsageBreakdown({ label, usage }: { label: string; usage: UsageTotals }) {
+  return (
+    <div className="rounded-control border border-border bg-secondary p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-caption font-bold text-foreground">{label}</span>
+        <span className="text-micro text-muted-foreground">
+          <span data-numeric>{faNum(usage.executions)}</span> اجرا
+        </span>
+      </div>
+      <dl className="mt-3 grid grid-cols-3 gap-2">
+        <div>
+          <dt className="text-micro text-muted-foreground">ورودی تازه</dt>
+          <dd className="text-body font-bold" data-numeric>
+            {faNum(freshInputTokens(usage))}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-micro text-muted-foreground">ورودی کش‌شده</dt>
+          <dd className="text-body font-bold text-primary" data-numeric>
+            {faNum(usage.cached_tokens)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-micro text-muted-foreground">خروجی</dt>
+          <dd className="text-body font-bold" data-numeric>
+            {faNum(usage.tokens_out)}
+          </dd>
+        </div>
+      </dl>
+      <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-border pt-3">
+        <span className="text-micro text-muted-foreground">هزینه (دلار)</span>
+        <span className="text-caption font-bold" dir="ltr" data-numeric>
+          {usdText(usage.cost_usd)}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function WalletPage() {
   const [state, setState] = useState<WalletState | null>(null);
@@ -226,6 +358,28 @@ export default function WalletPage() {
                 پس از تأیید مدیر سامانه به موجودی اعمال می‌شود.
               </Banner>
             ) : null}
+
+            {/*
+              Consumption, broken down by the three token classes AvalAI bills.
+              The PO's «میزان مصرف هر کاربر» is my_usage; the organisation total
+              sits beside it so an operator can see the caller's share. A cached
+              token is priced below a fresh input token, which is why the cached
+              count is called out rather than folded into "ورودی".
+            */}
+            {(state.usage || state.my_usage) && (
+              <Surface className="p-6" data-testid="wallet-usage-summary">
+                <h3 className="text-subheading text-foreground">مصرف به تفکیک نوع توکن</h3>
+                <p className="mt-1 text-caption text-muted-foreground">
+                  هزینه بر پایهٔ نرخ‌های عمومی AvalAI و با فرمول خودش برای هر سه دستهٔ توکن
+                  (ورودی تازه، ورودی کش‌شده، خروجی) محاسبه می‌شود؛ توکن کش‌شده ارزان‌تر از توکن
+                  ورودی تازه است.
+                </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {state.usage && <UsageBreakdown label="مصرف سازمان" usage={state.usage} />}
+                  {state.my_usage && <UsageBreakdown label="مصرف من" usage={state.my_usage} />}
+                </div>
+              </Surface>
+            )}
 
             {/* شارژ — الگوی «شارژ سریع» ماک‌آپ، با منطق درخواست مدیریتی (US-1203/1204) */}
             <form
@@ -438,6 +592,30 @@ export default function WalletPage() {
                       {isCharge ? "شارژ حساب" : "مصرف گفتگو"}
                     </div>
                     <div className="text-micro text-muted-foreground">{faDateTime(t.created_at)}</div>
+                    {/*
+                      The real, provider-derived cost of this deduction. A cost
+                      priced from AvalAI's live catalogue prints its USD figure;
+                      a fallback-derived one has no exact USD (cost_usd is null)
+                      and says so instead of showing a number it does not have.
+                    */}
+                    {!isCharge && (t.cost_usd != null || isFallbackCost(t.cost_basis)) && (
+                      <div
+                        className="mt-0.5 text-micro text-muted-foreground"
+                        data-testid={"tx-cost-" + t.id}
+                      >
+                        {t.cost_usd != null && (
+                          <span dir="ltr" data-numeric>
+                            {usdText(t.cost_usd)}
+                          </span>
+                        )}
+                        {t.cost_usd != null && isFallbackCost(t.cost_basis) && " · "}
+                        {isFallbackCost(t.cost_basis) && (
+                          <span className="font-bold text-warning">
+                            {fallbackCaveat(t.cost_basis)}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className={cn("whitespace-nowrap text-caption font-bold", isCharge ? "text-success" : "text-muted-foreground")}>
                     {isCharge ? "+" : "−"}

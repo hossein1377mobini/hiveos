@@ -423,6 +423,20 @@ async def delete_organization_user(
     )
 
 
+# Columns of the organization-detail user query that belong under "usage".
+_USER_USAGE_COLUMNS = frozenset(
+    {
+        "executions",
+        "tokens_in",
+        "tokens_out",
+        "cached_tokens",
+        "reasoning_tokens",
+        "cost_usd",
+        "cost_credits",
+    }
+)
+
+
 @router.get("/organizations/{org_id}", dependencies=[Depends(_rate_limit)])
 async def organization_detail(org_id: uuid.UUID, authorization: str = Header(default="")) -> dict:
     """E: one organization with everything the admin needs to act on it -
@@ -451,13 +465,44 @@ async def organization_detail(org_id: uuid.UUID, authorization: str = Header(def
         if org is None:
             raise ApiError(404, "NOT_FOUND", "Organization not found.")
 
+        # Per-user consumption (PO requirement 2026-09): the same token classes
+        # and USD figure the pricing layer wrote on each execution. The regex
+        # guards mean an older or malformed usage record sums as zero instead
+        # of failing the whole panel.
         users = (
             await session.execute(
                 text(
                     "SELECT u.id, u.username, u.mobile, u.status, u.created_at,"
-                    " m.status AS membership"
+                    " m.status AS membership,"
+                    " COALESCE(agg.executions, 0) AS executions,"
+                    " COALESCE(agg.tokens_in, 0) AS tokens_in,"
+                    " COALESCE(agg.tokens_out, 0) AS tokens_out,"
+                    " COALESCE(agg.cached_tokens, 0) AS cached_tokens,"
+                    " COALESCE(agg.reasoning_tokens, 0) AS reasoning_tokens,"
+                    " COALESCE(agg.cost_usd, 0) AS cost_usd,"
+                    " COALESCE(agg.cost_credits, 0) AS cost_credits"
                     " FROM hiveos.organization_members m"
                     " JOIN hiveos.users u ON u.id = m.user_id"
+                    " LEFT JOIN ("
+                    "   SELECT e.requested_by, count(*) AS executions,"
+                    "     COALESCE(sum(CASE WHEN e.usage->>'tokens_in' ~ '^[0-9]+$'"
+                    "       THEN (e.usage->>'tokens_in')::bigint ELSE 0 END), 0) AS tokens_in,"
+                    "     COALESCE(sum(CASE WHEN e.usage->>'tokens_out' ~ '^[0-9]+$'"
+                    "       THEN (e.usage->>'tokens_out')::bigint ELSE 0 END), 0) AS tokens_out,"
+                    "     COALESCE(sum(CASE WHEN e.usage->>'cached_tokens' ~ '^[0-9]+$'"
+                    "       THEN (e.usage->>'cached_tokens')::bigint ELSE 0 END), 0) AS cached_tokens,"
+                    "     COALESCE(sum(CASE WHEN e.usage->>'reasoning_tokens' ~ '^[0-9]+$'"
+                    "       THEN (e.usage->>'reasoning_tokens')::bigint ELSE 0 END), 0)"
+                    "       AS reasoning_tokens,"
+                    "     COALESCE(sum(CASE WHEN e.usage->>'cost_usd' ~ '^[0-9]+(\.[0-9]+)?$'"
+                    "       THEN (e.usage->>'cost_usd')::numeric ELSE 0 END), 0) AS cost_usd,"
+                    "     COALESCE(sum(CASE WHEN e.usage->>'cost_credits' ~ '^[0-9]+$'"
+                    "       THEN (e.usage->>'cost_credits')::bigint ELSE 0 END), 0)"
+                    "       AS cost_credits"
+                    "   FROM hiveos.agent_executions e"
+                    "   WHERE e.organization_id = :i"
+                    "   GROUP BY e.requested_by"
+                    " ) agg ON agg.requested_by = u.id"
                     " WHERE m.organization_id = :i ORDER BY u.created_at"
                 ),
                 {"i": str(org_id)},
@@ -514,7 +559,23 @@ async def organization_detail(org_id: uuid.UUID, authorization: str = Header(def
     return ok(
         {
             "organization": dict(org),
-            "users": [dict(row) for row in users],
+            "users": [
+                {
+                    # The aggregate columns are folded into "usage" rather
+                    # than left beside the profile fields.
+                    **{k: v for k, v in dict(row).items() if k not in _USER_USAGE_COLUMNS},
+                    "usage": {
+                        "executions": int(row["executions"] or 0),
+                        "tokens_in": int(row["tokens_in"] or 0),
+                        "tokens_out": int(row["tokens_out"] or 0),
+                        "cached_tokens": int(row["cached_tokens"] or 0),
+                        "reasoning_tokens": int(row["reasoning_tokens"] or 0),
+                        "cost_usd": float(row["cost_usd"] or 0),
+                        "cost_credits": int(row["cost_credits"] or 0),
+                    },
+                }
+                for row in users
+            ],
             "wallet_transactions": [dict(row) for row in wallet_rows],
             "charge_requests": requests,
             "recent_events": [dict(row) for row in events],
@@ -1067,7 +1128,16 @@ class ProvidersPricingSchema(BaseModel):
     provider: str = Field(default="mock", pattern="^(mock|online-mock|openai-compatible)$")
     base_url: str | None = Field(default=None, max_length=500)
     api_key: str | None = Field(default=None, max_length=500)
+    # FALLBACK only (PO requirement 2026-09): when AvalAI's public price list
+    # cannot be read, or the model is not in it, or the endpoint is not AvalAI
+    # at all, the charge degrades to ceil(tokens_out * this / 1000). When the
+    # catalogue IS reachable the real USD cost is used instead and this value
+    # is not consulted.
     credit_per_1000_tokens_out: int = Field(default=1, ge=0, le=10000)
+    # The documented USD -> internal credit conversion: 1 USD is worth this
+    # many credits (default 1000, i.e. one credit = $0.001). Applied to the USD
+    # figure AvalAI's formula produced, and rounded up to a whole credit.
+    credits_per_usd: float = Field(default=1000.0, gt=0, le=10_000_000)
     # PO request 2026-09-12: the embedding model is set here too, so switching
     # the vector model never needs a rebuild. Dimensions must match the column,
     # hence the fixed choice list rather than a free-text field.

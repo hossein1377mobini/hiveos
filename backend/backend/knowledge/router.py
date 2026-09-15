@@ -358,7 +358,13 @@ async def upload_endpoint(
     auth: AuthContext = Depends(get_auth_context),
     session: AsyncSession = Depends(get_db, scope="function"),
 ) -> dict:
-    """US-201 FR-009 (Amendment 2): multi-file direct upload -> queued assets."""
+    """US-201 FR-009 (Amendment 2): multi-file direct upload -> queued assets.
+
+    The upload only queues the files; the scheduler loop owns the queue (60 s
+    poll) and the asset list reports how far each file has got. Embedding a
+    25 MB document inside this request would make the upload dialog wait for
+    minutes, so the queue position is reported rather than processed here.
+    """
     result = await upload_assets(session, auth.organization, auth.user.id, files)
     return ok(result)
 

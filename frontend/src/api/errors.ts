@@ -89,6 +89,10 @@ const MESSAGES: Record<string, string> = {
   ALREADY_TERMINAL: "این اجرا به پایان رسیده است.",
   ALREADY_CANCELLING: "لغو این اجرا از قبل در جریان است.",
   CITATIONS_NOT_ALLOWED: "برای این پاسخ امکان ثبت منبع وجود ندارد.",
+  // Raised when a turn tries to attach a generated file to a message type that
+  // cannot carry one. Added with the artifact feature: without it the owner got
+  // the generic "انجام این کار ممکن نشد" instead of the real reason.
+  ARTIFACTS_NOT_ALLOWED: "برای این پیام امکان ثبت فایل ساخته‌شده وجود ندارد.",
   EXECUTION_TIMEOUT: "پردازش این پرسش بیش از حد طول کشید؛ دوباره تلاش کنید.",
   CREDIT_EXHAUSTED: "اعتبار حساب شما کافی نیست؛ ابتدا کیف پول را شارژ کنید.",
   WALLET_NOT_FOUND: "کیف پول این سازمان پیدا نشد.",

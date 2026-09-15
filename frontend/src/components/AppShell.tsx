@@ -1,7 +1,6 @@
 import {
   BellIcon,
   BookOpenIcon,
-  BotIcon,
   ChevronRightIcon,
   HouseIcon,
   LayoutDashboardIcon,
@@ -67,7 +66,7 @@ import { cn } from "../lib/utils"
 
 // "subscription" is no longer a nav destination: /subscription redirects to
 // /wallet, so the id was removed rather than kept as a second name for it.
-export type NavId = "chat" | "agent" | "knowledge" | "usage" | "wallet"
+export type NavId = "chat" | "knowledge" | "usage" | "wallet"
 
 type NavItem = { id: NavId; label: string; icon: LucideIcon; path: string; keyword: string }
 
@@ -82,16 +81,11 @@ const NAV_GROUPS: ReadonlyArray<{ section: string; items: readonly NavItem[] }> 
         path: "/chat",
         keyword: "هوش مصنوعی پرسش پاسخ گفتگو",
       },
-      {
-        // PO 2026-09: every user has their own agent. It gets its own page
-        // because what it remembers and which tools it may reach are the user's
-        // to see and change — not settings buried behind a gear icon.
-        id: "agent",
-        label: "ایجنت من",
-        icon: BotIcon,
-        path: "/agent",
-        keyword: "ایجنت حافظه ابزار شخصیت نمودار گزارش",
-      },
+      // PO 2026-09: the standalone "ایجنت من" page is gone. The persona and the
+      // tool allowlist are organization policy set in the admin panel, and the
+      // agent's memory is a property of the conversation, so a separate page held
+      // no decision the user could actually make. Everything it showed now lives
+      // where it is used: memory is read and managed from the chat itself.
     ],
   },
   {
@@ -132,7 +126,6 @@ const NAV_GROUPS: ReadonlyArray<{ section: string; items: readonly NavItem[] }> 
 
 export const NAV_LABEL: Record<NavId, string> = {
   chat: "گفتگو",
-  agent: "ایجنت من",
   knowledge: "دانش سازمان",
   usage: "اعتبار و مصرف",
   wallet: "کیف پول و اشتراک",
@@ -140,7 +133,6 @@ export const NAV_LABEL: Record<NavId, string> = {
 
 const PATH_LABEL: Record<string, string> = {
   "/chat": "گفتگو",
-  "/agent": "ایجنت من",
   "/knowledge": "دانش سازمان",
   "/usage": "اعتبار و مصرف",
   "/wallet": "کیف پول و اشتراک",
@@ -226,7 +218,15 @@ export function AppShell({
   const activeItem = NAV_GROUPS.flatMap((group) => group.items).find((item) =>
     location.pathname.startsWith(item.path),
   )
-  const crumbLabel = activeItem ? activeItem.label : (PATH_LABEL[location.pathname] ?? "")
+  // An unlabeled path must produce NO crumb rather than an empty one. This used
+  // to render <BreadcrumbPage> with no text, which is a role="link" with no
+  // accessible name - picked up by axe as aria-command-name on every route that
+  // PATH_LABEL did not happen to cover, the onboarding "/" among them.
+  //
+  // routeLabel stays a plain string because <main>'s aria-label needs one; the
+  // rendered leaf may be overridden by the (ReactNode) breadcrumb prop.
+  const routeLabel = activeItem ? activeItem.label : (PATH_LABEL[location.pathname] ?? "")
+  const crumbLeaf = breadcrumb ?? routeLabel
 
   const commands: CommandItem[] = [
     ...NAV_GROUPS.flatMap((group) =>
@@ -322,14 +322,16 @@ export function AppShell({
                   </button>
                 </BreadcrumbLink>
               </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden sm:inline-flex rtl:-scale-x-100">
-                <ChevronRightIcon className="size-3.5" />
-              </BreadcrumbSeparator>
-              <BreadcrumbItem className="min-w-0">
-                <BreadcrumbPage className="truncate font-bold text-foreground">
-                  {breadcrumb ?? crumbLabel}
-                </BreadcrumbPage>
-              </BreadcrumbItem>
+              {crumbLeaf ? (
+                <>
+                  <BreadcrumbSeparator className="hidden sm:inline-flex rtl:-scale-x-100">
+                    <ChevronRightIcon className="size-3.5" />
+                  </BreadcrumbSeparator>
+                  <BreadcrumbItem className="min-w-0">
+                    <BreadcrumbPage className="truncate font-bold text-foreground">{crumbLeaf}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </>
+              ) : null}
             </BreadcrumbList>
           </Breadcrumb>
 
@@ -368,7 +370,7 @@ export function AppShell({
         <main
           ref={mainRef}
           tabIndex={-1}
-          aria-label={crumbLabel || "محتوای صفحه"}
+          aria-label={routeLabel || "محتوای صفحه"}
           className={cn(
             "outline-none",
             // min-h-0 on the flush (chat) variant: without it the automatic

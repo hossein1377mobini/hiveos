@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
 from backend.audit import record_audit
-from backend.models import ChatMessage, ChatSession
+from backend.models import AgentExecution, ChatMessage, ChatSession
 
 SESSION_STATUSES = ("ACTIVE", "ARCHIVED", "DELETED", "ALL")
 MESSAGE_ROLES = ("USER", "ASSISTANT", "SYSTEM", "TOOL")
@@ -100,7 +100,7 @@ def _session_payload(session: ChatSession, message_count: int | None = None) -> 
 
 
 def _message_payload(message: ChatMessage) -> dict:
-    return {
+    payload = {
         "id": message.id,
         "session_id": message.session_id,
         "role": message.role,
@@ -110,6 +110,13 @@ def _message_payload(message: ChatMessage) -> dict:
         "sequence": message.sequence,
         "created_at": message.created_at,
     }
+    # Only when there is something to say. A reply that created no file must
+    # serialize exactly as it did before this field existed, so a client or a
+    # test written against the old shape keeps working unchanged; an absent key
+    # and an empty list both mean "no file", and the client reads it as such.
+    if message.artifacts:
+        payload["artifacts"] = message.artifacts
+    return payload
 
 
 async def _get_owned_session(
@@ -136,9 +143,21 @@ async def authorize_session(
 
 
 async def persist_assistant_reply(
-    session: AsyncSession, organization_id, user_id, session_id, text: str, *, citations: list | None = None
+    session: AsyncSession,
+    organization_id,
+    user_id,
+    session_id,
+    text: str,
+    *,
+    citations: list | None = None,
+    artifacts: list | None = None,
 ) -> dict:
-    """US-0902/US-0909: store the completed streamed reply as an ASSISTANT message."""
+    """US-0902/US-0909: store the completed streamed reply as an ASSISTANT message.
+
+    `artifacts` is the list of files this reply created, passed straight through
+    to the same JSON column pattern citations use. Without it the file the agent
+    just built is invisible the moment the user reloads the transcript.
+    """
     return await append_message(
         session,
         organization_id,
@@ -147,6 +166,7 @@ async def persist_assistant_reply(
         "ASSISTANT",
         {"text": text},
         citations=citations,
+        artifacts=artifacts,
     )
 
 
@@ -342,21 +362,42 @@ async def list_sessions(
             select(func.count()).select_from(ChatSession).where(*conditions)
         )
     ).scalar_one()
-    rows = (
-        (
-            await session.execute(
-                select(ChatSession)
-                .where(*conditions)
-                .order_by(ChatSession.updated_at.desc(), ChatSession.created_at.desc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-            )
+
+    # PO request 2026-09: "این تغییرات وضعیت‌ها باید آنلاین باشه" - the client must
+    # be able to show, per conversation, whether an answer is being generated
+    # right now, so it can offer a live status and let the user switch to another
+    # chat while this one is still answering.
+    #
+    # This is a correlated EXISTS selected alongside the page, the same shape as
+    # the message_count EXISTS above and for the same reason: ONE statement for
+    # the whole page. A per-session lookup would be the classic N+1 and would
+    # make the sidebar slower the more conversations the user has.
+    #
+    # `CANCELLABLE` is imported from the execution service rather than retyped
+    # here, so the two can never disagree about which statuses mean "live".
+    from backend.execution.service import CANCELLABLE
+
+    generating = exists(
+        select(AgentExecution.id).where(
+            AgentExecution.chat_session_id == ChatSession.id,
+            # Belt and braces: chat_session_id is globally unique, so the org
+            # predicate can never match a row outside this tenant. It is stated
+            # anyway because every read path here carries the tenant boundary.
+            AgentExecution.organization_id == organization_id,
+            AgentExecution.status.in_(CANCELLABLE),
         )
-        .scalars()
-        .all()
     )
+    rows = (
+        await session.execute(
+            select(ChatSession, generating.label("generating"))
+            .where(*conditions)
+            .order_by(ChatSession.updated_at.desc(), ChatSession.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
     items = []
-    for chat in rows:
+    for chat, is_generating in rows:
         items.append(
             {
                 "id": chat.id,
@@ -366,6 +407,7 @@ async def list_sessions(
                 "current_token_count": (chat.context_state or {}).get(
                     "current_token_count", 0
                 ),
+                "generating": bool(is_generating),
                 "updated_at": chat.updated_at,
                 "pinned": chat.pinned,
                 "tags": chat.tags or [],
@@ -507,6 +549,7 @@ async def append_message(
     content: dict,
     *,
     citations: list | None = None,
+    artifacts: list | None = None,
     tokens: int = 0,
     idempotency_key: str | None = None,
     parent_id=None,
@@ -515,12 +558,17 @@ async def append_message(
 
     US-09.9.1: role=USER comes from the API; ASSISTANT/SYSTEM/TOOL messages
     are written by internal services (T-S3-4). Citations are valid only on
-    ASSISTANT messages (RG-07).
+    ASSISTANT messages (RG-07); artifacts follow the same rule, because they
+    are the same kind of fact - structured provenance for one reply.
     """
     if role not in MESSAGE_ROLES:
         raise ApiError(400, "VALIDATION_ERROR", "Unknown message role.")
     if citations and role != "ASSISTANT":
         raise ApiError(400, "CITATIONS_NOT_ALLOWED", "Citations are only valid on ASSISTANT messages.")
+    if artifacts and role != "ASSISTANT":
+        raise ApiError(
+            400, "ARTIFACTS_NOT_ALLOWED", "Artifacts are only valid on ASSISTANT messages."
+        )
 
     chat = await _get_owned_session(session, organization_id, user_id, session_id)
     if chat.status != "ACTIVE":
@@ -557,6 +605,7 @@ async def append_message(
         role=role,
         content=content,
         citations=citations,
+        artifacts=artifacts or None,
         tokens=tokens,
         message_metadata={"idempotency_key": idempotency_key} if idempotency_key else {},
         parent_id=parent_id,

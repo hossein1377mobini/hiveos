@@ -29,6 +29,8 @@ import { RetryNotice } from "../components/ui/retry";
 import { cn } from "../lib/utils";
 import { pickFolder, isDesktop } from "../lib/desktop";
 import { syncClientFolder } from "../lib/folderSync";
+import { anyPending, useLive } from "../lib/live";
+import { StatusBadge } from "../components/ui/status-badge";
 import { faDateTime, faNum, humanSize, norm } from "../utils/format";
 import { Surface } from "../components/ui/surface";
 
@@ -58,6 +60,13 @@ interface Asset {
   pipeline?: string | null;
   text_length?: number;
   chunks?: number;
+  // PO request: the server now reports how far THIS file's preparation has got
+  // (an integer 0..100) and which stage it reached. Both are optional and both
+  // may be null: an older deployment sends neither, and a file whose position
+  // the server cannot express sends null. Absence is not zero — it means "not
+  // known", and the page must not invent a number for it.
+  progress?: number | null;
+  stage?: string | null;
 }
 
 interface Job {
@@ -155,20 +164,241 @@ function oversizeFiles(files: File[], limitMb: number): File[] {
   return files.filter((file) => file.size > maxBytes);
 }
 
+/** ".pdf" from "Report.PDF" — the same shape the API's `extension` uses. */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "" : name.slice(dot).toLowerCase();
+}
+
 type TabKey = "all" | "ready" | "processing" | "queued" | "failed";
 const PAGE_SIZE = 8;
 
 /**
- * What a document is doing inside the pipeline (H2).
+ * How often the screen re-reads the server while something is still moving.
+ *
+ * Two seconds is fast enough that an upload or a scan visibly advances without
+ * the operator touching anything, and slow enough that an idle page costs
+ * nothing — because on an idle page the poll is switched OFF entirely (see
+ * POLLING below), not merely slowed.
+ */
+const POLL_MS = 2000;
+
+/**
+ * After a manual scan/sync the folder's own row can change (discovered count,
+ * last scan time) even though the SOURCE status itself stays "active". Nothing
+ * on the wire says "a scan is running", so the page watches the folder list for
+ * a bounded window after the operator starts one, then settles.
+ */
+const SCAN_WATCH_MS = 30_000;
+
+/**
+ * Asset statuses the pipeline has finished with: no later request will change
+ * them. Anything NOT in this set is treated as moving, which is the honest
+ * default — an unknown new status keeps the page live rather than freezing it.
+ */
+const TERMINAL_ASSET = new Set([
+  "ready",
+  "indexed",
+  "succeeded",
+  "failed",
+  "parse_failed",
+  "cancelled",
+  "skipped",
+  "duplicate",
+  "stopped",
+  "deleted",
+  "needs_review",
+]);
+
+/** A folder whose watch state will not move on its own. */
+const TERMINAL_SOURCE = new Set(["active", "disabled"]);
+
+function assetPending(a: Asset): boolean {
+  return !TERMINAL_ASSET.has((a.status ?? "").toLowerCase());
+}
+
+function sourcePending(s: SourceFolder): boolean {
+  return !TERMINAL_SOURCE.has((s.status ?? "").toLowerCase());
+}
+
+/**
+ * A file the operator just handed over, shown BEFORE the server has answered
+ * (B1).
+ *
+ * The upload used to be awaited inside the dialog, so the modal stayed open for
+ * the whole transfer — the PO's complaint. The row is now rendered the instant
+ * the request starts, marked «در حال بارگذاری», and replaced by the server's
+ * own row (matched by id) once the list comes back.
+ */
+interface PendingUpload {
+  key: string;
+  file: File;
+  name: string;
+  size_bytes: number;
+  extension: string;
+  status: "uploading" | "failed";
+  error?: string;
+  /** Filled from the upload response, so the row is reconciled BY ID. */
+  serverId?: string;
+}
+
+/** A table row: a server asset, or a just-started local upload. */
+type Row = Asset & { local?: PendingUpload };
+
+/** The server's answer to POST /knowledge-assets/upload. */
+interface UploadResult {
+  stored?: Array<{ id?: string; name?: string }>;
+  rejected?: Array<{ name?: string; code?: string; message?: string }>;
+}
+
+/**
+ * The server's answer to POST /knowledge-sources/{id}/scan.
+ *
+ * The endpoint returns the SOURCE payload spread together with the scan's own
+ * result (backend knowledge/service.py: scan_source -> {**_payload, **result}),
+ * so the counts live at the top level next to id/path/status. Every count is
+ * optional here because an older deployment may answer the source payload
+ * alone — the notice then says only what it actually knows.
+ */
+interface ScanResult {
+  scan_type?: string;
+  files_added?: number;
+  files_updated?: number;
+  files_deleted?: number;
+  discovered_files?: number;
+}
+
+function countOf(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.trunc(value));
+}
+
+/**
+ * What the manual scan ACTUALLY did, in Persian.
+ *
+ * The button used to answer «پویش دستی اجرا شد.» no matter what came back, so a
+ * scan of a folder the server cannot see read exactly like one that ingested
+ * fifty files — the PO's complaint that «پویش اکنون» did not scan the folder.
+ * The real numbers are in the response and are reported here; a run that found
+ * nothing says so instead of looking like a success.
+ */
+function scanNotice(scan: ScanResult): string {
+  const discovered = countOf(scan.discovered_files);
+  const added = countOf(scan.files_added) ?? 0;
+  const updated = countOf(scan.files_updated) ?? 0;
+  const deleted = countOf(scan.files_deleted) ?? 0;
+  if (discovered === 0) return "پویش انجام شد؛ پوشه هیچ فایل تازه‌ای نداشت.";
+  const parts: string[] = [];
+  if (discovered !== null) parts.push("پویش انجام شد: " + faNum(discovered) + " فایل بررسی شد");
+  else parts.push("پویش انجام شد");
+  if (added > 0) parts.push(faNum(added) + " فایل تازه اضافه شد");
+  if (updated > 0) parts.push(faNum(updated) + " فایل تغییرکرده به‌روزرسانی شد");
+  if (deleted > 0) parts.push(faNum(deleted) + " فایل حذف‌شده علامت خورد");
+  if (added === 0 && updated === 0 && deleted === 0) parts.push("فایل تازه‌ای پیدا نشد");
+  return parts.join("؛ ") + ".";
+}
+
+/**
+ * The server's own percentage for one file, or null when it did not give one.
+ *
+ * Absence and null both mean "the server has not told us", which is NOT zero:
+ * rendering ۰٪ for a file the server never measured would be an invented fact,
+ * so every caller below falls back to the stage label instead.
+ */
+function progressValue(asset: Asset): number | null {
+  const raw = asset.progress;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  return Math.max(0, Math.min(100, Math.round(raw)));
+}
+
+/**
+ * The server's stage code -> the Persian label the operator reads.
+ *
+ * The stage string is the server's, so a code this build does not know is not
+ * guessed at and NOT shown raw: an unknown English token would be worse than
+ * the derived Persian sentence, which is what happens then.
+ */
+const STAGE_LABELS: Record<string, string> = {
+  queued: "در صف پردازش",
+  pending: "در صف پردازش",
+  discovered: "تازه شناسایی شد",
+  uploading: "در حال بارگذاری",
+  uploaded: "بارگذاری شد",
+  extracting: "استخراج متن",
+  extraction: "استخراج متن",
+  text: "استخراج متن",
+  ocr: "تشخیص متن تصویری",
+  extracted: "متن استخراج شد",
+  text_extracted: "متن استخراج شد",
+  chunking: "تقسیم به واحد دانش",
+  chunked: "تقسیم به واحد دانش",
+  embedding: "ساخت بردار معنایی",
+  embedded: "ساخت بردار معنایی",
+  indexing: "نمایه‌سازی",
+  indexed: "نمایه‌سازی",
+  classifying: "دسته‌بندی",
+  classify: "دسته‌بندی",
+  finalizing: "آماده‌سازی نهایی",
+};
+
+function stageLabel(stage: string | null | undefined): string | null {
+  if (!stage) return null;
+  return STAGE_LABELS[stage.trim().toLowerCase()] ?? null;
+}
+
+/** The furthest stage the row's own fields reveal, when the server sent none. */
+function derivedStage(asset: Asset): string {
+  const textLength = asset.text_length ?? 0;
+  if (textLength > 0) return asset.pipeline ? "متن استخراج شد" : "در حال پردازش";
+  return "در صف پردازش";
+}
+
+/**
+ * The highest percentage seen for each still-running file.
+ *
+ * Polls are independent samples of one attempt and a later sample can lag
+ * behind an earlier one (a dropped response, a job that restarts its stage), so
+ * a bar that followed the newest number would rewind on its own. The CEILING is
+ * what gets rendered instead, keyed by asset id. The entry is dropped once the
+ * row reaches a terminal state: that attempt is over, and a file re-queued
+ * afterwards is a NEW attempt whose numbers may legitimately start over.
+ */
+function useProgressCeiling(assets: Asset[]): Map<string, number> {
+  const [ceiling, setCeiling] = useState<Record<string, number>>({});
+  useEffect(() => {
+    setCeiling((previous) => {
+      const next: Record<string, number> = {};
+      let changed = false;
+      for (const asset of assets) {
+        // A terminal row has finished this attempt: forgetting it lets a file
+        // that is re-queued later start over from its own new numbers.
+        if (!assetPending(asset)) continue;
+        const before = previous[asset.id];
+        const value = Math.max(before ?? 0, progressValue(asset) ?? 0);
+        next[asset.id] = value;
+        if (before === undefined || before !== value) changed = true;
+      }
+      for (const id of Object.keys(previous)) if (!(id in next)) changed = true;
+      // Same numbers as last time: return the SAME object, so a poll that
+      // repeats itself cannot cause a render loop.
+      return changed ? next : previous;
+    });
+  }, [assets]);
+  return useMemo(() => new Map(Object.entries(ceiling)), [ceiling]);
+}
+
+/**
+ * What a document is doing inside the pipeline (H2 + PO request).
  *
  * The document table used to show only a coarse status, so a file waiting its
  * turn and one that had already been read but not split into knowledge units
  * looked identical — an operator could not tell whether a stuck queue was
- * moving. The API reports the stage it actually reached, and this renders it.
+ * moving. The stage label still covers every file; on top of it, the server now
+ * reports a percentage for a file that is still being prepared, and that is
+ * rendered as a real bar plus the Persian number.
  *
- * Deliberately not a percentage: the server knows how far it got, not how much
- * remains, and a progress bar invented from an unknown denominator is a lie that
- * looks like information.
+ * The percentage is NEVER invented: without one from the server the column
+ * falls back to the stage label exactly as before.
  */
 function AssetProgress({ asset }: { asset: Asset }) {
   if (asset.status === "failed") {
@@ -197,6 +427,54 @@ function AssetProgress({ asset }: { asset: Asset }) {
   );
 }
 
+/**
+ * The row's progress cell (PO request: a percentage per file).
+ *
+ * While a file is being prepared AND the server gave a percentage, this renders
+ * a real progress bar plus the Persian number («۴۰٪») and the Persian stage
+ * name, and says in words that the file cannot answer questions yet. That last
+ * sentence is the PO's other report: a file that was still being read looked
+ * exactly like a file that was never added, so a question asked meanwhile came
+ * back with «سندی وجود نداشت».
+ *
+ * When the server gave no percentage — null, absent, or a row the pipeline has
+ * finished with — this falls straight back to the stage label, so no number is
+ * ever invented from an unknown denominator.
+ */
+function AssetPreparation({ asset, ceiling }: { asset: Asset; ceiling: Map<string, number> }) {
+  const reported = progressValue(asset);
+  if (reported === null || !assetPending(asset)) return <AssetProgress asset={asset} />;
+  // Monotonic within one attempt: never below the highest value already seen.
+  const value = Math.max(reported, ceiling.get(asset.id) ?? 0);
+  const stage = stageLabel(asset.stage) ?? derivedStage(asset);
+  return (
+    <div className="min-w-[168px] space-y-1" data-testid={"asset-percent-" + asset.id}>
+      <div className="flex items-center justify-between gap-2 text-micro">
+        <span data-numeric className="font-semibold text-warning">
+          {faNum(value)}٪
+        </span>
+        <span className="text-muted-foreground">{stage}</span>
+      </div>
+      {/* The house progressbar markup (OrgDetailPanel): role + aria-valuenow on
+          the element itself. The shared <Progress> wrapper drops Radix's value
+          prop, so its bar would carry no aria-valuenow at all. */}
+      <div
+        role="progressbar"
+        aria-valuenow={value}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={"پیشرفت آماده‌سازی " + asset.name}
+        className="h-1.5 w-full overflow-hidden rounded-full bg-secondary"
+      >
+        <div className="h-full rounded-full bg-warning" style={{ width: value + "%" }} />
+      </div>
+      <span className="block text-micro text-warning">
+        در حال آماده‌سازی — هنوز آمادهٔ پاسخ‌دهی نیست.
+      </span>
+    </div>
+  );
+}
+
 export default function Knowledge() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -214,7 +492,18 @@ export default function Knowledge() {
   const [picked, setPicked] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [maxFileMb, setMaxFileMb] = useState<number | null>(null);
+  // B1: rows for files whose upload is in flight (or has failed). They are shown
+  // before the server's list knows anything about them.
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  // Bounded watch window opened when the operator starts a scan/sync.
+  const [scanWatchUntil, setScanWatchUntil] = useState(0);
+  // The folder row AS IT STOOD when that action started, so the window's end can
+  // tell the operator whether anything actually moved.
+  const scanBaseline = useRef<{ id: string; discovered: number | null; scannedAt: string | null } | null>(
+    null,
+  );
   const fileRef = useRef<HTMLInputElement>(null);
+  const uploadSeq = useRef(0);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   // The browser build has no native folder picker and no local file access.
@@ -264,6 +553,75 @@ export default function Knowledge() {
     void loadLimit();
   }, [refresh, loadLimit]);
 
+  // POLLING (B2). Two independent polls — the document list and the folder list
+  // — and each one runs ONLY while its side still has something non-terminal:
+  // an upload in flight, a document the pipeline has not finished with, or the
+  // bounded window after a manual scan. Passing `null` tears the interval down,
+  // so an idle page pays for no timer at all instead of polling forever.
+  const watchingScans = Date.now() < scanWatchUntil;
+  const pollAssets =
+    pendingUploads.some((p) => p.status === "uploading") || anyPending(assets, assetPending);
+  const pollSources = watchingScans || anyPending(sources, sourcePending);
+
+  const liveAssets = useLive<{ assets?: Asset[] }>(pollAssets ? "/knowledge-assets" : null, POLL_MS);
+  const liveSources = useLive<unknown>(pollSources ? "/knowledge-sources" : null, POLL_MS);
+
+  // A failed poll never lands here (the hook keeps the previous payload), so the
+  // list is only ever replaced by data the server actually sent — a dropped
+  // request can neither blank the table nor reset the paging the user is on.
+  useEffect(() => {
+    if (liveAssets.data) setAssets(liveAssets.data.assets ?? []);
+  }, [liveAssets.data]);
+
+  useEffect(() => {
+    if (liveSources.data !== null) setSources(normalizeSources(liveSources.data));
+  }, [liveSources.data]);
+
+  // What the bounded scan watch does when it closes (PO request).
+  //
+  // Nothing on the wire says "a scan is running", so the only evidence a manual
+  // scan did anything is the folder's own discovered count / last-scan time
+  // moving. If the window closes and NEITHER moved, the page says so out loud:
+  // a silent return to idle is exactly how a scan that found nothing used to
+  // look like one that worked.
+  useEffect(() => {
+    if (scanWatchUntil === 0) return;
+    const timer = setTimeout(() => {
+      const baseline = scanBaseline.current;
+      scanBaseline.current = null;
+      setScanWatchUntil(0);
+      if (!baseline) return;
+      const current = sources.find((s) => s.id === baseline.id);
+      if (!current) return;
+      if (
+        current.discovered_files === baseline.discovered &&
+        current.last_scanned_at === baseline.scannedAt
+      ) {
+        setNotice(
+          "پویش تمام شد ولی چیزی در این پوشه تغییر نکرد: نه فایل تازه‌ای شناسایی شد و نه زمان پویش به‌روز شد. اگر انتظار فایل تازه‌ای داشتید، نشانی پوشه و دسترسی سرور به آن را بررسی کنید.",
+        );
+      }
+    }, Math.max(0, scanWatchUntil - Date.now()));
+    return () => clearTimeout(timer);
+  }, [scanWatchUntil, sources]);
+
+  // Optimistic rows are reconciled BY ID: as soon as the server lists the asset
+  // whose id the upload answered with, the local row is dropped, so the same
+  // file is never on screen twice even when the server assigned its own id.
+  useEffect(() => {
+    if (pendingUploads.length === 0) return;
+    setPendingUploads((prev) => {
+      const next = prev.filter(
+        (p) =>
+          !(
+            p.status === "uploading" &&
+            (p.serverId ? assets.some((a) => a.id === p.serverId) : assets.some((a) => a.name === p.name))
+          ),
+      );
+      return next.length === prev.length ? prev : next;
+    });
+  }, [assets, pendingUploads.length]);
+
   const limitMb = maxFileMb ?? DEFAULT_MAX_FILE_MB;
 
   /** Reject the files the server will refuse anyway - before any byte is sent. */
@@ -285,29 +643,106 @@ export default function Knowledge() {
     setPicked((prev) => [...prev, ...acceptedFiles(files)]);
   }
 
-  async function upload() {
-    if (picked.length === 0) {
+  /**
+   * B1: START the upload and close the dialog, without waiting for it.
+   *
+   * This used to be `await api(...)` followed by the close, so the operator sat
+   * inside the modal for the whole transfer and only then saw the modal go away.
+   * The confirmation now does only what it says: the rows appear in the table
+   * immediately as «در حال بارگذاری», the dialog closes on the same click, and
+   * the request finishes on its own — the live poll then reports whatever the
+   * server says next (queued -> processing -> ready/failed).
+   *
+   * The client-side size gate has already run in `pickFiles` (P1-5), before any
+   * of this, so nothing reaches the network that the picker refused.
+   */
+  function upload() {
+    const files = picked;
+    if (files.length === 0) {
       setError("ابتدا فایل را انتخاب کنید.");
       return;
     }
-    setBusy(true);
+    const rows: PendingUpload[] = files.map((file) => ({
+      key: "upload-" + ++uploadSeq.current,
+      file,
+      name: file.name,
+      size_bytes: file.size,
+      extension: extensionOf(file.name),
+      status: "uploading",
+    }));
     setError(null);
     setNotice(null);
+    // Reset the picker here as well as on close, so reopening the dialog can
+    // never resend the selection that was just confirmed.
+    setPicked([]);
+    setDialogOpen(false);
+    setPendingUploads((prev) => [...prev, ...rows]);
+    for (const row of rows) void sendUpload(row);
+  }
+
+  /**
+   * Send ONE row.
+   *
+   * One request per file keeps a failure attached to the file that caused it and
+   * gives each failed row its own retry, instead of one batch failure that
+   * cannot say which of five files the server refused.
+   */
+  async function sendUpload(row: PendingUpload) {
+    const form = new FormData();
+    form.append("files", row.file);
     try {
-      const form = new FormData();
-      for (const f of picked) form.append("files", f);
-      await api("POST", "/knowledge-assets/upload", form);
-      setNotice("فایل‌ها در صف پردازش قرار گرفتند.");
-      setPicked([]);
-      setDialogOpen(false);
+      const result = await api<UploadResult>("POST", "/knowledge-assets/upload", form);
+      const stored = Array.isArray(result?.stored) ? result.stored : [];
+      const rejected = Array.isArray(result?.rejected) ? result.rejected : [];
+      const match = stored.find((s) => s?.name === row.name);
+      const refusal = rejected.find((r) => r?.name === row.name);
+      if (match) {
+        setNotice("فایل در صف پردازش قرار گرفت.");
+        // Keep the row until the server's own list carries this id; the effect
+        // above then removes it. That is the by-id reconciliation.
+        setPendingUploads((prev) =>
+          prev.map((p) =>
+            p.key === row.key ? { ...p, serverId: match.id ? String(match.id) : undefined } : p,
+          ),
+        );
+      } else {
+        // The server answered but neither stored nor rejected this name: the row
+        // stays on screen as a failure rather than disappearing silently.
+        setPendingUploads((prev) =>
+          prev.map((p) =>
+            p.key === row.key
+              ? { ...p, status: "failed", error: persianError(refusal?.code ?? "", 0, refusal?.message ?? null) }
+              : p,
+          ),
+        );
+      }
       await reload();
     } catch (exc) {
       // D6: keep the server's reason (size cap, format, quota) instead of a
-      // generic message that hides it.
-      setError(exc instanceof ApiError ? exc.message : "آپلود ناموفق بود.");
-    } finally {
-      setBusy(false);
+      // generic message that hides it — and never drop the file.
+      setPendingUploads((prev) =>
+        prev.map((p) =>
+          p.key === row.key
+            ? { ...p, status: "failed", error: exc instanceof ApiError ? exc.message : "آپلود ناموفق بود." }
+            : p,
+        ),
+      );
     }
+  }
+
+  /** Re-send one failed row, from the file the page kept for exactly this. */
+  function retryUpload(row: PendingUpload) {
+    setError(null);
+    setNotice(null);
+    setPendingUploads((prev) =>
+      prev.map((p) => (p.key === row.key ? { ...p, status: "uploading", error: undefined } : p)),
+    );
+    void sendUpload(row);
+  }
+
+  /** Drop a failed row the operator has decided not to retry. */
+  function dismissUpload(key: string) {
+    setPendingUploads((prev) => prev.filter((p) => p.key !== key));
   }
 
   /**
@@ -354,12 +789,27 @@ export default function Knowledge() {
     setBusy(true);
     setError(null);
     setNotice(null);
+    // A folder the server can never read: refuse before opening a watch window
+    // that would have nothing to watch.
+    if (folder.source_type === "client_folder" && !desktop) {
+      setError("این پوشه روی رایانهٔ شماست؛ همگام‌سازی آن از برنامهٔ ویندوزی HiveOS انجام می‌شود.");
+      setBusy(false);
+      return;
+    }
+    // B2: the scan's own result (discovered count, last scan time) lands while
+    // the SOURCE status stays "active", so watch the folder list for a bounded
+    // window after the operator starts one instead of polling it forever. The
+    // row AS IT WAS is remembered beside the window: if the window closes and
+    // neither count moved, the operator is told that the scan changed nothing
+    // (see the effect below) rather than being left to guess.
+    scanBaseline.current = {
+      id: folder.id,
+      discovered: folder.discovered_files,
+      scannedAt: folder.last_scanned_at,
+    };
+    setScanWatchUntil(Date.now() + SCAN_WATCH_MS);
     try {
       if (folder.source_type === "client_folder") {
-        if (!desktop) {
-          setError("این پوشه روی رایانهٔ شماست؛ همگام‌سازی آن از برنامهٔ ویندوزی HiveOS انجام می‌شود.");
-          return;
-        }
         const result = await syncClientFolder(folder.path, undefined, limitMb);
         setNotice(
           "همگام‌سازی انجام شد: " +
@@ -371,11 +821,14 @@ export default function Knowledge() {
             ".",
         );
       } else {
-        await api("POST", "/knowledge-sources/" + folder.id + "/scan");
-        setNotice("پویش دستی اجرا شد.");
+        // The scan answers with the source payload PLUS its own result, so the
+        // notice is built from the response instead of a fixed sentence.
+        const scan = await api<ScanResult>("POST", "/knowledge-sources/" + folder.id + "/scan");
+        setNotice(scanNotice(scan));
       }
       await reload();
     } catch (e) {
+      // The server's own reason (ApiError.message), never a generic success.
       setError(e instanceof Error ? e.message : "اجرای این کار ناموفق بود.");
     } finally {
       setBusy(false);
@@ -483,31 +936,62 @@ export default function Knowledge() {
   const jobByAsset = new Map<string, Job>();
   for (const j of jobs) if (j.asset_id) jobByAsset.set(j.asset_id, j);
 
+  /**
+   * What the table renders: rows whose upload is still local first, then
+   * everything the server lists. Same shape, so the table, the filters and the
+   * paging need no second code path.
+   */
+  const rows: Row[] = useMemo(
+    () => [
+      ...pendingUploads.map((p) => ({
+        id: p.serverId ?? p.key,
+        name: p.name,
+        status: p.status,
+        size_bytes: p.size_bytes,
+        extension: p.extension,
+        origin: "upload",
+        local: p,
+      })),
+      ...assets,
+    ],
+    [pendingUploads, assets],
+  );
+
+  // Monotonic progress per file (see useProgressCeiling): read during render,
+  // advanced after it, so a poll can never rewind a bar.
+  const progressCeiling = useProgressCeiling(assets);
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: assets.length, ready: 0, processing: 0, queued: 0, failed: 0 };
-    for (const a of assets) if (c[a.status] !== undefined) c[a.status] += 1;
+    const c: Record<string, number> = { all: rows.length, ready: 0, processing: 0, queued: 0, failed: 0 };
+    for (const a of rows) if (c[a.status] !== undefined) c[a.status] += 1;
     return c;
-  }, [assets]);
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const q = norm(search);
-    return assets.filter((a) => {
+    return rows.filter((a) => {
       if (tab !== "all" && a.status !== tab) return false;
       if (format !== "all" && (a.extension ?? "").replace(".", "").toLowerCase() !== format) return false;
       if (q && !norm(a.name).includes(q)) return false;
       return true;
     });
-  }, [assets, tab, search, format]);
+  }, [rows, tab, search, format]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
   const pageItems = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
   const formats = useMemo(
-    () => Array.from(new Set(assets.map((a) => (a.extension ?? "").replace(".", "").toLowerCase()).filter(Boolean))),
-    [assets],
+    () => Array.from(new Set(rows.map((a) => (a.extension ?? "").replace(".", "").toLowerCase()).filter(Boolean))),
+    [rows],
   );
   const readyCount = counts.ready;
   const activeCount = counts.processing + counts.queued;
+  // A file that is not ready yet cannot answer a question. Counting them here
+  // lets the page say so in words near the document list (PO report: a file was
+  // added, the answer still said no document was found in the context).
+  const preparingRows = rows.filter((a) =>
+    a.local ? a.local.status === "uploading" : assetPending(a),
+  );
 
   return (
     <section aria-label="دانش سازمان">
@@ -576,13 +1060,10 @@ export default function Knowledge() {
               <div className="text-body font-bold text-foreground">هنوز پوشه‌ای ثبت نشده است.</div>
               <div className="mt-1 text-caption text-muted-foreground">
                 پوشهٔ اسناد را ثبت کنید تا پردازش آغاز شود. بعد از آن می‌توانید هر تعداد پوشهٔ دیگر اضافه کنید.
+                برای شروع، «افزودن پوشه جدید» را از بالای همین صفحه بزنید.
               </div>
             </div>
           </div>
-          <LoadingButton size="sm" className="mt-4" onClick={() => setAddOpen(true)}>
-            <FolderPlus aria-hidden />
-            افزودن پوشه جدید
-          </LoadingButton>
         </Surface>
       ) : (
         <div className="mb-4 space-y-3">
@@ -689,7 +1170,7 @@ export default function Knowledge() {
 
       {/* آمار (stat-card, mockup §۲۱) */}
       <div className="mb-4 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
-        <StatCard label="کل اسناد" value={faNum(assets.length)} />
+        <StatCard label="کل اسناد" value={faNum(rows.length)} />
         <StatCard label="آماده برای گفتگو" value={faNum(readyCount)} />
         <StatCard label="در حال پردازش" value={faNum(activeCount)} tone={activeCount > 0 ? "info" : undefined} />
         <StatCard label="ناموفق" value={faNum(counts.failed)} tone={counts.failed > 0 ? "danger" : undefined} />
@@ -760,6 +1241,17 @@ export default function Knowledge() {
         </div>
       </Surface>
 
+      {/* PO report: «فایل اضافه کردم ولی می‌گوید سندی وجود نداشت». A file that is
+          still being prepared cannot answer a question yet, so the page says so
+          here, in words, next to the list — no modal, no blocking step. */}
+      {preparingRows.length > 0 && (
+        <Banner tone="warning" className="mb-4" data-testid="knowledge-preparing">
+          {faNum(preparingRows.length)} سند هنوز در حال آماده‌سازی است و آمادهٔ پاسخ‌دهی نیست. تا پایان
+          پردازش، پاسخ‌ها فقط از اسناد آماده ساخته می‌شوند؛ برای همین ممکن است دربارهٔ این فایل‌ها هنوز
+          سندی پیدا نشود.
+        </Banner>
+      )}
+
       {/* جدول اسناد (mockup §۸) */}
       <Surface className="overflow-x-auto">
         <Table>
@@ -780,10 +1272,17 @@ export default function Knowledge() {
           <TableBody>
             {pageItems.map((a) => {
               const job = jobByAsset.get(a.id);
+              const local = a.local;
               const failedReason =
-                a.status === "failed" ? persianError(jobFailureCode(job?.error_detail)) : "";
+                local !== undefined
+                  ? (local.error ?? "")
+                  : a.status === "failed"
+                    ? persianError(jobFailureCode(job?.error_detail))
+                    : "";
+              // The optimistic row keeps its own local key: for one render it
+              // coexists with the server's row for the same id.
               return (
-                <TableRow key={a.id} className="border-border last:border-0">
+                <TableRow key={local ? local.key : a.id} className="border-border last:border-0">
                   <TableCell className="p-3 ps-5 font-bold whitespace-normal text-foreground" data-testid="asset-name">
                     {a.name}
                   </TableCell>
@@ -796,21 +1295,60 @@ export default function Knowledge() {
                     {humanSize(a.size_bytes)}
                   </TableCell>
                   <TableCell className="p-3" data-testid={"asset-status-" + a.status}>
-                    <DomainStatus domain="asset" value={a.status} dot />
+                    {/* B1: a file the operator just handed over is not on the
+                        server's list yet, and "uploading" is a state the API
+                        never reports — so it is labelled here, explicitly, in
+                        the same badge the server's own statuses use. */}
+                    {a.local ? (
+                      <StatusBadge
+                        tone={a.local.status === "failed" ? "error" : "info"}
+                        dot
+                        title={a.local.status === "failed" ? "بارگذاری این فایل ناموفق بود." : "در حال ارسال به سرور…"}
+                      >
+                        {a.local.status === "failed" ? "ناموفق" : "در حال بارگذاری"}
+                      </StatusBadge>
+                    ) : (
+                      <DomainStatus domain="asset" value={a.status} dot />
+                    )}
                     {failedReason && (
                       <div className="mt-1 text-micro leading-relaxed text-error">{failedReason}</div>
                     )}
                   </TableCell>
-                  {/* H2: what the document is actually doing. A file that has
-                      been extracted but not chunked reads differently from one that
-                      has not been touched, and the operator can tell whether a
-                      stuck queue is moving. Stage names, never a made-up
-                      percentage. */}
+                  {/* H2 + PO percentage request: what the document is actually
+                      doing. A file that has been extracted but not chunked reads
+                      differently from one that has not been touched, and a file
+                      the server can measure shows a real bar and number. */}
                   <TableCell className="p-3" data-testid={"asset-progress-" + a.id}>
-                    <AssetProgress asset={a} />
+                    {a.local ? (
+                      <span className="text-micro text-muted-foreground">
+                        {a.local.status === "uploading" ? "در حال ارسال به سرور…" : "بارگذاری ناتمام ماند"}
+                      </span>
+                    ) : (
+                      <AssetPreparation asset={a} ceiling={progressCeiling} />
+                    )}
                   </TableCell>
                   <TableCell className="p-3 pe-5 text-end">
-                    {a.status === "ready" && (
+                    {local?.status === "failed" && (
+                      <span className="inline-flex items-center gap-1">
+                        <LoadingButton
+                          variant="secondary"
+                          size="xs"
+                          onClick={() => retryUpload(local)}
+                          data-testid={"upload-retry-" + local.name}
+                        >
+                          تلاش مجدد
+                        </LoadingButton>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={"حذف " + local.name + " از فهرست"}
+                          onClick={() => dismissUpload(local.key)}
+                        >
+                          <X className="size-4" aria-hidden />
+                        </Button>
+                      </span>
+                    )}
+                    {a.status === "ready" && !local && (
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -924,7 +1462,16 @@ export default function Knowledge() {
       </Dialog>
 
       {/* Dialog افزودن سند — الگوی آپلود متعارف ماک‌آپ (بازبینی سوم) */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          // Closing the dialog always drops the picked files: reopening it must
+          // never resend the selection that was just confirmed or cancelled.
+          if (!open) setPicked([]);
+        }}
+      >
+      
         <DialogContent className="max-w-[640px]">
           <DialogHeader>
             <DialogTitle>افزودن سند</DialogTitle>

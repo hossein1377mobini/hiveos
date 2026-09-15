@@ -235,8 +235,16 @@ async def agenerate(
             if not tool_schemas:
                 tool_schemas = None
 
+        # Every token class AvalAI bills, summed across all tool rounds. The
+        # cached class was not captured at all before, so its discounted rate
+        # could never be applied and no charge could be reconciled against what
+        # the provider actually billed. A tool round re-sends the whole
+        # conversation, so on a long session cached input is a large part of
+        # the prompt on exactly the rounds that cost the most.
         tokens_in = 0
         tokens_out = 0
+        cached_tokens = 0
+        reasoning_tokens = 0
         tool_calls_made: list[dict] = []
         rounds = 0
 
@@ -261,8 +269,15 @@ async def agenerate(
             try:
                 message = body["choices"][0]["message"]
                 usage = body.get("usage") or {}
-                tokens_in += int(usage.get("prompt_tokens") or _estimate_tokens(prompt))
+                # The fallback estimates the CURRENT messages payload, not the
+                # original prompt: by the second round the request carries the
+                # system prompt, the history and every tool result, so
+                # estimating the one-line question under-counted the prompt by
+                # orders of magnitude on exactly the rounds that cost most.
+                tokens_in += int(usage.get("prompt_tokens") or _estimate_messages_tokens(messages))
                 tokens_out += int(usage.get("completion_tokens") or 0)
+                cached_tokens += _cached_tokens(usage)
+                reasoning_tokens += _reasoning_tokens(usage)
             except (KeyError, IndexError, TypeError, ValueError) as error:
                 raise ApiError(502, "LLM_PROVIDER_ERROR", "Malformed provider response.") from error
 
@@ -276,6 +291,10 @@ async def agenerate(
                     "model": body.get("model") or model,
                     "tokens_in": tokens_in,
                     "tokens_out": tokens_out,
+                    # Extra classes, additive: every existing caller keeps
+                    # reading tokens_in/tokens_out exactly as before.
+                    "cached_tokens": cached_tokens,
+                    "reasoning_tokens": reasoning_tokens,
                     "provider": provider,
                     "tool_calls": tool_calls_made,
                     "tool_rounds": rounds,
@@ -362,6 +381,76 @@ def _estimate_tokens(text: str) -> int:
     return max(1, math.ceil(len(text) / 4))
 
 
+def _message_text(message: dict) -> str:
+    """Everything a single wire message contributes to the prompt."""
+    parts: list[str] = []
+    content = message.get("content")
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, list):
+        # Providers accept content parts; only the text ones are tokens we can
+        # count here.
+        for part in content:
+            if isinstance(part, dict):
+                parts.append(str(part.get("text") or ""))
+    # An assistant turn that asked for tools carries its arguments here, and
+    # those arguments are real prompt tokens on every later round.
+    for call in message.get("tool_calls") or []:
+        function = call.get("function") or {}
+        parts.append(str(function.get("name") or ""))
+        parts.append(str(function.get("arguments") or ""))
+    return "\n".join(part for part in parts if part)
+
+
+def _estimate_messages_tokens(messages: list) -> int:
+    text = "\n".join(_message_text(m) for m in messages if isinstance(m, dict))
+    return _estimate_tokens(text)
+
+
+def _cached_tokens(usage: dict) -> int:
+    """Cached prompt tokens, whichever shape the provider reports them in.
+
+    OpenAI-compatible responses nest them in prompt_tokens_details; Anthropic-
+    style responses put cache_read_input_tokens at the top level; a few
+    aggregators emit cached_tokens directly. AvalAI's OpenAI-compatible
+    endpoint is the first shape, but a proxy in front of it may drop the
+    details object, so all three are checked before giving up.
+    """
+    details = usage.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        value = _int_or_none(details.get("cached_tokens"))
+        if value is not None:
+            return max(0, value)
+    for key in ("cache_read_input_tokens", "cached_tokens"):
+        value = _int_or_none(usage.get(key))
+        if value is not None:
+            return max(0, value)
+    return 0
+
+
+def _reasoning_tokens(usage: dict) -> int:
+    """Reasoning tokens, recorded but never billed twice.
+
+    In this wire format completion_tokens already includes them; AvalAI's
+    output price covers the whole completion. They are captured because the PO
+    asked to see consumption exactly as the provider reports it.
+    """
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict):
+        value = _int_or_none(details.get("reasoning_tokens"))
+        if value is not None:
+            return max(0, value)
+    value = _int_or_none(usage.get("reasoning_tokens"))
+    return max(0, value or 0)
+
+
+def _int_or_none(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def generate(model: str, prompt: str, context: str) -> dict:
     """Deterministic generation with token metering (US-1201 AC).
 
@@ -379,4 +468,8 @@ def generate(model: str, prompt: str, context: str) -> dict:
         "model": model,
         "tokens_in": _estimate_tokens(f"{prompt}\n{context}"),
         "tokens_out": _estimate_tokens(answer),
+        # The mock provider has no prompt cache and no reasoning tokens; the
+        # keys exist so every caller reads the same shape from every provider.
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
     }

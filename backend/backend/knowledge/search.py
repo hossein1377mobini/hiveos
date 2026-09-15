@@ -12,7 +12,7 @@ the system knowing something it should not.
 """
 
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api_errors import ApiError
@@ -42,6 +42,76 @@ MIN_RELEVANCE_SCORE = 0.5
 # makes "found nothing" the answer when only one marginal chunk clears the bar.
 # Both rules must hold; either alone reintroduces the failure from one side.
 MIN_RELEVANCE_HITS = 1
+
+# Below the bottom of the cosine range: "no floor applies". Used for an
+# embedding provider whose score carries no semantics (see relevance_floor).
+NO_SEMANTIC_FLOOR = -1.0
+
+
+def relevance_floor(provider: str | None = None) -> float:
+    """The cosine floor that actually applies to a given embedding provider.
+
+    MIN_RELEVANCE_SCORE is a SEMANTIC threshold. It was measured on the real
+    model, where a relevant Persian query lands at 0.72-0.76 and gibberish at
+    0.31-0.37 - so 0.5 separates the two. It only means anything if the score it
+    filters is a semantic score.
+
+    The 'mock' provider is a sha256 stub with no semantics at all: different
+    strings produce independent vectors, so the cosine similarity between a
+    question and ANY document is |s| <= 0.03 (measured on this checkout with
+    backend.knowledge.embeddings._mock_vector at 1024 dimensions). Applying 0.5
+    there rejects every hit, so a file that was uploaded, discovered, chunked and
+    embedded - fully present and fully indexed - still answers that there was no
+    document in the context sent with the question. That is not a hypothetical
+    configuration: embedding_provider defaults to 'mock' (backend/config.py) and
+    the dev deployment does not override it, so the floor alone made the whole
+    retrieval path report an empty knowledge base.
+
+    A provider whose score carries no semantics therefore gets no floor at all.
+    Not zero either: the stub score is a cosine similarity between independent
+    vectors, so it scatters around zero - measured samples were -0.0216,
+    -0.0017, 0.008 and 0.0148 - and a floor of 0.0 would still throw away every
+    document that landed on the negative half, which is about half of them.
+    NO_SEMANTIC_FLOOR is below the bottom of the cosine range, so nothing is
+    filtered and the candidate ranking (hash noise under this provider) is
+    returned as-is. Ranked hits still come back, and the response reports the
+    provider and the floor that was used, so a deployment running the stub is
+    visible instead of silently answering that no documents exist.
+    """
+    name = provider if provider is not None else get_settings().embedding_provider
+    if name == "mock":
+        return NO_SEMANTIC_FLOOR
+    return MIN_RELEVANCE_SCORE
+
+
+async def _indexing_state(
+    session: AsyncSession, organization_id, user_id, is_admin: bool
+) -> dict:
+    """How much readable knowledge exists, split by prepared vs preparing.
+
+    Only called when a search found nothing: it is the difference between "this
+    organization has no documents", "the documents are still being prepared" and
+    "the documents are ready but none of them answer this question". Those three
+    looked identical to the caller before, and the PO read the first one as
+    "my file was lost".
+    """
+    rows = (
+        await session.execute(
+            select(KnowledgeAsset.status, func.count())
+            .where(
+                KnowledgeAsset.organization_id == organization_id,
+                KnowledgeAsset.deleted_at.is_(None),
+                visible_to(user_id, is_admin),
+            )
+            .group_by(KnowledgeAsset.status)
+        )
+    ).all()
+    counts = {status: int(count) for status, count in rows}
+    return {
+        "ready": counts.get("ready", 0),
+        "preparing": counts.get("queued", 0),
+        "failed": counts.get("failed", 0),
+    }
 
 
 async def semantic_search(
@@ -140,9 +210,31 @@ async def semantic_search(
     # Relevance floor + minimum hits (P2-9): see the constants above. Filtering
     # AFTER reranking is deliberate - the reranker orders candidates but does not
     # change the cosine score, and the floors are calibrated on that score.
-    hits = [hit for hit in candidates if hit["score"] >= MIN_RELEVANCE_SCORE]
+    #
+    # relevance_floor() is provider-aware: the floor is a SEMANTIC threshold and
+    # the mock provider produces non-semantic scores, so applying it there
+    # rejected every hit and reported an empty knowledge base for content that
+    # was fully indexed. See the function.
+    floor = relevance_floor(settings.embedding_provider)
+    hits = [hit for hit in candidates if hit["score"] >= floor]
     if len(hits) < MIN_RELEVANCE_HITS:
         hits = []
+    # The honest half of an empty answer (PO report 2026-09-15: a file was added,
+    # the answer said no document was sent with the question). An empty result
+    # list cannot say WHY it is empty, so the three cases are named here: there
+    # are no documents, the documents are still being prepared, or documents are
+    # ready and none of them answers this question. Only computed when nothing
+    # was found - the happy path pays no extra query.
+    status = "ok"
+    indexing = None
+    if not hits:
+        indexing = await _indexing_state(session, organization_id, user_id, is_admin)
+        if indexing["ready"] == 0 and indexing["preparing"] == 0 and indexing["failed"] == 0:
+            status = "no_documents"
+        elif indexing["ready"] == 0:
+            status = "documents_preparing"
+        else:
+            status = "no_match"
     await record_audit(
         session,
         "knowledge.search",
@@ -152,7 +244,20 @@ async def semantic_search(
             "top_k": limit,
             "hits": len(hits),
             "candidates": len(candidates),
-            "floor": MIN_RELEVANCE_SCORE,
+            "floor": floor,
+            "provider": settings.embedding_provider,
+            "status": status,
         },
     )
-    return {"query_chars": len(query), "results": hits}
+    return {
+        "query_chars": len(query),
+        "results": hits,
+        # Additive diagnostics. "results" keeps its shape and meaning for every
+        # existing caller (the search API and the execution cycle branch on
+        # len(results)); these two keys let a client tell "nothing to search"
+        # from "nothing relevant" and show the user which one it is.
+        "status": status,
+        "provider": settings.embedding_provider,
+        "relevance_floor": floor,
+        "indexing": indexing,
+    }
